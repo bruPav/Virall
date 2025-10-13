@@ -1,5 +1,9 @@
 # Virall
 
+<div align="center">
+  <img src="logo.jpg" alt="Virall Logo" width="300">
+</div>
+
 A comprehensive tool for viral genome analysis including assembly, classification, gene prediction, and annotation.
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
