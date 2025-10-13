@@ -43,7 +43,7 @@ The installation script will:
 
 ```bash
 # Short reads only (single or paired-end)
-virall analyse --single-reads-2 reads.fastq -o output_dir
+virall analyse --single-reads reads.fastq -o output_dir
 
 virall analyse --short-reads-1 reads_1.fastq --short-reads-2 reads_2.fastq -o output_dir
 
@@ -138,20 +138,20 @@ Train a viral sequence identification model (work in progress, not available yet
 Usage: virall analyse [OPTIONS]
 
 Options:
-  -1, --short-reads-1 PATH     Forward short reads (FASTQ)
-  -2, --short-reads-2 PATH     Reverse short reads (FASTQ)
-  -l, --long-reads PATH        Long reads (FASTQ)
-  -s, --single-reads PATH      Single-end reads (FASTQ)
-  -r, --reference PATH         Reference genome (FASTA)
-  -o, --output-dir PATH        Output directory [required]
+  --short-reads-1 TEXT         Path to first mate of paired-end reads
+  --short-reads-2 TEXT         Path to second mate of paired-end reads
+  --long-reads TEXT            Path to long reads (PacBio/ONT)
+  --single-reads TEXT          Path to single-end reads
+  --reference TEXT             Optional reference genome for guided assembly
+  -o, --output-dir TEXT        Output directory [required]
   -t, --threads INTEGER        Number of threads [default: 8]
-  -m, --memory TEXT            Memory limit [default: 16G]
-  -c, --config PATH            Configuration file
+  --memory TEXT                Memory allocation [default: 16G]
+  --config TEXT                Configuration file path
   --min-contig-length INTEGER  Minimum contig length [default: 1000]
-  --viral-confidence FLOAT     Viral classification confidence [default: 0.7]
-  --assembly-strategy TEXT     Assembly strategy [default: auto]
-  --rna-mode                   Enable RNA mode
-  --mem-efficient              Enable memory-efficient mode
+  --viral-confidence FLOAT     Viral sequence confidence threshold [default: 0.8]
+  --assembly-strategy [hybrid|short_only|long_only]  Assembly strategy [default: hybrid]
+  --rna-mode                   Enable RNA-specific assembly parameters
+  -m, --mem-efficient          Enable memory-efficient mode with read subsampling for large datasets
   --help                       Show this message and exit.
 ```
 
