@@ -1,7 +1,7 @@
 # Virall
 
 <div align="center">
-  <img src="logo.jpg" alt="Virall Logo" width="300">
+  <img src="logo.png" alt="Virall Logo" width="300">
 </div>
 
 A comprehensive tool for viral genome analysis including assembly, classification, gene prediction, and annotation.
