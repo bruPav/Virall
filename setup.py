@@ -16,7 +16,7 @@ setup(
     name="virall",
     version="0.1.0",
     author="Virall Team",
-    author_email="bruno.pavletic@gmail.com",
+    author_email="bruno.pavletic@gmail.com, britaniadiazf@gmail.com",
     description="A comprehensive tool for viral genome analysis including assembly, classification, gene prediction, and annotation",
     long_description=long_description,
     long_description_content_type="text/markdown",

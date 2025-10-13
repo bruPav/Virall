@@ -279,7 +279,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - Kaiju team for taxonomic classification
 - CheckV team for viral genome validation
 - VOG team for viral protein annotation
-- This software was developed by Dr. Aurora Britania Diaz Fernandez and Bruno Pavletic, Msc
+- This software was developed by Dr. Aurora Britania Diaz Fernandez and Bruno Pavletic, Msc together in collaboration with Nidia Trovao, PhD and Prof. Windy McNerny
 
 ## Changelog
 
