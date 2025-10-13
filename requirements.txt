@@ -1,0 +1,15 @@
+# Core dependencies for viral genome assembly tool
+numpy>=1.21.0
+pandas>=1.3.0
+biopython>=1.79
+scikit-learn>=1.0.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+plotly>=5.0.0
+
+# Utilities
+click>=8.0.0
+tqdm>=4.62.0
+pyyaml>=6.0
+loguru>=0.6.0
+psutil>=5.8.0
