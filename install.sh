@@ -117,6 +117,9 @@ echo "This simplifies the pipeline and reduces dependencies"
 echo "Installing BWA and minimap2 for viral contig quantification..."
 mamba install -n virall -c bioconda bwa minimap2 samtools -y
 
+# Install the virall package in development mode
+echo "Installing virall package..."
+pip install -e .
 
 # Set up VOG database for viral gene annotation
 echo "Setting up VOG (Viral Orthologous Groups) database..."
