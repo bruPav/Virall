@@ -39,7 +39,7 @@ class ViralGenePredictor:
         
         Args:
             contigs_file: Path to viral contigs file
-            viral_classifications: DIAMOND classification results
+            viral_classifications: Kaiju classification results
             output_dir: Output directory for results
             
         Returns:
@@ -434,16 +434,16 @@ class ViralGenePredictor:
         """Group contigs by their viral type."""
         viral_groups = {}
         
-        # Extract actual contig classifications from Kaiju or DIAMOND results
+        # Extract actual contig classifications from Kaiju results
         for contig_id, contig_classification in viral_classifications.items():
-            # Handle both Kaiju and DIAMOND formats
+            # Handle Kaiju format
             if 'classification' in contig_classification:
                 # Kaiju format
                 viral_type = contig_classification.get('classification', 'unknown')
                 if viral_type == 'Unclassified':
                     viral_type = 'unknown'
             else:
-                # DIAMOND format - use consensus species as viral type
+                # Fallback for other classification formats
                 consensus = contig_classification.get('consensus', {})
                 viral_type = consensus.get('species', 'unknown')
                 if viral_type == 'unknown':
@@ -725,7 +725,7 @@ class ViralGenePredictor:
         """Annotate proteins using multiple databases."""
         logger.info("Annotating proteins")
         
-        # This would integrate with BLAST, HMMER, DIAMOND, etc.
+        # This would integrate with BLAST, HMMER, Kaiju, etc.
         # For now, we'll create a placeholder structure
         
         protein_annotations = {}

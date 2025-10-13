@@ -70,7 +70,7 @@ def assemble(
     This command performs:
     1. Preprocessing (quality control, trimming)
     2. Assembly (SPAdes)
-    3. Viral contig identification (DIAMOND)
+    3. Viral contig identification (Kaiju)
     
     Output: Filtered viral contigs ready for annotation.
     """
@@ -341,11 +341,11 @@ def assemble(
                     click.echo("\n" + "="*60)
                     click.echo("ANALYSIS COMPLETE - CHOOSE YOUR RESULTS")
                     click.echo("="*60)
-                    click.echo("Both contigs and scaffolds have been analyzed with DIAMOND.")
+                    click.echo("Both contigs and scaffolds have been analyzed with Kaiju.")
                     click.echo("Choose the best results based on your downstream analysis needs:")
                     click.echo("\nCONTIGS:")
                     click.echo("  - No gaps (N's) - better for gene-based analysis")
-                    click.echo("  - More reliable for DIAMOND classification")
+                    click.echo("  - More reliable for Kaiju classification")
                     click.echo("  - May be fragmented - shorter sequences")
                     click.echo("\nSCAFFOLDS:")
                     click.echo("  - Longer sequences - more complete genomes")
@@ -403,7 +403,7 @@ def analyse(
     This command performs the full analysis workflow:
     1. Preprocessing (quality control, trimming)
     2. Assembly (SPAdes)
-    3. Viral contig identification (DIAMOND)
+    3. Viral contig identification (Kaiju)
     4. Gene prediction and annotation (Prodigal + VOG)
     5. Validation and quantification (QUAST + BWA)
     """
@@ -974,7 +974,7 @@ def classify(viral_contigs: str, output_dir: Optional[str], threads: int):
         # Initialize viral identifier
         viral_identifier = ViralIdentifier()
         
-        # Run DIAMOND classification
+        # Run Kaiju classification
         results = viral_identifier.classify_viral_contigs(
             contigs_file=viral_contigs,
             output_dir=output_dir
