@@ -117,12 +117,15 @@ def assemble(
         )
         
         # Run assembly-only workflow (no preprocessing/annotation/quantification)
-        reads_dict = {
-            "short_reads_1": short_reads_1,
-            "short_reads_2": short_reads_2,
-            "single_reads": single_reads,
-            "long_reads": long_reads,
-        }
+        # Map provided inputs to assembler's expected keys
+        reads_dict: Dict[str, str] = {}
+        if short_reads_1 and short_reads_2:
+            reads_dict["short_1"] = short_reads_1
+            reads_dict["short_2"] = short_reads_2
+        if single_reads:
+            reads_dict["single"] = single_reads
+        if long_reads:
+            reads_dict["long"] = long_reads
 
         assembly_results = assembler._perform_assembly(reads_dict, reference)
 
