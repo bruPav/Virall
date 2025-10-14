@@ -83,6 +83,14 @@ conda install -c bioconda -y checkv
 conda install -c bioconda -y pysam pybedtools pyfaidx
 conda install -c bioconda -y blast wget hmmer
 
+# Optional: ONT adapter trimming with Porechop
+echo "Installing optional ONT trimming tool (Porechop)..."
+if conda install -c bioconda -y porechop; then
+    echo "Porechop installed successfully"
+else
+    echo "Warning: Porechop installation failed. Long-read trimming will be skipped if unavailable."
+fi
+
 # Fix BLAST library issues on newer Linux systems
 echo "Installing BLAST dependencies for newer Linux systems..."
 conda install -c conda-forge -y libnsl
