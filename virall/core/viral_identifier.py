@@ -1445,9 +1445,16 @@ class ViralIdentifier:
     def _setup_kaiju_database(self) -> Optional[Path]:
         """Setup Kaiju viral database."""
         # Get database path from config
-        kaiju_db_path = self.config.get('databases', {}).get('kaiju_db_path', 
-                    str(Path(__file__).parent.parent.parent / "databases" / "kaiju_db"))
-        kaiju_db_path = Path(kaiju_db_path)
+        config_path = self.config.get('databases', {}).get('kaiju_db_path')
+        if config_path:
+            kaiju_db_path = Path(config_path)
+        else:
+            # Try current working directory first, then fall back to package location
+            cwd_db_path = Path.cwd() / "databases" / "kaiju_db"
+            if cwd_db_path.exists():
+                kaiju_db_path = cwd_db_path
+            else:
+                kaiju_db_path = Path(__file__).parent.parent.parent / "databases" / "kaiju_db"
         
         logger.debug(f"Looking for Kaiju database at: {kaiju_db_path}")
         

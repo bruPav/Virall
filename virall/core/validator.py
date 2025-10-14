@@ -37,10 +37,13 @@ class AssemblyValidator:
         if config_path:
             checkv_db_path = Path(config_path)
         else:
-            # Look for CheckV database in databases directory first, then fall back to home
-            # validator.py is in virall/core/, so go up 3 levels: core -> virall -> vas
-            software_dir = Path(__file__).parent.parent.parent
-            checkv_db_path = software_dir / "databases" / "checkv_db"
+            # Try current working directory first, then fall back to package location
+            cwd_db_path = Path.cwd() / "databases" / "checkv_db"
+            if cwd_db_path.exists():
+                checkv_db_path = cwd_db_path
+            else:
+                software_dir = Path(__file__).parent.parent.parent
+                checkv_db_path = software_dir / "databases" / "checkv_db"
             
             if not checkv_db_path.exists():
                 # Fallback to home directory

@@ -60,11 +60,12 @@ class VOGAnnotator:
     
     def _find_vog_database(self) -> Path:
         """Find VOG database in common locations."""
-        # Get the software installation directory (vog_annotator.py is in virall/core/)
-        # So we need to go up 3 levels: core -> virall -> vas -> home
+        # Try current working directory first, then fall back to package location
+        cwd_db_path = Path.cwd() / "databases" / "vog_db"
         software_dir = Path(__file__).parent.parent.parent
         
         possible_paths = [
+            cwd_db_path,  # Current working directory first
             software_dir / "databases" / "vog_db",
             Path.home() / "vog_db",
             Path.home() / ".vog_db",
