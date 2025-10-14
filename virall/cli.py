@@ -1109,7 +1109,7 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
     for file_path in input_files:
         if not Path(file_path).exists():
             click.echo(f"Error: Read file not found: {file_path}", err=True)
-        sys.exit(1)
+            sys.exit(1)
     
     try:
         # Initialize preprocessor
@@ -1154,14 +1154,14 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
         if long_reads:
             click.echo("Processing long reads...")
             processed_long = preprocessor.process_long_reads(long_reads)
-        
-        # Copy to output directory
-        import shutil
-        output_long = Path(output_dir) / f"trimmed_{Path(long_reads).name}"
-        shutil.copy2(processed_long, output_long)
-        processed_files.append(str(output_long))
-        
-        click.echo(f"Long reads processed: {output_long}")
+
+            # Copy to output directory
+            import shutil
+            output_long = Path(output_dir) / f"trimmed_{Path(long_reads).name}"
+            shutil.copy2(processed_long, output_long)
+            processed_files.append(str(output_long))
+
+            click.echo(f"Long reads processed: {output_long}")
         
         click.echo(f"\nPreprocessing completed successfully!")
         click.echo(f"Processed files saved to: {output_dir}")
