@@ -178,6 +178,8 @@ class Preprocessor:
         
         output_1 = self.temp_dir / "trimmed_1.fastq.gz"
         output_2 = self.temp_dir / "trimmed_2.fastq.gz"
+        output_1_plain = self.temp_dir / "trimmed_1.fastq"
+        output_2_plain = self.temp_dir / "trimmed_2.fastq"
         unpaired_1 = self.temp_dir / "unpaired_1.fastq.gz"
         unpaired_2 = self.temp_dir / "unpaired_2.fastq.gz"
         
@@ -204,6 +206,15 @@ class Preprocessor:
             raise RuntimeError(f"Trimmomatic failed: {result.stderr}")
         
         logger.info("Paired-end trimming completed")
+
+        # Also write plain FASTQ copies alongside gzipped outputs
+        try:
+            with gzip.open(output_1, "rt") as fin, open(output_1_plain, "w") as fout:
+                shutil.copyfileobj(fin, fout)
+            with gzip.open(output_2, "rt") as fin, open(output_2_plain, "w") as fout:
+                shutil.copyfileobj(fin, fout)
+        except Exception as e:
+            logger.warning(f"Failed to create plain FASTQ copies: {e}")
         return str(output_1), str(output_2)
     
     def _trim_single_reads(
@@ -216,6 +227,7 @@ class Preprocessor:
         logger.info("Trimming single-end reads with Trimmomatic")
         
         output = self.temp_dir / "trimmed_single.fastq.gz"
+        output_plain = self.temp_dir / "trimmed_single.fastq"
         
         cmd = [
             "trimmomatic",
@@ -239,13 +251,21 @@ class Preprocessor:
             raise RuntimeError(f"Trimmomatic failed: {result.stderr}")
         
         logger.info("Single-end trimming completed")
+
+        # Also write plain FASTQ copy alongside gzipped output
+        try:
+            with gzip.open(output, "rt") as fin, open(output_plain, "w") as fout:
+                shutil.copyfileobj(fin, fout)
+        except Exception as e:
+            logger.warning(f"Failed to create plain FASTQ copy: {e}")
         return str(output)
     
     def _trim_ont_adapters(self, reads: str) -> str:
-        """Trim ONT adapters using Porechop."""
+        """Trim ONT adapters using Porechop (write plain + gz FASTQ)."""
         logger.info("Trimming ONT adapters with Porechop")
         
-        output = self.temp_dir / "trimmed_ont.fastq.gz"
+        output = self.temp_dir / "trimmed_ont.fastq"
+        output_gz = self.temp_dir / "trimmed_ont.fastq.gz"
         
         cmd = [
             "porechop",
@@ -260,6 +280,13 @@ class Preprocessor:
             return reads  # Return original if trimming fails
         
         logger.info("ONT adapter trimming completed")
+
+        # Also gzip a copy
+        try:
+            with open(output, "rt") as fin, gzip.open(output_gz, "wt") as fout:
+                shutil.copyfileobj(fin, fout)
+        except Exception as e:
+            logger.warning(f"Failed to create gzipped ONT-trimmed copy: {e}")
         return str(output)
 
     def _should_trim_ont_by_detection(self, reads: str) -> bool:
@@ -344,10 +371,16 @@ class Preprocessor:
         """Filter long reads by quality and length."""
         logger.info("Filtering long reads by quality and length")
         
-        output = self.temp_dir / "filtered_long.fastq.gz"
+        output = self.temp_dir / "filtered_long.fastq"
+        output_gz = self.temp_dir / "filtered_long.fastq.gz"
         filtered_records = []
         
-        for record in SeqIO.parse(reads, "fastq"):
+        # Open input with gzip if needed
+        if str(reads).endswith('.gz'):
+            in_handle = gzip.open(reads, "rt")
+        else:
+            in_handle = open(reads, "rt")
+        for record in SeqIO.parse(in_handle, "fastq"):
             # Simple quality filtering based on average quality
             if len(record.seq) >= min_length:
                 # Calculate average quality
@@ -359,9 +392,16 @@ class Preprocessor:
                     # If no quality scores, keep the read
                     filtered_records.append(record)
         
-        # Write filtered reads
-        with gzip.open(output, "wt") as f:
+        # Write filtered reads as plain FASTQ
+        with open(output, "w") as f:
             SeqIO.write(filtered_records, f, "fastq")
+
+        # Also write gzipped FASTQ
+        try:
+            with gzip.open(output_gz, "wt") as f:
+                SeqIO.write(filtered_records, f, "fastq")
+        except Exception as e:
+            logger.warning(f"Failed to write gzipped filtered long reads: {e}")
         
         logger.info(f"Filtered {len(filtered_records)} long reads")
         return str(output)
