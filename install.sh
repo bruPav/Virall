@@ -117,10 +117,6 @@ else
     echo "Mamba found"
 fi
 
-# VirSorter2 and DIAMOND removed - now using Kaiju for viral identification
-echo "VirSorter2 and DIAMOND removed - using Kaiju for viral identification"
-echo "This simplifies the pipeline and reduces dependencies"
-
 # Install BWA and minimap2 for viral contig quantification
 echo "Installing BWA and minimap2 for viral contig quantification..."
 mamba install -n virall -c bioconda bwa minimap2 samtools -y
@@ -163,9 +159,6 @@ else:
     fi
 fi
 
-# Note: DIAMOND database setup removed - now using Kaiju for viral classification
-
-#
 echo "Creating QUAST environment (optional - for assembly quality assessment)..."
 if conda create -n quast_env -y python=3.9; then
     echo "QUAST environment created successfully"
