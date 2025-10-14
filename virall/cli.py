@@ -70,11 +70,12 @@ def assemble(
     """Assemble reads and identify viral contigs.
     
     This command performs:
-    1. Preprocessing (quality control, trimming)
-    2. Assembly (SPAdes)
-    3. Viral contig identification (Kaiju)
+    1. Assembly (SPAdes/Flye based on read type)
+    2. Viral contig identification (Kaiju)
+    3. Basic assembly validation (QUAST)
     
-    Output: Filtered viral contigs ready for annotation.
+    Note: No preprocessing is performed - use preprocessed reads as input.
+    Output: Assembled contigs and viral contigs ready for annotation.
     """
     
     # Validate input files
@@ -115,8 +116,8 @@ def assemble(
             mem_efficient=mem_efficient
         )
         
-        # Run assembly and viral identification
-        results = assembler.assemble_and_identify(
+        # Run assembly only (no preprocessing, annotation, or quantification)
+        results = assembler.assemble(
             short_reads_1=short_reads_1,
             short_reads_2=short_reads_2,
             long_reads=long_reads,
