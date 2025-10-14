@@ -94,7 +94,6 @@ class ViralAssembler:
     def _get_default_config(self) -> Dict:
         """Get default configuration parameters."""
         # Get software directory for database paths
-        # assembler.py is in virall/core/, so go up 3 levels: core -> virall -> vas
         software_dir = Path(__file__).parent.parent.parent
         
         return {
@@ -695,7 +694,11 @@ class ViralAssembler:
         
         # Read all sequences and sort by length
         sequences = []
-        with gzip.open(reads["long"], "rt") as handle:
+        if self._is_gzipped(str(reads["long"])):
+            fh = gzip.open(reads["long"], "rt")
+        else:
+            fh = open(reads["long"], "rt")
+        with fh as handle:
             for record in SeqIO.parse(handle, "fastq"):
                 sequences.append(record)
         
@@ -733,7 +736,11 @@ class ViralAssembler:
         
         # Count total reads first
         total_reads = 0
-        with gzip.open(reads_file, "rt") as handle:
+        if self._is_gzipped(reads_file):
+            fh = gzip.open(reads_file, "rt")
+        else:
+            fh = open(reads_file, "rt")
+        with fh as handle:
             for _ in SeqIO.parse(handle, "fastq"):
                 total_reads += 1
         
@@ -747,7 +754,11 @@ class ViralAssembler:
                 
                 # Read all sequences and sort by length
                 sequences = []
-                with gzip.open(reads_file, "rt") as handle:
+                if self._is_gzipped(reads_file):
+                    fh2 = gzip.open(reads_file, "rt")
+                else:
+                    fh2 = open(reads_file, "rt")
+                with fh2 as handle:
                     for record in SeqIO.parse(handle, "fastq"):
                         sequences.append(record)
                 
@@ -765,6 +776,14 @@ class ViralAssembler:
                 return temp_file.name
         
         return None
+
+    def _is_gzipped(self, file_path: str) -> bool:
+        """Return True if the file is gzipped based on magic bytes."""
+        try:
+            with open(file_path, "rb") as fh:
+                return fh.read(2) == b"\x1f\x8b"
+        except Exception:
+            return file_path.endswith(".gz")
     
     def _extract_viral_genomes(self, assembly_results: Dict[str, str]) -> List[str]:
         """Extract and polish viral genomes from assembly results."""
