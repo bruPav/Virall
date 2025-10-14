@@ -81,7 +81,7 @@ conda install -c bioconda -y spades bwa samtools minimap2 flye
 conda install -c bioconda -y fastqc trimmomatic
 conda install -c bioconda -y checkv
 # Minimal extras needed by the pipeline
-conda install -c bioconda -y hmmer
+conda install -c bioconda -y hmmer prodigal
 
 # Optional: ONT adapter trimming with Porechop
 echo "Installing optional ONT trimming tool (Porechop)..."
