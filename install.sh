@@ -80,8 +80,8 @@ echo "Installing bioinformatics tools..."
 conda install -c bioconda -y spades bwa samtools minimap2 flye
 conda install -c bioconda -y fastqc trimmomatic
 conda install -c bioconda -y checkv
-conda install -c bioconda -y pysam pybedtools pyfaidx
-conda install -c bioconda -y blast wget hmmer
+# Minimal extras needed by the pipeline
+conda install -c bioconda -y hmmer
 
 # Optional: ONT adapter trimming with Porechop
 echo "Installing optional ONT trimming tool (Porechop)..."
@@ -91,9 +91,7 @@ else
     echo "Warning: Porechop installation failed. Long-read trimming will be skipped if unavailable."
 fi
 
-# Fix BLAST library issues on newer Linux systems
-echo "Installing BLAST dependencies for newer Linux systems..."
-conda install -c conda-forge -y libnsl
+# (Removed) BLAST and related libraries are not used by the current pipeline
 
 # Fix SPAdes PATH issue (create symlink)
 echo "Creating SPAdes symlink..."
