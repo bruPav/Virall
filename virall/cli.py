@@ -116,14 +116,36 @@ def assemble(
             mem_efficient=mem_efficient
         )
         
-        # Run assembly only (no preprocessing, annotation, or quantification)
-        results = assembler.assemble(
-            short_reads_1=short_reads_1,
-            short_reads_2=short_reads_2,
-            long_reads=long_reads,
-            single_reads=single_reads,
-            reference=reference
+        # Run assembly-only workflow (no preprocessing/annotation/quantification)
+        reads_dict = {
+            "short_reads_1": short_reads_1,
+            "short_reads_2": short_reads_2,
+            "single_reads": single_reads,
+            "long_reads": long_reads,
+        }
+
+        assembly_results = assembler._perform_assembly(reads_dict, reference)
+
+        # Viral contig identification from assembled contigs
+        viral_contig_results = assembler._identify_viral_contigs_efficiently(assembly_results)
+
+        # Basic validation (QUAST)
+        validation_results = assembler._validate_assemblies(
+            viral_contig_results.get("viral_genomes", []),
+            assembly_dir=assembler.output_dir / "01_assemblies"
         )
+
+        # Prepare a compact results dict for reporting
+        results = {
+            "assembly_dir": str(assembler.output_dir),
+            "viral_genomes": viral_contig_results.get("viral_genomes", []),
+            "viral_contig_info": viral_contig_results,
+            "validation_results": validation_results,
+            "total_viral_contigs": sum(
+                info.get("viral_contig_count", len(info.get("viral_contigs", [])))
+                for info in viral_contig_results.get("viral_contig_info", {}).values()
+            ),
+        }
         
         # Print results summary
         click.echo("\n" + "="*50)
