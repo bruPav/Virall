@@ -50,6 +50,7 @@ def main(verbose: bool, log_file: Optional[str]):
               type=click.Choice(['hybrid', 'short_only', 'long_only']),
               default='hybrid', help='Assembly strategy')
 @click.option('--rna-mode', is_flag=True, help='Enable RNA-specific assembly parameters')
+@click.option('--mem-efficient', '-m', is_flag=True, help='Enable memory-efficient mode with read subsampling for large datasets')
 def assemble(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -63,7 +64,8 @@ def assemble(
     min_contig_length: int,
     viral_confidence: float,
     assembly_strategy: str,
-    rna_mode: bool
+    rna_mode: bool,
+    mem_efficient: bool
 ):
     """Assemble reads and identify viral contigs.
     
