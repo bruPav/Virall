@@ -8,7 +8,7 @@ import tempfile
 import shutil
 import gzip
 from pathlib import Path
-from typing import Tuple, Optional, Dict, List
+from typing import Tuple, Optional, Dict, List, Set
 from loguru import logger
 
 import pandas as pd
@@ -93,10 +93,12 @@ class Preprocessor:
         self._run_fastqc(reads)
         
         # Adapter trimming (for ONT reads)
-        if self._is_ont_reads(reads):
-            trimmed_reads = self._trim_ont_adapters(reads)
-        else:
-            trimmed_reads = reads
+        trimmed_reads = reads
+        try:
+            if self._should_trim_ont_by_detection(reads):
+                trimmed_reads = self._trim_ont_adapters(reads)
+        except Exception as e:
+            logger.warning(f"ONT adapter detection failed ({e}); continuing without adapter trimming")
         
         # Quality filtering
         filtered_reads = self._filter_long_reads(
@@ -259,6 +261,79 @@ class Preprocessor:
         
         logger.info("ONT adapter trimming completed")
         return str(output)
+
+    def _should_trim_ont_by_detection(self, reads: str) -> bool:
+        """Detect ONT adapters using Porechop's adapter catalog.
+
+        Returns True when known ONT adapter motifs are observed in a sample of reads.
+        Falls back to filename heuristic if the catalog is unavailable.
+        """
+        # Quick hint from filename
+        if self._is_ont_reads(reads):
+            return True
+        adapters = self._load_known_ont_adapters()
+        if not adapters:
+            return False
+        return self._reads_contain_any_sequence(reads, adapters, max_reads=2000)
+
+    def _load_known_ont_adapters(self) -> Set[str]:
+        """Load ONT adapter sequences from Porechop's adapters.py if available."""
+        try:
+            import importlib
+            adapters_mod = importlib.import_module("porechop.adapters")
+        except Exception:
+            return set()
+        candidates: Set[str] = set()
+
+        def add_seq(s: str) -> None:
+            s_clean = s.strip().upper()
+            if len(s_clean) >= 12 and all(c in "ACGTN" for c in s_clean):
+                candidates.add(s_clean)
+
+        for name in dir(adapters_mod):
+            if name.startswith("__"):
+                continue
+            try:
+                obj = getattr(adapters_mod, name)
+            except Exception:
+                continue
+            if isinstance(obj, str):
+                add_seq(obj)
+            elif isinstance(obj, (list, tuple, set)):
+                for item in obj:
+                    if isinstance(item, str):
+                        add_seq(item)
+                    elif isinstance(item, dict):
+                        for v in item.values():
+                            if isinstance(v, str):
+                                add_seq(v)
+            elif isinstance(obj, dict):
+                for v in obj.values():
+                    if isinstance(v, str):
+                        add_seq(v)
+                    elif isinstance(v, (list, tuple, set)):
+                        for x in v:
+                            if isinstance(x, str):
+                                add_seq(x)
+        return candidates
+
+    def _reads_contain_any_sequence(self, reads: str, motifs: Set[str], max_reads: int = 2000) -> bool:
+        """Scan the first max_reads for presence of any motif (simple substring search)."""
+        try:
+            motifs_upper = {m.upper() for m in motifs}
+            count = 0
+            for record in SeqIO.parse(reads, "fastq"):
+                seq_upper = str(record.seq).upper()
+                for m in motifs_upper:
+                    if m in seq_upper:
+                        logger.info("Detected ONT adapter motifs in reads (via Porechop catalog)")
+                        return True
+                count += 1
+                if count >= max_reads:
+                    break
+        except Exception:
+            return False
+        return False
     
     def _filter_long_reads(
         self, 
