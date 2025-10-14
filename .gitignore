@@ -190,3 +190,6 @@ Thumbs.db
 # Test data (optional - uncomment if you don't want to include test data)
 # samples/
 # test_data/
+
+# Local logs
+logs.txt

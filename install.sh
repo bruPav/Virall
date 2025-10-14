@@ -91,8 +91,6 @@ else
     echo "Warning: Porechop installation failed. Long-read trimming will be skipped if unavailable."
 fi
 
-# (Removed) BLAST and related libraries are not used by the current pipeline
-
 # Fix SPAdes PATH issue (create symlink)
 echo "Creating SPAdes symlink..."
 SPADES_PATH=$(find $CONDA_PREFIX -name "spades.py" -path "*/share/spades-*/bin/*" | head -1)
