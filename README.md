@@ -25,8 +25,8 @@ A comprehensive tool for viral genome analysis including assembly, classificatio
 
 ```bash
 # Clone the repository
-git clone https://github.com/bruPav/virall.git
-cd virall
+git clone https://github.com/bruPav/Virall.git
+cd Virall
 
 # Run the installation script
 bash install.sh
@@ -105,7 +105,7 @@ virall identify --short-reads-1 reads_1.fastq --short-reads-2 reads_2.fastq -o i
 Classify viral contigs using Kaiju nucleotide-based classification.
 
 ```bash
-virall classify --contigs contigs.fasta -o classification/
+virall classify --viral-contigs contigs.fasta -o classification/
 ```
 
 ### `validate` - Quality Assessment
@@ -159,22 +159,18 @@ Options:
 
 ```
 output_dir/
-├── 00_qc/                     # Quality control reports
-│   ├── fastqc/               # FastQC reports
-│   └── trimmomatic/          # Trimming logs
-├── 01_assembly/              # Assembly results
-│   ├── spades/               # SPAdes output
-│   ├── flye/                 # Flye output
-│   └── reference_guided/     # Reference-guided assembly
-├── 02_identification/        # Viral identification
-│   ├── kaiju/                # Kaiju classification
-│   └── viral_contigs.fasta   # Identified viral contigs
-├── 03_validation/            # Quality validation
-│   └── checkv/               # CheckV results
-├── 04_annotation/            # Gene prediction and annotation
-│   ├── prodigal/             # Gene predictions
-│   └── vog/                  # VOG annotations
-└── final_report.html         # Summary report
+├── 00_qc/
+│   └── fastqc/                         # FastQC HTML/zip reports
+├── 01_assemblies/                      # Assembly outputs (SPAdes/Flye)
+├── 02_viral_contigs/                   # Viral contigs and scaffolds
+│   ├── viral_contigs.fasta
+│   └── viral_scaffolds.fasta
+├── 03_classifications/                 # Kaiju results
+│   └── kaiju_summary.tsv
+├── 04_quality_assessment/              # QUAST/CheckV results
+├── 05_gene_predictions/                # Prodigal + VOG annotations
+├── 06_quantification/                  # Read mapping and abundance
+└── logs/                               # Pipeline logs (if enabled)
 ```
 
 ## Configuration
@@ -185,7 +181,7 @@ Create a custom configuration file to modify default parameters:
 # config.yaml
 min_contig_length: 1000
 min_coverage: 5
-viral_confidence: 0.7
+viral_confidence: 0.8
 max_long_reads: 50000
 long_read_subsample_size: 20000
 
