@@ -30,6 +30,40 @@ class AssemblyValidator:
         self.checkv_db_path = self._setup_checkv_database()
         logger.info(f"AssemblyValidator initialized with {threads} threads")
     
+    def _find_installation_directory(self) -> Path:
+        """Find the actual installation directory where databases are located."""
+        # Start from the current file location
+        current_file = Path(__file__)
+        
+        # Try different approaches to find the installation directory
+        
+        # Method 1: Look for a databases directory in the current package structure
+        # Go up from virall/core/ to virall/ to parent (installation root)
+        package_dir = current_file.parent.parent  # virall/
+        installation_dir = package_dir.parent     # parent of virall/
+        
+        # Check if databases directory exists in installation
+        if (installation_dir / "databases").exists():
+            return installation_dir
+        
+        # Method 2: Look for setup.py or other installation markers
+        if (installation_dir / "setup.py").exists():
+            return installation_dir
+        
+        # Method 3: Check if we're in a development installation
+        # Look for common development markers
+        if (installation_dir / "README.md").exists() or (installation_dir / "requirements.txt").exists():
+            return installation_dir
+        
+        # Method 4: Fall back to current working directory if databases exist there
+        cwd = Path.cwd()
+        if (cwd / "databases").exists():
+            return cwd
+        
+        # Method 5: Fall back to package directory (original behavior)
+        logger.warning("Could not find installation directory, falling back to package directory")
+        return installation_dir
+    
     def _setup_checkv_database(self) -> Optional[str]:
         """Setup CheckV database for viral contig quality assessment."""
         # Check config first
@@ -37,12 +71,13 @@ class AssemblyValidator:
         if config_path:
             checkv_db_path = Path(config_path)
         else:
-            # Try current working directory first, then fall back to package location
+            # Try current working directory first, then fall back to installation directory
             cwd_db_path = Path.cwd() / "databases" / "checkv_db"
             if cwd_db_path.exists():
                 checkv_db_path = cwd_db_path
             else:
-                software_dir = Path(__file__).parent.parent.parent
+                # Use the same installation directory detection as assembler
+                software_dir = self._find_installation_directory()
                 checkv_db_path = software_dir / "databases" / "checkv_db"
             
             if not checkv_db_path.exists():

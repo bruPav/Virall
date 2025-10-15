@@ -91,10 +91,45 @@ class ViralAssembler:
         
         logger.info(f"ViralAssembler initialized with {threads} threads, {memory} memory")
     
+    def _find_installation_directory(self) -> Path:
+        """Find the actual installation directory where databases are located."""
+        # Start from the current file location
+        current_file = Path(__file__)
+        
+        # Try different approaches to find the installation directory
+        
+        # Method 1: Look for a databases directory in the current package structure
+        # Go up from virall/core/ to virall/ to parent (installation root)
+        package_dir = current_file.parent.parent  # virall/
+        installation_dir = package_dir.parent     # parent of virall/
+        
+        # Check if databases directory exists in installation
+        if (installation_dir / "databases").exists():
+            return installation_dir
+        
+        # Method 2: Look for setup.py or other installation markers
+        if (installation_dir / "setup.py").exists():
+            return installation_dir
+        
+        # Method 3: Check if we're in a development installation
+        # Look for common development markers
+        if (installation_dir / "README.md").exists() or (installation_dir / "requirements.txt").exists():
+            return installation_dir
+        
+        # Method 4: Fall back to current working directory if databases exist there
+        cwd = Path.cwd()
+        if (cwd / "databases").exists():
+            return cwd
+        
+        # Method 5: Fall back to package directory (original behavior)
+        logger.warning("Could not find installation directory, falling back to package directory")
+        return installation_dir
+    
     def _get_default_config(self) -> Dict:
         """Get default configuration parameters."""
-        # Get software directory for database paths
-        software_dir = Path(__file__).parent.parent.parent
+        # Get software directory for database paths - look in installation directory
+        # Try to find the actual installation directory, not site-packages
+        software_dir = self._find_installation_directory()
         
         return {
             "min_contig_length": 1000,

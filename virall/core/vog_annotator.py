@@ -60,12 +60,15 @@ class VOGAnnotator:
     
     def _find_vog_database(self) -> Path:
         """Find VOG database in common locations."""
-        # Try current working directory first, then fall back to package location
+        # Try current working directory first, then fall back to installation directory
         cwd_db_path = Path.cwd() / "databases" / "vog_db"
-        software_dir = Path(__file__).parent.parent.parent
+        if cwd_db_path.exists() and (cwd_db_path / "vog.hmm").exists():
+            return cwd_db_path
+        
+        # Use the same installation directory detection as assembler
+        software_dir = self._find_installation_directory()
         
         possible_paths = [
-            cwd_db_path,  # Current working directory first
             software_dir / "databases" / "vog_db",
             Path.home() / "vog_db",
             Path.home() / ".vog_db",
@@ -83,7 +86,41 @@ class VOGAnnotator:
                 # If no annotations file, still return the path as it has vog.hmm
                 return path
         
-        return software_dir / "databases" / "vog_db"  # Default to software directory
+        return software_dir / "databases" / "vog_db"  # Default to installation directory
+    
+    def _find_installation_directory(self) -> Path:
+        """Find the actual installation directory where databases are located."""
+        # Start from the current file location
+        current_file = Path(__file__)
+        
+        # Try different approaches to find the installation directory
+        
+        # Method 1: Look for a databases directory in the current package structure
+        # Go up from virall/core/ to virall/ to parent (installation root)
+        package_dir = current_file.parent.parent  # virall/
+        installation_dir = package_dir.parent     # parent of virall/
+        
+        # Check if databases directory exists in installation
+        if (installation_dir / "databases").exists():
+            return installation_dir
+        
+        # Method 2: Look for setup.py or other installation markers
+        if (installation_dir / "setup.py").exists():
+            return installation_dir
+        
+        # Method 3: Check if we're in a development installation
+        # Look for common development markers
+        if (installation_dir / "README.md").exists() or (installation_dir / "requirements.txt").exists():
+            return installation_dir
+        
+        # Method 4: Fall back to current working directory if databases exist there
+        cwd = Path.cwd()
+        if (cwd / "databases").exists():
+            return cwd
+        
+        # Method 5: Fall back to package directory (original behavior)
+        logger.warning("Could not find installation directory, falling back to package directory")
+        return installation_dir
     
     def _load_vog_database(self):
         """Load VOG database files."""
