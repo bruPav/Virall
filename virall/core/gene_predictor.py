@@ -123,10 +123,16 @@ class ViralGenePredictor:
         # Build a simple contig_id -> { 'classification': species_name } map from provided Kaiju results
         try:
             kaiju_species_map = {}
-            for key, value in viral_classifications.items():
-                if isinstance(value, dict) and value.get('method') == 'kaiju' and 'classifications' in value:
-                    for contig_id, cls in value['classifications'].items():
-                        # Prefer explicit classification/taxon_name fields
+            for contig_id, cls in viral_classifications.items():
+                if isinstance(cls, dict):
+                    # Handle both nested and flat structures
+                    if 'classifications' in cls:
+                        # Nested structure (legacy)
+                        for nested_contig_id, nested_cls in cls['classifications'].items():
+                            species_label = nested_cls.get('classification') or nested_cls.get('taxon_name') or 'Unknown'
+                            kaiju_species_map[nested_contig_id] = {'classification': species_label}
+                    else:
+                        # Flat structure (current)
                         species_label = cls.get('classification') or cls.get('taxon_name') or 'Unknown'
                         kaiju_species_map[contig_id] = {'classification': species_label}
 
