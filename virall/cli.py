@@ -894,7 +894,7 @@ def quantify(
     for file_path in read_files:
         if not Path(file_path).exists():
             click.echo(f"Error: Read file not found: {file_path}", err=True)
-        sys.exit(1)
+            sys.exit(1)
     
     try:
         from .core.viral_identifier import ViralIdentifier
