@@ -97,15 +97,16 @@ class ViralGenePredictor:
             mode_name = "RNA" if is_rna_mode else "Kaiju"
             logger.info(f"{mode_name} mode detected - running Prodigal gene prediction directly on contigs")
             kaiju_genes = self._run_prodigal_gene_prediction(contigs_file, output_dir)
+            # Skip additional gene prediction in Kaiju/RNA mode to avoid duplication
+            additional_predictions = {}
         else:
             # Legacy mode (should not be used anymore)
             logger.info("Legacy mode detected - this should not happen with Kaiju approach")
             kaiju_genes = {}
-        
-        # Run additional gene prediction methods
-        additional_predictions = self._run_additional_gene_prediction(
-            contigs_file, viral_classifications, output_dir
-        )
+            # Run additional gene prediction methods for legacy mode
+            additional_predictions = self._run_additional_gene_prediction(
+                contigs_file, viral_classifications, output_dir
+            )
         
         # Combine and annotate all gene predictions
         combined_results = self._combine_gene_predictions(
