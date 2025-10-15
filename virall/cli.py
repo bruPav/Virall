@@ -707,10 +707,16 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
                 }
             }
         
+        # Extract actual classifications for gene prediction
+        viral_classifications = {}
+        for classification_group in classification_data.values():
+            if 'classifications' in classification_group:
+                viral_classifications.update(classification_group['classifications'])
+        
         # Run gene prediction and annotation
         results = gene_predictor.predict_genes_comprehensive(
             viral_contigs,
-            classification_data,
+            viral_classifications,
             output_dir
         )
         

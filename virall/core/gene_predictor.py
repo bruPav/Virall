@@ -434,6 +434,15 @@ class ViralGenePredictor:
         """Group contigs by their viral type."""
         viral_groups = {}
         
+        # If no classifications available, group all contigs as 'unknown'
+        if not viral_classifications:
+            # Get all contig IDs from the contigs file
+            contig_ids = []
+            for record in SeqIO.parse(contigs_file, "fasta"):
+                contig_ids.append(record.id)
+            viral_groups['unknown'] = contig_ids
+            return viral_groups
+        
         # Extract actual contig classifications from Kaiju results
         for contig_id, contig_classification in viral_classifications.items():
             # Handle Kaiju format
