@@ -77,6 +77,9 @@ class ViralGenePredictor:
                     is_kaiju_mode = True
                 elif classification.get('classification_method') in ['kaiju_dna_mode', 'kaiju_rna_mode']:
                     is_kaiju_mode = True
+                # Check for Kaiju-specific fields
+                elif 'taxon_id' in classification and 'taxon_name' in classification:
+                    is_kaiju_mode = True
         
         # If we have any Kaiju results, we're in Kaiju mode
         if not is_kaiju_mode and viral_classifications:
