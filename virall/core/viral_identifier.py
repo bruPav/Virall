@@ -278,12 +278,7 @@ class ViralIdentifier:
             "kaiju_classifications": kaiju_classifications
         }
     
-    # Legacy identify_viral_reads method removed - now using Kaiju for viral contig identification
-    # Legacy _identify_viral_reads_with_database method removed - now using Kaiju
-    
     # Using Kaiju for viral identification
-    
-    # Legacy _identify_viral_reads_composition method removed - now using Kaiju
     
     def is_viral_sequence(
         self, 
@@ -434,9 +429,6 @@ class ViralIdentifier:
             "classification_report": report
         }
     
-    # VirSorter2 removed - now using Kaiju for viral identification
-    
-    # VIBRANT removed - now using Kaiju for viral identification
     
     def save_model(self, model_path: str) -> None:
         """Save the trained model to file."""
@@ -496,7 +488,6 @@ class ViralIdentifier:
             "total_classified": len(classifications)
         }
     
-    # Legacy DIAMOND methods removed - now using Kaiju for viral classification
 
 
 
