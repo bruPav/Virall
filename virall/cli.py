@@ -21,7 +21,7 @@ from .core.validator import AssemblyValidator
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
 @click.option('--log-file', help='Log file path')
 def main(verbose: bool, log_file: Optional[str]):
-    """Virall - Comprehensive viral genome analysis including assembly, classification, gene prediction, and annotation. Available commands: assemble, analyse, classify, identify, preprocess, quantify, validate, annotate. Under development: train-model (machine learning model training)"""
+    """Virall - Comprehensive viral genome analysis including assembly, classification, gene prediction, and annotation. Available commands: assemble, analyse, classify, preprocess, quantify, validate, annotate. Under development: train-model (machine learning model training)"""
     
     # Configure logging
     if verbose:
@@ -756,40 +756,6 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
         logger.error(f"Annotation failed: {e}")
         click.echo(f"Error: Annotation failed - {e}", err=True)
         sys.exit(1)
-
-
-@main.command()
-@click.option('--input', '-i', required=True, help='Input reads file')
-@click.option('--output', '-o', required=True, help='Output viral sequences file')
-@click.option('--confidence', default=0.8, help='Confidence threshold for viral classification')
-@click.option('--threads', '-t', default=8, help='Number of threads')
-@click.option('--memory', default='16G', help='Memory allocation')
-def identify(input: str, output: str, confidence: float, threads: int, memory: str):
-    """Identify viral sequences in sequencing reads."""
-    
-    if not Path(input).exists():
-        click.echo(f"Error: Input file not found: {input}", err=True)
-        sys.exit(1)
-    
-    try:
-        # Initialize viral identifier
-        identifier = ViralIdentifier(threads=threads, memory=memory)
-        
-        # Identify viral reads
-        viral_file = identifier.identify_viral_reads(
-            reads_file=input,
-            confidence_threshold=confidence,
-            output_file=output
-        )
-        
-        click.echo(f"Viral sequence identification completed")
-        click.echo(f"Viral sequences saved to: {viral_file}")
-        
-    except Exception as e:
-        logger.error(f"Viral identification failed: {e}")
-        click.echo(f"Error: Viral identification failed - {e}", err=True)
-        sys.exit(1)
-
 
 @main.command()
 @click.option('--genome', '-g', required=True, help='Genome file to validate')
