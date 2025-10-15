@@ -161,6 +161,15 @@ class ViralGenePredictor:
         if vog_annotations and 'viral_classifications' in vog_annotations:
             results['vog_classifications'] = vog_annotations['viral_classifications']
         
+        # Add Kaiju classification results to the output
+        if viral_classifications:
+            # Extract contig to species mapping from Kaiju classifications
+            kaiju_contig_classifications = {}
+            for contig_id, classification in viral_classifications.items():
+                if isinstance(classification, dict) and 'taxon_name' in classification:
+                    kaiju_contig_classifications[contig_id] = classification['taxon_name']
+            results['kaiju_classifications'] = kaiju_contig_classifications
+        
         logger.info("Comprehensive gene prediction completed")
         return results
     

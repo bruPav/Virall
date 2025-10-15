@@ -739,6 +739,17 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
             
             click.echo(f"Annotated proteins: {annotated_proteins}")
             
+            # Display Kaiju taxonomic classification
+            kaiju_classifications = results.get('kaiju_classifications', {})
+            if kaiju_classifications:
+                from collections import Counter
+                kaiju_counts = Counter(kaiju_classifications.values())
+                click.echo(f"Kaiju taxonomic classifications:")
+                for species, count in kaiju_counts.most_common():
+                    click.echo(f"  {species}: {count} contigs")
+            else:
+                click.echo("No Kaiju taxonomic classifications found")
+            
             # Display VOG classifications summary instead of full dictionary
             if isinstance(viral_classifications, dict):
                 unique_vogs = len(set(viral_classifications.keys()))
