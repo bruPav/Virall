@@ -929,7 +929,7 @@ class ViralGenePredictor:
             logger.info(f"Contig {contig_id} has {len(kaiju_genes)} kaiju_genes")
             for gene in kaiju_genes:
                 if 'protein_sequence' in gene and gene['protein_sequence']:
-                    logger.info(f"Found protein sequence for gene {gene.get('id', 'unknown')}")
+                    logger.info(f"Found protein sequence for gene {gene.get('gene_id', gene.get('id', 'unknown'))}")
                     # Find the matching protein ID from all_proteins.faa by sequence
                     gene_sequence = gene['protein_sequence']
                     matching_protein_id = None
