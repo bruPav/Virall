@@ -822,6 +822,13 @@ class ViralGenePredictor:
             # Run VOG annotation
             vog_results = self.vog_annotator.annotate_proteins(str(protein_file), str(output_dir / "vog_annotation"))
             
+            # Debug: Log the VOG results format
+            logger.info(f"VOG results type: {type(vog_results)}")
+            logger.info(f"VOG results keys: {list(vog_results.keys()) if isinstance(vog_results, dict) else 'Not a dict'}")
+            if isinstance(vog_results, dict) and vog_results:
+                sample_key = list(vog_results.keys())[0]
+                logger.info(f"Sample VOG result: {sample_key} -> {vog_results[sample_key]}")
+            
             # Get viral classifications based on VOG
             viral_classifications = self.vog_annotator.get_viral_classification(vog_results)
             
