@@ -481,17 +481,31 @@ class VOGAnnotator:
             vog_id = hit.get('vog_id', '')
             vog_function = hit.get('vog_function', '').lower()
             
-            # Simple classification based on VOG function
-            if 'dna' in vog_function and 'polymerase' in vog_function:
-                contig_classifications[contig_id] = 'DNA_virus'
-            elif 'rna' in vog_function and 'polymerase' in vog_function:
-                contig_classifications[contig_id] = 'RNA_virus'
-            elif 'capsid' in vog_function or 'coat' in vog_function:
-                contig_classifications[contig_id] = 'Viral_structural'
-            elif 'helicase' in vog_function:
-                contig_classifications[contig_id] = 'Viral_replication'
+            # Use human-readable protein functions for classification
+            vog_function = hit.get('function', '')
+            
+            # Extract human-readable function from VOG annotation
+            if vog_function:
+                # Parse the function to get the human-readable name
+                # Format: "sp|P0C6T8|R1A_CVBEN Replicase polyprotein 1a"
+                # We want: "Replicase polyprotein 1a"
+                if '|' in vog_function:
+                    # Split by '|' and take the last part (after the third |)
+                    parts = vog_function.split('|')
+                    if len(parts) >= 4:
+                        human_readable = parts[-1].strip()
+                        contig_classifications[contig_id] = human_readable
+                    else:
+                        contig_classifications[contig_id] = vog_function
+                else:
+                    contig_classifications[contig_id] = vog_function
             else:
-                contig_classifications[contig_id] = 'Viral_unknown'
+                # Fallback to VOG category if no function available
+                vog_category = hit.get('category', '')
+                if vog_category:
+                    contig_classifications[contig_id] = f"VOG_{vog_category}"
+                else:
+                    contig_classifications[contig_id] = 'Viral_unknown'
         
         return contig_classifications
     
