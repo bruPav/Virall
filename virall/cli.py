@@ -735,7 +735,7 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
             
             vog_results = results.get('vog_annotations', {})
             annotated_proteins = vog_results.get('total_annotated_proteins', 0)
-            viral_classifications = vog_results.get('viral_classifications', {})
+            viral_classifications = results.get('vog_classifications', vog_results.get('viral_classifications', {}))
             
             click.echo(f"Annotated proteins: {annotated_proteins}")
             

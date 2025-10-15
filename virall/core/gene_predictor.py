@@ -157,6 +157,10 @@ class ViralGenePredictor:
             "output_directory": str(output_dir)
         }
         
+        # Add VOG classification results to the output
+        if vog_annotations and 'viral_classifications' in vog_annotations:
+            results['vog_classifications'] = vog_annotations['viral_classifications']
+        
         logger.info("Comprehensive gene prediction completed")
         return results
     
