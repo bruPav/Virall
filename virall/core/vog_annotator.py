@@ -466,7 +466,7 @@ class VOGAnnotator:
         Infer viral classification based on VOG annotations.
         
         Args:
-            annotations: VOG annotation results
+            annotations: VOG annotation results (ignored, we'll read from TSV file)
             
         Returns:
             Dictionary mapping contig IDs to viral classifications
@@ -474,38 +474,59 @@ class VOGAnnotator:
         # Group annotations by contig ID
         contig_classifications = {}
         
-        for query_id, hit in annotations.items():
-            # Extract contig ID from gene ID (remove gene suffix like _1, _2, etc.)
-            contig_id = query_id.rsplit('_', 1)[0] if '_' in query_id else query_id
+        # Read the processed VOG annotations from the TSV file
+        # The raw HMMER results don't have the processed function information
+        try:
+            import pandas as pd
+            from pathlib import Path
             
-            vog_id = hit.get('vog_id', '')
-            vog_function = hit.get('vog_function', '').lower()
+            # Find the VOG annotations TSV file
+            vog_tsv_file = None
+            for parent_dir in [Path.cwd(), Path.cwd().parent]:
+                for tsv_file in parent_dir.rglob("vog_annotations.tsv"):
+                    vog_tsv_file = tsv_file
+                    break
+                if vog_tsv_file:
+                    break
             
-            # Use human-readable protein functions for classification
-            vog_function = hit.get('function', '')
-            
-            # Extract human-readable function from VOG annotation
-            if vog_function:
-                # Parse the function to get the human-readable name
-                # Format: "sp|P0C6T8|R1A_CVBEN Replicase polyprotein 1a"
-                # We want: "Replicase polyprotein 1a"
-                if '|' in vog_function:
-                    # Split by '|' and take the last part (after the third |)
-                    parts = vog_function.split('|')
-                    if len(parts) >= 4:
-                        human_readable = parts[-1].strip()
-                        contig_classifications[contig_id] = human_readable
+            if vog_tsv_file and vog_tsv_file.exists():
+                df = pd.read_csv(vog_tsv_file, sep='\t')
+                
+                for _, row in df.iterrows():
+                    query_id = row['query_id']
+                    function = row['function']
+                    
+                    # Extract contig ID from gene ID (remove gene suffix like _1, _2, etc.)
+                    contig_id = query_id.rsplit('_', 1)[0] if '_' in query_id else query_id
+                    
+                    # Extract human-readable function from VOG annotation
+                    if function and function != '1 1 1 -':  # Skip generic placeholders
+                        # Parse the function to get the human-readable name
+                        # Format: "sp|P0C6T8|R1A_CVBEN Replicase polyprotein 1a"
+                        # We want: "Replicase polyprotein 1a"
+                        if '|' in function:
+                            # Split by '|' and take the last part (after the third |)
+                            parts = function.split('|')
+                            if len(parts) >= 4:
+                                human_readable = parts[-1].strip()
+                                contig_classifications[contig_id] = human_readable
+                            else:
+                                contig_classifications[contig_id] = function
+                        else:
+                            contig_classifications[contig_id] = function
                     else:
-                        contig_classifications[contig_id] = vog_function
-                else:
-                    contig_classifications[contig_id] = vog_function
+                        contig_classifications[contig_id] = 'Viral_unknown'
             else:
-                # Fallback to VOG category if no function available
-                vog_category = hit.get('category', '')
-                if vog_category:
-                    contig_classifications[contig_id] = f"VOG_{vog_category}"
-                else:
+                # Fallback to raw annotations if TSV file not found
+                for query_id, hit in annotations.items():
+                    contig_id = query_id.rsplit('_', 1)[0] if '_' in query_id else query_id
                     contig_classifications[contig_id] = 'Viral_unknown'
+                    
+        except Exception as e:
+            # Fallback to raw annotations if TSV parsing fails
+            for query_id, hit in annotations.items():
+                contig_id = query_id.rsplit('_', 1)[0] if '_' in query_id else query_id
+                contig_classifications[contig_id] = 'Viral_unknown'
         
         return contig_classifications
     
