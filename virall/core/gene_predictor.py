@@ -825,6 +825,9 @@ class ViralGenePredictor:
             # Get viral classifications based on VOG
             viral_classifications = self.vog_annotator.get_viral_classification(vog_results)
             
+            # Debug: Log the VOG classification results
+            logger.info(f"VOG classification results: {viral_classifications}")
+            
             # Write species-specific protein files (only if classifications are available)
             if viral_classifications:
                 # Use the contigs file path from the method parameter
