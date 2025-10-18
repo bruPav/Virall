@@ -51,6 +51,11 @@ def main(verbose: bool, log_file: Optional[str]):
               default='hybrid', help='Assembly strategy')
 @click.option('--rna-mode', is_flag=True, help='Enable RNA-specific assembly parameters')
 @click.option('--mem-efficient', '-m', is_flag=True, help='Enable memory-efficient mode with read subsampling for large datasets')
+@click.option('--single-cell', is_flag=True, help='Enable single-cell sequencing mode')
+@click.option('--cell-barcodes', help='Path to cell barcodes file (if not 10X format)')
+@click.option('--min-cells', default=100, help='Minimum number of cells to process')
+@click.option('--cellranger-path', help='Path to Cell Ranger installation')
+@click.option('--barcode-whitelist', help='Path to barcode whitelist file')
 def assemble(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -65,7 +70,12 @@ def assemble(
     viral_confidence: float,
     assembly_strategy: str,
     rna_mode: bool,
-    mem_efficient: bool
+    mem_efficient: bool,
+    single_cell: bool,
+    cell_barcodes: Optional[str],
+    min_cells: int,
+    cellranger_path: Optional[str],
+    barcode_whitelist: Optional[str]
 ):
     """Assemble reads and identify viral contigs.
     
@@ -106,6 +116,36 @@ def assemble(
             config_dict.update(file_config)
     
     try:
+        # Handle single-cell mode preprocessing
+        if single_cell:
+            click.echo("Single-cell mode enabled - preprocessing reads...")
+            from .core.single_cell_preprocessor import SingleCellPreprocessor
+            
+            # Initialize single-cell preprocessor
+            sc_preprocessor = SingleCellPreprocessor(
+                threads=threads,
+                cellranger_path=cellranger_path
+            )
+            
+            # Process single-cell data
+            if short_reads_1 and short_reads_2:
+                sc_results = sc_preprocessor.process_10x_data(
+                    r1_file=short_reads_1,
+                    r2_file=short_reads_2,
+                    sample_id="sample",
+                    output_dir=output_dir + "/single_cell_processed",
+                    min_cells=min_cells
+                )
+                
+                # Update read paths to processed files
+                short_reads_1 = sc_results["processed_reads"]["processed_r1"]
+                short_reads_2 = sc_results["processed_reads"]["processed_r2"]
+                
+                click.echo(f"Processed {sc_results['num_cells']} cells")
+            else:
+                click.echo("Error: Single-cell mode requires paired-end reads (R1 and R2)", err=True)
+                sys.exit(1)
+        
         # Initialize assembler
         assembler = ViralAssembler(
             output_dir=output_dir,
