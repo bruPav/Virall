@@ -202,6 +202,7 @@ class SingleCellPreprocessor(Preprocessor):
                     processed_reads += 1
                     
                     # Extract barcode and UMI from R1
+                    # R1 structure: [16bp barcode][12bp UMI][remaining cDNA]
                     barcode = str(r1_record.seq[:self.barcode_length])
                     umi = str(r1_record.seq[self.barcode_length:self.barcode_length + self.umi_length])
                     
@@ -211,9 +212,33 @@ class SingleCellPreprocessor(Preprocessor):
                     if is_valid_cell:
                         valid_reads += 1
                         
+                        # For single-cell assembly, we need to create proper paired-end reads
+                        # R1 is very short (barcode + UMI), R2 contains the cDNA
+                        # We'll use R2 as both R1 and R2 for assembly, but keep cell info
+                        
+                        # Create modified read IDs with cell barcode info
+                        cell_id = cell_barcodes[barcode]
+                        modified_r1_id = f"{r1_record.id}_cell_{cell_id}_umi_{umi}"
+                        modified_r2_id = f"{r2_record.id}_cell_{cell_id}_umi_{umi}"
+                        
+                        # Create new records with modified IDs
+                        r1_modified = SeqRecord(
+                            seq=r2_record.seq,  # Use R2 sequence for both
+                            id=modified_r1_id,
+                            description=""
+                        )
+                        r1_modified.letter_annotations["phred_quality"] = r2_record.letter_annotations["phred_quality"]
+                        
+                        r2_modified = SeqRecord(
+                            seq=r2_record.seq,  # Use R2 sequence for both
+                            id=modified_r2_id,
+                            description=""
+                        )
+                        r2_modified.letter_annotations["phred_quality"] = r2_record.letter_annotations["phred_quality"]
+                        
                         # Write processed reads
-                        SeqIO.write(r1_record, out_r1, "fastq")
-                        SeqIO.write(r2_record, out_r2, "fastq")
+                        SeqIO.write(r1_modified, out_r1, "fastq")
+                        SeqIO.write(r2_modified, out_r2, "fastq")
                         
                         # Write assignment
                         out_assignments.write(f"{r1_record.id}\t{barcode}\t{umi}\tTrue\n")
