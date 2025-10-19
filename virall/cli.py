@@ -56,6 +56,7 @@ def main(verbose: bool, log_file: Optional[str]):
 @click.option('--min-cells', default=100, help='Minimum number of cells to process')
 @click.option('--cellranger-path', help='Path to Cell Ranger installation')
 @click.option('--barcode-whitelist', help='Path to barcode whitelist file')
+@click.option('--index-reads', help='Path to index reads (I1) for single-cell data')
 def assemble(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -75,7 +76,8 @@ def assemble(
     cell_barcodes: Optional[str],
     min_cells: int,
     cellranger_path: Optional[str],
-    barcode_whitelist: Optional[str]
+    barcode_whitelist: Optional[str],
+    index_reads: Optional[str]
 ):
     """Assemble reads and identify viral contigs.
     
@@ -119,6 +121,7 @@ def assemble(
         # Handle single-cell mode preprocessing
         if single_cell:
             click.echo("Single-cell mode enabled - preprocessing reads...")
+            click.echo("Note: Single-cell data is typically RNA-seq, enabling RNA mode")
             from .core.single_cell_preprocessor import SingleCellPreprocessor
             
             # Initialize single-cell preprocessor
@@ -141,7 +144,12 @@ def assemble(
                 short_reads_1 = sc_results["processed_reads"]["processed_r1"]
                 short_reads_2 = sc_results["processed_reads"]["processed_r2"]
                 
+                # Enable RNA mode for single-cell data
+                rna_mode = True
+                config_dict["rna_mode"] = True
+                
                 click.echo(f"Processed {sc_results['num_cells']} cells")
+                click.echo("RNA mode enabled for single-cell transcript assembly")
             else:
                 click.echo("Error: Single-cell mode requires paired-end reads (R1 and R2)", err=True)
                 sys.exit(1)
@@ -152,7 +160,7 @@ def assemble(
             threads=threads,
             memory=memory,
             config=config_dict,
-            rna_mode=rna_mode,
+            rna_mode=rna_mode or single_cell,  # Enable RNA mode for single-cell
             mem_efficient=mem_efficient
         )
         
