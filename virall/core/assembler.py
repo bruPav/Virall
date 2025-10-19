@@ -606,8 +606,23 @@ class ViralAssembler:
         
         # In RNA mode, SPAdes outputs transcripts instead of contigs/scaffolds
         if self.rna_mode:
+            # Check if transcripts.fasta exists, otherwise fall back to final_contigs.fasta
+            # This handles cases where SPAdes has paired-end read orientation issues
+            contigs_file = output_dir / "transcripts.fasta"
+            if not contigs_file.exists():
+                # Look for final_contigs.fasta in the highest k-mer directory
+                k_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.startswith('K')]
+                if k_dirs:
+                    # Sort by k-mer size and take the highest
+                    k_dirs.sort(key=lambda x: int(x.name[1:]) if x.name[1:].isdigit() else 0)
+                    highest_k_dir = k_dirs[-1]
+                    fallback_contigs = highest_k_dir / "final_contigs.fasta"
+                    if fallback_contigs.exists():
+                        logger.warning(f"transcripts.fasta not found, using {fallback_contigs} as fallback")
+                        contigs_file = fallback_contigs
+            
             return {
-                "contigs": str(output_dir / "transcripts.fasta"),
+                "contigs": str(contigs_file),
                 "scaffolds": str(output_dir / "hard_filtered_transcripts.fasta"),
                 "assembly_graph": str(output_dir / "assembly_graph.fastg")
             }
@@ -661,8 +676,21 @@ class ViralAssembler:
         
         # In RNA mode, SPAdes outputs transcripts instead of contigs/scaffolds
         if self.rna_mode:
+            # Check if transcripts.fasta exists, otherwise fall back to final_contigs.fasta
+            contigs_file = output_dir / "transcripts.fasta"
+            if not contigs_file.exists():
+                # Look for final_contigs.fasta in the highest k-mer directory
+                k_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.startswith('K')]
+                if k_dirs:
+                    k_dirs.sort(key=lambda x: int(x.name[1:]) if x.name[1:].isdigit() else 0)
+                    highest_k_dir = k_dirs[-1]
+                    fallback_contigs = highest_k_dir / "final_contigs.fasta"
+                    if fallback_contigs.exists():
+                        logger.warning(f"transcripts.fasta not found, using {fallback_contigs} as fallback")
+                        contigs_file = fallback_contigs
+            
             return {
-                "contigs": str(output_dir / "transcripts.fasta"),
+                "contigs": str(contigs_file),
                 "scaffolds": str(output_dir / "hard_filtered_transcripts.fasta")
             }
         else:
