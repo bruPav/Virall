@@ -19,6 +19,7 @@ from .preprocessor import Preprocessor
 from .viral_identifier import ViralIdentifier
 from .validator import AssemblyValidator
 from .gene_predictor import ViralGenePredictor
+from .rnabloom_assembler import RNABloomAssembler
 
 
 class ViralAssembler:
@@ -89,7 +90,51 @@ class ViralAssembler:
             vog_db_path=self.config.get('databases', {}).get('vog_db_path')
         )
         
+        # Initialize RNA-Bloom assembler for RNA-seq data
+        try:
+            self.rnabloom_assembler = RNABloomAssembler(threads=threads, memory=memory)
+            logger.info("RNA-Bloom assembler initialized for RNA-seq data")
+        except RuntimeError as e:
+            logger.warning(f"RNA-Bloom not available: {e}")
+            self.rnabloom_assembler = None
+        
         logger.info(f"ViralAssembler initialized with {threads} threads, {memory} memory")
+    
+    def _detect_single_cell_data(self, reads: Dict[str, str]) -> bool:
+        """
+        Detect if the data appears to be single-cell RNA-seq based on read ID patterns.
+        
+        Args:
+            reads: Dictionary containing read file paths
+            
+        Returns:
+            True if single-cell data is detected, False otherwise
+        """
+        # Check for cell barcode patterns in read IDs
+        for read_type, read_path in reads.items():
+            if read_type in ["short_1", "short_2"] and read_path:
+                try:
+                    # Read first few lines to check for cell barcode patterns
+                    with open(read_path, 'r') as f:
+                        for i, line in enumerate(f):
+                            if i >= 10:  # Check first 10 reads
+                                break
+                            if line.startswith('@'):
+                                # Look for cell barcode patterns in read IDs
+                                read_id = line.strip()
+                                if '_cell_' in read_id and '_umi_' in read_id:
+                                    logger.info("Detected single-cell data based on read ID patterns")
+                                    return True
+                                # Also check for 10X Genomics patterns
+                                if 'CB:Z:' in read_id or 'UB:Z:' in read_id:
+                                    logger.info("Detected 10X Genomics single-cell data")
+                                    return True
+                except Exception as e:
+                    logger.debug(f"Could not check read file {read_path}: {e}")
+                    continue
+        
+        logger.info("No single-cell patterns detected, treating as bulk RNA-seq")
+        return False
     
     def _find_installation_directory(self) -> Path:
         """Find the actual installation directory where databases are located."""
@@ -565,7 +610,53 @@ class ViralAssembler:
             raise ValueError(f"Invalid assembly strategy '{strategy}' for available reads")
     
     def _hybrid_assembly(self, reads: Dict[str, str], output_dir: Path, reference: Optional[Union[str, Path]] = None) -> Dict[str, str]:
-        """Perform hybrid assembly using SPAdes."""
+        """Perform hybrid assembly using SPAdes or RNA-Bloom."""
+        
+        # Use RNA-Bloom for RNA-seq data if available
+        if self.rna_mode and self.rnabloom_assembler is not None:
+            logger.info("Running hybrid assembly with RNA-Bloom (optimized for RNA-seq)")
+            
+            try:
+                # Determine if this is single-cell data
+                is_single_cell = self._detect_single_cell_data(reads)
+                
+                if is_single_cell:
+                    logger.info("Detected single-cell data, using RNA-Bloom hybrid assembly")
+                    results = self.rnabloom_assembler.assemble_hybrid(
+                        short_r1=reads.get("short_1", ""),
+                        short_r2=reads.get("short_2", ""),
+                        long_reads=reads.get("long", ""),
+                        output_dir=output_dir,
+                        sample_name="sample",
+                        min_length=self.config.get("min_contig_length", 200),
+                        stranded=self.config.get("stranded", False),
+                        pacbio=self.config.get("pacbio", False)
+                    )
+                else:
+                    logger.info("Detected bulk RNA-seq data, using RNA-Bloom hybrid assembly")
+                    results = self.rnabloom_assembler.assemble_hybrid(
+                        short_r1=reads.get("short_1", ""),
+                        short_r2=reads.get("short_2", ""),
+                        long_reads=reads.get("long", ""),
+                        output_dir=output_dir,
+                        sample_name="sample",
+                        min_length=self.config.get("min_contig_length", 200),
+                        stranded=self.config.get("stranded", False),
+                        pacbio=self.config.get("pacbio", False)
+                    )
+                
+                # Convert RNA-Bloom output format to expected format
+                return {
+                    "contigs": results.get("transcripts", ""),
+                    "scaffolds": results.get("transcripts_nr", results.get("transcripts", "")),
+                    "assembly_graph": str(output_dir / "assembly_graph.fastg")
+                }
+                
+            except Exception as e:
+                logger.warning(f"RNA-Bloom hybrid assembly failed: {e}")
+                logger.info("Falling back to SPAdes hybrid assembly")
+        
+        # Fallback to SPAdes for DNA assembly or if RNA-Bloom fails
         logger.info("Running hybrid assembly with SPAdes")
         
         # Convert memory from "16G" format to just number for SPAdes
@@ -635,6 +726,50 @@ class ViralAssembler:
     
     def _short_read_assembly(self, reads: Dict[str, str], output_dir: Path, reference: Optional[Union[str, Path]] = None) -> Dict[str, str]:
         """Perform short-read only assembly."""
+        
+        # Use RNA-Bloom for RNA-seq data if available
+        if self.rna_mode and self.rnabloom_assembler is not None:
+            logger.info("Running short-read assembly with RNA-Bloom (optimized for RNA-seq)")
+            
+            try:
+                # Determine if this is single-cell data (check for cell barcode patterns in read IDs)
+                is_single_cell = self._detect_single_cell_data(reads)
+                
+                if is_single_cell:
+                    logger.info("Detected single-cell data, using RNA-Bloom single-cell assembly")
+                    results = self.rnabloom_assembler.assemble_single_cell(
+                        r1_file=reads.get("short_1", ""),
+                        r2_file=reads.get("short_2", ""),
+                        output_dir=output_dir,
+                        sample_name="sample",
+                        min_length=self.config.get("min_contig_length", 200),
+                        stranded=self.config.get("stranded", False),
+                        reference=str(reference) if reference else None
+                    )
+                else:
+                    logger.info("Detected bulk RNA-seq data, using RNA-Bloom bulk assembly")
+                    results = self.rnabloom_assembler.assemble_bulk_rna(
+                        r1_file=reads.get("short_1", ""),
+                        r2_file=reads.get("short_2", ""),
+                        output_dir=output_dir,
+                        sample_name="sample",
+                        min_length=self.config.get("min_contig_length", 200),
+                        stranded=self.config.get("stranded", False),
+                        reference=str(reference) if reference else None,
+                        single_end=reads.get("single")
+                    )
+                
+                # Convert RNA-Bloom output format to expected format
+                return {
+                    "contigs": results.get("transcripts", ""),
+                    "scaffolds": results.get("transcripts_nr", results.get("transcripts", ""))
+                }
+                
+            except Exception as e:
+                logger.warning(f"RNA-Bloom assembly failed: {e}")
+                logger.info("Falling back to SPAdes assembly")
+        
+        # Fallback to SPAdes for DNA assembly or if RNA-Bloom fails
         logger.info("Running short-read assembly with SPAdes")
         
         # Convert memory from "16G" format to just number for SPAdes

@@ -82,6 +82,8 @@ conda install -c bioconda -y fastqc trimmomatic
 conda install -c bioconda -y checkv
 # Minimal extras needed by the pipeline
 conda install -c bioconda -y hmmer prodigal
+# RNA-Bloom for transcriptome assembly (supports single-cell, bulk RNA-seq, and long reads)
+conda install -c bioconda -y rnabloom
 
 # Optional: ONT adapter trimming with Porechop
 echo "Installing optional ONT trimming tool (Porechop)..."
