@@ -123,11 +123,16 @@ class RNABloomAssembler:
             
             logger.info("RNA-Bloom single-cell assembly completed successfully")
             
+            # Find and move output files to clean structure
+            transcripts_file = self._organize_output_files(output_dir, sample_name, "transcripts.fa")
+            transcripts_short_file = self._organize_output_files(output_dir, sample_name, "transcripts.short.fa")
+            transcripts_nr_file = self._organize_output_files(output_dir, sample_name, "transcripts.nr.fa")
+            
             # Return output file paths
             return {
-                "transcripts": str(output_dir / f"{sample_name}.transcripts.fa"),
-                "transcripts_short": str(output_dir / f"{sample_name}.transcripts.short.fa"),
-                "transcripts_nr": str(output_dir / f"{sample_name}.transcripts.nr.fa"),
+                "transcripts": transcripts_file,
+                "transcripts_short": transcripts_short_file,
+                "transcripts_nr": transcripts_nr_file,
                 "assembly_log": str(output_dir / "rnabloom.log")
             }
             
@@ -210,11 +215,16 @@ class RNABloomAssembler:
             
             logger.info("RNA-Bloom bulk RNA-seq assembly completed successfully")
             
+            # Find and move output files to clean structure
+            transcripts_file = self._organize_output_files(output_dir, sample_name, "transcripts.fa")
+            transcripts_short_file = self._organize_output_files(output_dir, sample_name, "transcripts.short.fa")
+            transcripts_nr_file = self._organize_output_files(output_dir, sample_name, "transcripts.nr.fa")
+            
             # Return output file paths
             return {
-                "transcripts": str(output_dir / f"{sample_name}.transcripts.fa"),
-                "transcripts_short": str(output_dir / f"{sample_name}.transcripts.short.fa"),
-                "transcripts_nr": str(output_dir / f"{sample_name}.transcripts.nr.fa"),
+                "transcripts": transcripts_file,
+                "transcripts_short": transcripts_short_file,
+                "transcripts_nr": transcripts_nr_file,
                 "assembly_log": str(output_dir / "rnabloom.log")
             }
             
@@ -298,10 +308,14 @@ class RNABloomAssembler:
             
             logger.info("RNA-Bloom long-read assembly completed successfully")
             
+            # Find and move output files to clean structure
+            transcripts_file = self._organize_output_files(output_dir, sample_name, "transcripts.fa")
+            transcripts_short_file = self._organize_output_files(output_dir, sample_name, "transcripts.short.fa")
+            
             # Return output file paths
             return {
-                "transcripts": str(output_dir / f"{sample_name}.transcripts.fa"),
-                "transcripts_short": str(output_dir / f"{sample_name}.transcripts.short.fa"),
+                "transcripts": transcripts_file,
+                "transcripts_short": transcripts_short_file,
                 "assembly_log": str(output_dir / "rnabloom.log")
             }
             
@@ -380,11 +394,16 @@ class RNABloomAssembler:
             
             logger.info("RNA-Bloom hybrid assembly completed successfully")
             
+            # Find and move output files to clean structure
+            transcripts_file = self._organize_output_files(output_dir, sample_name, "transcripts.fa")
+            transcripts_short_file = self._organize_output_files(output_dir, sample_name, "transcripts.short.fa")
+            transcripts_nr_file = self._organize_output_files(output_dir, sample_name, "transcripts.nr.fa")
+            
             # Return output file paths
             return {
-                "transcripts": str(output_dir / f"{sample_name}.transcripts.fa"),
-                "transcripts_short": str(output_dir / f"{sample_name}.transcripts.short.fa"),
-                "transcripts_nr": str(output_dir / f"{sample_name}.transcripts.nr.fa"),
+                "transcripts": transcripts_file,
+                "transcripts_short": transcripts_short_file,
+                "transcripts_nr": transcripts_nr_file,
                 "assembly_log": str(output_dir / "rnabloom.log")
             }
             
@@ -498,6 +517,39 @@ class RNABloomAssembler:
         except Exception as e:
             logger.error(f"RNA-Bloom assembly failed: {e}")
             raise
+    
+    def _organize_output_files(self, output_dir: Path, sample_name: str, filename: str) -> str:
+        """
+        Find RNA-Bloom output files and organize them in a clean structure.
+        
+        Args:
+            output_dir: Base output directory
+            sample_name: Sample name
+            filename: Name of the file to find (e.g., "transcripts.fa")
+            
+        Returns:
+            Path to the organized file
+        """
+        full_filename = f"{sample_name}.{filename}"
+        target_path = output_dir / full_filename
+        
+        # First try the direct path
+        if target_path.exists():
+            return str(target_path)
+        
+        # Search recursively for the file
+        found_file = None
+        for file_path in output_dir.rglob(full_filename):
+            if file_path.is_file():
+                found_file = file_path
+                break
+        
+        if found_file and found_file != target_path:
+            # Move file to clean location
+            logger.info(f"Moving {found_file} to {target_path}")
+            shutil.move(str(found_file), str(target_path))
+        
+        return str(target_path)
     
     def cleanup(self) -> None:
         """Clean up temporary files."""
