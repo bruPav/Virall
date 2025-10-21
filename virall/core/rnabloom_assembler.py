@@ -214,15 +214,18 @@ class RNABloomAssembler:
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(output_dir))
             
             if result.returncode != 0:
-                logger.error(f"RNA-Bloom failed: {result.stderr}")
+                logger.error(f"RNA-Bloom failed with return code {result.returncode}")
+                logger.error(f"RNA-Bloom stderr: {result.stderr}")
+                logger.error(f"RNA-Bloom stdout: {result.stdout}")
                 raise RuntimeError(f"RNA-Bloom assembly failed: {result.stderr}")
             
             logger.info("RNA-Bloom pooled single-cell assembly completed successfully")
             
             # Find and move output files to clean structure
-            transcripts_file = self._organize_output_files(output_dir, "rnabloom", "transcripts.fa")
-            transcripts_short_file = self._organize_output_files(output_dir, "rnabloom", "transcripts.short.fa")
-            transcripts_nr_file = self._organize_output_files(output_dir, "rnabloom", "transcripts.nr.fa")
+            # For pooled mode, files are in subdirectories like cell_1/
+            transcripts_file = self._organize_pooled_output_files(output_dir, "transcripts.fa")
+            transcripts_short_file = self._organize_pooled_output_files(output_dir, "transcripts.short.fa")
+            transcripts_nr_file = self._organize_pooled_output_files(output_dir, "transcripts.nr.fa")
             
             # Return output file paths
             return {
@@ -665,6 +668,58 @@ class RNABloomAssembler:
             shutil.move(str(found_file), str(target_path))
         
         return str(target_path)
+    
+    def _organize_pooled_output_files(self, output_dir: Path, filename: str) -> str:
+        """
+        Organize output files from RNA-Bloom pooled mode.
+        
+        Args:
+            output_dir: Base output directory
+            filename: Name of the file to find (e.g., "transcripts.fa")
+            
+        Returns:
+            Path to the organized file
+        """
+        target_path = output_dir / filename
+        
+        # Look for files in subdirectories (cell_1/, cell_2/, etc.)
+        found_files = []
+        for subdir in output_dir.iterdir():
+            if subdir.is_dir() and not subdir.name.startswith('.'):
+                file_path = subdir / filename
+                if file_path.exists():
+                    found_files.append(file_path)
+        
+        if found_files:
+            # Combine all files from different cells
+            logger.info(f"Found {len(found_files)} {filename} files from pooled assembly")
+            self._combine_pooled_files(found_files, target_path)
+        else:
+            logger.warning(f"Could not find {filename} in pooled assembly output")
+        
+        return str(target_path)
+    
+    def _combine_pooled_files(self, source_files: List[Path], target_file: Path) -> None:
+        """
+        Combine files from multiple cells into a single file.
+        
+        Args:
+            source_files: List of source files to combine
+            target_file: Target file to write combined content
+        """
+        from Bio import SeqIO
+        
+        all_sequences = []
+        for source_file in source_files:
+            for record in SeqIO.parse(source_file, "fasta"):
+                # Add cell information to sequence ID
+                cell_name = source_file.parent.name
+                record.id = f"{cell_name}_{record.id}"
+                all_sequences.append(record)
+        
+        # Write combined file
+        SeqIO.write(all_sequences, target_file, "fasta")
+        logger.info(f"Combined {len(all_sequences)} sequences from {len(source_files)} cells into {target_file}")
     
     def cleanup(self) -> None:
         """Clean up temporary files."""
