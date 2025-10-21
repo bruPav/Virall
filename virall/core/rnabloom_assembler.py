@@ -184,11 +184,15 @@ class RNABloomAssembler:
         self._create_cell_reads_list(r1_file, r2_file, reads_list_file)
         
         # Prepare RNA-Bloom command for pooled assembly
+        # Use relative paths since we'll run from parent directory
+        reads_list_rel = reads_list_file.relative_to(output_dir.parent)
+        output_dir_rel = output_dir.relative_to(output_dir.parent)
+        
         cmd = [
             "rnabloom",
-            "-pool", str(reads_list_file),
+            "-pool", str(reads_list_rel),
             "-t", str(self.threads),
-            "-outdir", str(output_dir),
+            "-outdir", str(output_dir_rel),
             "-length", str(min_length)
         ]
         
@@ -209,9 +213,10 @@ class RNABloomAssembler:
         
         logger.info(f"RNA-Bloom pooled command: {' '.join(cmd)}")
         
-        # Run RNA-Bloom
+        # Run RNA-Bloom from parent directory so it can find the reads list file
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(output_dir))
+            parent_dir = output_dir.parent
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(parent_dir))
             
             if result.returncode != 0:
                 logger.error(f"RNA-Bloom failed with return code {result.returncode}")
