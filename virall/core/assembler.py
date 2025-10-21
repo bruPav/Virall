@@ -142,6 +142,38 @@ class ViralAssembler:
         logger.info("No single-cell patterns detected, treating as bulk RNA-seq")
         return False
     
+    def _combine_transcript_files(self, long_file: str, short_file: str, output_file: Path) -> None:
+        """
+        Combine long and short transcript files for comprehensive viral identification.
+        
+        Args:
+            long_file: Path to long transcripts file
+            short_file: Path to short transcripts file  
+            output_file: Path to combined output file
+        """
+        logger.info(f"Combining long and short transcripts for comprehensive viral identification")
+        
+        from Bio import SeqIO
+        
+        # Read all sequences from both files
+        all_sequences = []
+        
+        # Add long transcripts
+        if Path(long_file).exists():
+            for record in SeqIO.parse(long_file, "fasta"):
+                all_sequences.append(record)
+            logger.info(f"Added {len(list(SeqIO.parse(long_file, 'fasta')))} long transcripts")
+        
+        # Add short transcripts
+        if Path(short_file).exists():
+            for record in SeqIO.parse(short_file, "fasta"):
+                all_sequences.append(record)
+            logger.info(f"Added {len(list(SeqIO.parse(short_file, 'fasta')))} short transcripts")
+        
+        # Write combined file
+        SeqIO.write(all_sequences, output_file, "fasta")
+        logger.info(f"Combined {len(all_sequences)} transcripts into {output_file}")
+    
     def _find_installation_directory(self) -> Path:
         """Find the actual installation directory where databases are located."""
         # Start from the current file location
@@ -766,10 +798,24 @@ class ViralAssembler:
                     )
                 
                 # Convert RNA-Bloom output format to expected format
-                return {
-                    "contigs": results.get("transcripts", ""),
-                    "scaffolds": results.get("transcripts_nr", results.get("transcripts", ""))
-                }
+                # For RNA-seq, we should use both long and short transcripts
+                transcripts_file = results.get("transcripts", "")
+                transcripts_short_file = results.get("transcripts_short", "")
+                
+                # If we have both long and short transcripts, combine them for viral identification
+                if transcripts_file and transcripts_short_file and Path(transcripts_file).exists() and Path(transcripts_short_file).exists():
+                    # Create a combined file with both long and short transcripts
+                    combined_file = output_dir / "combined_transcripts.fa"
+                    self._combine_transcript_files(transcripts_file, transcripts_short_file, combined_file)
+                    return {
+                        "contigs": str(combined_file),
+                        "scaffolds": results.get("transcripts_nr", transcripts_file)
+                    }
+                else:
+                    return {
+                        "contigs": transcripts_file,
+                        "scaffolds": results.get("transcripts_nr", transcripts_file)
+                    }
                 
             except Exception as e:
                 logger.warning(f"RNA-Bloom assembly failed: {e}")
