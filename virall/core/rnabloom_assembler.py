@@ -691,9 +691,11 @@ class RNABloomAssembler:
         found_files = []
         for subdir in output_dir.iterdir():
             if subdir.is_dir() and not subdir.name.startswith('.'):
-                file_path = subdir / filename
-                if file_path.exists():
-                    found_files.append(file_path)
+                # RNA-Bloom creates files with cell prefix (e.g., cell_1.transcripts.fa)
+                cell_file = subdir / f"{subdir.name}.{filename}"
+                if cell_file.exists():
+                    found_files.append(cell_file)
+                    logger.info(f"Found {filename} file: {cell_file}")
         
         if found_files:
             # Combine all files from different cells
