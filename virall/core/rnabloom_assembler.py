@@ -106,9 +106,10 @@ class RNABloomAssembler:
             cmd.extend(["-ref", reference])
             logger.info(f"Using reference-guided assembly with {reference}")
         
-        # Add memory settings
+        # Add memory settings (convert from "16G" to "16")
         if self.memory:
-            cmd.extend(["-mem", self.memory])
+            memory_value = self.memory.replace('G', '').replace('g', '').replace('M', '').replace('m', '')
+            cmd.extend(["-mem", memory_value])
         
         logger.info(f"RNA-Bloom command: {' '.join(cmd)}")
         
@@ -192,9 +193,10 @@ class RNABloomAssembler:
             cmd.extend(["-ref", reference])
             logger.info(f"Using reference-guided assembly with {reference}")
         
-        # Add memory settings
+        # Add memory settings (convert from "16G" to "16")
         if self.memory:
-            cmd.extend(["-mem", self.memory])
+            memory_value = self.memory.replace('G', '').replace('g', '').replace('M', '').replace('m', '')
+            cmd.extend(["-mem", memory_value])
         
         logger.info(f"RNA-Bloom command: {' '.join(cmd)}")
         
@@ -279,9 +281,10 @@ class RNABloomAssembler:
                 cmd.extend(["-ser", short_reads_reverse])
             logger.info("Including short reads for polishing")
         
-        # Add memory settings
+        # Add memory settings (convert from "16G" to "16")
         if self.memory:
-            cmd.extend(["-mem", self.memory])
+            memory_value = self.memory.replace('G', '').replace('g', '').replace('M', '').replace('m', '')
+            cmd.extend(["-mem", memory_value])
         
         logger.info(f"RNA-Bloom command: {' '.join(cmd)}")
         
@@ -360,9 +363,10 @@ class RNABloomAssembler:
             cmd.append("-stranded")
             logger.info("Using stranded assembly for hybrid data")
         
-        # Add memory settings
+        # Add memory settings (convert from "16G" to "16")
         if self.memory:
-            cmd.extend(["-mem", self.memory])
+            memory_value = self.memory.replace('G', '').replace('g', '').replace('M', '').replace('m', '')
+            cmd.extend(["-mem", memory_value])
         
         logger.info(f"RNA-Bloom command: {' '.join(cmd)}")
         
@@ -466,9 +470,10 @@ class RNABloomAssembler:
             cmd.extend(["-ref", reference])
             logger.info(f"Using reference-guided assembly with {reference}")
         
-        # Add memory settings
+        # Add memory settings (convert from "16G" to "16")
         if self.memory:
-            cmd.extend(["-mem", self.memory])
+            memory_value = self.memory.replace('G', '').replace('g', '').replace('M', '').replace('m', '')
+            cmd.extend(["-mem", memory_value])
         
         logger.info(f"RNA-Bloom command: {' '.join(cmd)}")
         

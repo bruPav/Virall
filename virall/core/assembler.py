@@ -114,8 +114,14 @@ class ViralAssembler:
         for read_type, read_path in reads.items():
             if read_type in ["short_1", "short_2"] and read_path:
                 try:
-                    # Read first few lines to check for cell barcode patterns
-                    with open(read_path, 'r') as f:
+                    # Handle gzipped files
+                    import gzip
+                    if str(read_path).endswith('.gz'):
+                        f = gzip.open(read_path, 'rt')
+                    else:
+                        f = open(read_path, 'r')
+                    
+                    with f:
                         for i, line in enumerate(f):
                             if i >= 10:  # Check first 10 reads
                                 break
