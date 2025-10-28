@@ -128,7 +128,7 @@ class VOGAnnotator:
             self.vog_hmm = self.vog_db_path / "vog.hmm"
             
             if not self.vog_hmm.exists():
-                logger.error(f"VOG HMM database not found in {self.vog_db_path}")
+                logger.info(f"VOG HMM database not found in {self.vog_db_path} - will be downloaded during setup")
                 self.vog_db_path = None
                 return
             

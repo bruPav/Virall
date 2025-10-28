@@ -269,7 +269,7 @@ fi
 
 # Verify CheckV database was downloaded successfully
 # Check if the database directory exists and has actual content (not just empty files)
-if [ ! -d "$CHECKV_DB_DIR" ] || [ -z "$(ls -A $CHECKV_DB_DIR 2>/dev/null)" ] || [ ! -s "$CHECKV_DB_DIR/checkv-db.tar.gz" ]; then
+if [ ! -d "$CHECKV_DB_DIR" ] || [ -z "$(ls -A $CHECKV_DB_DIR 2>/dev/null)" ]; then
     echo ""
     echo "CheckV database setup failed or incomplete. Trying manual download as fallback..."
     echo "This may take 10-30 minutes depending on your internet connection"
