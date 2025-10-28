@@ -167,7 +167,7 @@ output_dir/
 │   └── viral_scaffolds.fasta
 ├── 03_classifications/                 # Kaiju results
 │   └── kaiju_summary.tsv
-├── 04_quality_assessment/              # QUAST/CheckV results
+├── 04_quality_assessment/              # CheckV results
 ├── 05_gene_predictions/                # Prodigal + VOG annotations
 ├── 06_quantification/                  # Read mapping and abundance
 └── logs/                               # Pipeline logs (if enabled)

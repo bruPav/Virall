@@ -1136,11 +1136,7 @@ class ViralAssembler:
         """Validate and assess quality of assembled viral genomes."""
         validation_results = {}
         
-        # Run hybrid QUAST evaluation if assembly directory is provided
-        if assembly_dir and assembly_dir.exists():
-            logger.info("Running hybrid QUAST evaluation (assembly + viral)")
-            hybrid_quast = self.validator.run_hybrid_quast(assembly_dir, viral_genomes)
-            validation_results["hybrid_quast"] = hybrid_quast
+        # Assembly quality evaluation removed
         
         # Individual viral genome validation
         for genome_file in viral_genomes:
@@ -1156,11 +1152,7 @@ class ViralAssembler:
             checkv_output_dir = quality_assessment_dir / "checkv_results" / Path(genome_file).stem
             checkv_results = self.validator.run_checkv(genome_file, output_dir=str(checkv_output_dir))
             
-            # Run individual QUAST for each viral file
-            quast_results = self.validator.run_quast(genome_file)
-            
             validation_results[genome_file] = {
-                "quast": quast_results,
                 "checkv": checkv_results,
                 "statistics": stats
             }
@@ -1876,16 +1868,10 @@ class ViralAssembler:
         """
         logger.info("Evaluating reference-guided assembly")
         
-        # Run QUAST with reference
+        # Run CheckV with reference
         quality_assessment_dir = self.output_dir / "04_quality_assessment"
         quality_assessment_dir.mkdir(parents=True, exist_ok=True)
-        quast_results = self.validator.run_quast(
-            assembly_results["contigs"],
-            reference=str(reference),
-            output_dir=str(quality_assessment_dir / "reference_quast")
-        )
         
-        # Run CheckV on the assembly
         checkv_results = self.validator.run_checkv(
             assembly_results["contigs"],
             output_dir=str(quality_assessment_dir / "reference_checkv")
@@ -1896,7 +1882,6 @@ class ViralAssembler:
         
         # Determine if assembly was successful
         success = (
-            quast_results.get("status") == "completed" and
             stats.get("num_contigs", 0) > 0
         )
         
@@ -1909,7 +1894,6 @@ class ViralAssembler:
             "reference_genome": str(reference),
             "assembly_dir": str(self.output_dir),
             "assembly_files": assembly_results,
-            "quast_results": quast_results,
             "checkv_results": checkv_results,
             "statistics": stats,
             "viral_genomes": [assembly_results["contigs"]] if success else [],

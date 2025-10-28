@@ -157,25 +157,7 @@ else:
     fi
 fi
 
-echo "Creating QUAST environment (optional - for assembly quality assessment)..."
-if conda create -n quast_env -y python=3.9; then
-    echo "QUAST environment created successfully"
-    echo "Installing QUAST..."
-    # Try installing QUAST with mamba for better dependency resolution
-    if conda run -n quast_env mamba install -c bioconda -c conda-forge quast -y; then
-        echo "QUAST installed successfully"
-    else
-        echo "Warning: QUAST installation failed, trying alternative approach..."
-        # Fallback: install without strict dependency resolution
-        if conda run -n quast_env conda install -c bioconda quast --no-deps -y; then
-            echo "QUAST installed with minimal dependencies"
-        else
-            echo "Warning: QUAST installation completely failed"
-        fi
-    fi
-else
-    echo "Warning: Failed to create QUAST environment"
-fi
+# Assembly quality assessment installation removed
 
 echo "Installing Kaiju for viral contig classification..."
 if conda install -c bioconda kaiju -y; then

@@ -25,7 +25,7 @@ viral_identification:
 # Validation parameters
 validation:
   run_checkv: true
-  run_quast: true
+  # Assembly quality assessment removed
 
 # Performance parameters
 performance:

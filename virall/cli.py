@@ -84,7 +84,7 @@ def assemble(
     This command performs:
     1. Assembly (SPAdes/Flye based on read type)
     2. Viral contig identification (Kaiju)
-    3. Basic assembly validation (QUAST)
+    3. Basic assembly validation
     
     Note: No preprocessing is performed - use preprocessed reads as input.
     Output: Assembled contigs and viral contigs ready for annotation.
@@ -180,7 +180,7 @@ def assemble(
         # Viral contig identification from assembled contigs
         viral_contig_results = assembler._identify_viral_contigs_efficiently(assembly_results)
 
-        # Basic validation (QUAST)
+        # Basic validation
         validation_results = assembler._validate_assemblies(
             viral_contig_results.get("viral_genomes", []),
             assembly_dir=assembler.output_dir / "01_assemblies"
@@ -220,13 +220,12 @@ def assemble(
                 click.echo(f"Minimap2 hits to reference: {num_reference_hits}")
                 click.echo(f"Total assembled contigs: {total_viral_contigs}")
                 
-                # Display QUAST results
-                quast_results = results.get('quast_results', {})
-                if quast_results.get('status') == 'completed':
-                    click.echo(f"\nQUAST Results (with reference):")
-                    for key, value in quast_results.items():
-                        if key not in ['status', 'output_directory']:
-                            click.echo(f"  {key}: {value}")
+                # Display assembly statistics
+                stats = results.get('statistics', {})
+                if stats:
+                    click.echo(f"\nAssembly Statistics (with reference):")
+                    for key, value in stats.items():
+                        click.echo(f"  {key}: {value}")
                 
                 # Display CheckV results
                 checkv_results = results.get('checkv_results', {})
@@ -334,31 +333,12 @@ def assemble(
             if 'validation_results' in results:
                 click.echo("\nValidation Results:")
                 
-                # Display hybrid QUAST results if available
-                if 'hybrid_quast' in results['validation_results']:
-                    hybrid_quast = results['validation_results']['hybrid_quast']
-                    click.echo("\nHybrid QUAST Evaluation:")
-                    if hybrid_quast.get('status') == 'completed':
-                        click.echo("  Assembly Quality Assessment: Completed")
-                        assembly_quality = hybrid_quast.get('assembly_quality', {})
-                        if assembly_quality.get('status') == 'completed':
-                            click.echo(f"    Assembly files evaluated: {len(assembly_quality.get('assembly_files', []))}")
-                            click.echo(f"    Labels: {', '.join(assembly_quality.get('labels', []))}")
-                        
-                        viral_quality = hybrid_quast.get('viral_quality', {})
-                        if viral_quality.get('status') == 'completed':
-                            click.echo("  Viral Contig Quality Assessment: Completed")
-                            click.echo(f"    Viral files evaluated: {len(viral_quality.get('viral_files', []))}")
-                        elif viral_quality.get('status') == 'skipped':
-                            click.echo(f"  Viral Contig Quality Assessment: Skipped - {viral_quality.get('reason', 'Unknown reason')}")
-                    else:
-                        click.echo(f"  Hybrid QUAST: Failed - {hybrid_quast.get('error', 'Unknown error')}")
+                # Assembly quality evaluation removed
                 
                 # Display individual genome validation results
                 if 'validation_results' in results:
                     for genome_file, validation in results['validation_results'].items():
-                        if genome_file == 'hybrid_quast':
-                            continue  # Skip hybrid QUAST as it's handled above
+                        # Skip any special validation entries
                             
                         genome_name = Path(genome_file).stem
                         click.echo(f"\n{genome_name}:")
@@ -380,17 +360,12 @@ def assemble(
                         else:
                             click.echo(f"  CheckV: Failed - {checkv_results.get('error', 'Unknown error')}")
                         
-                        # Display QUAST results
-                        quast_results = validation.get('quast', {})
-                        if quast_results.get('status') == 'completed':
-                            click.echo("  QUAST Results: Completed")
-                            for key, value in quast_results.items():
-                                if key not in ['status', 'output_directory']:
-                                    click.echo(f"    {key}: {value}")
-                        elif quast_results.get('status') == 'failed':
-                            click.echo(f"  QUAST Results: Failed - {quast_results.get('error', 'Unknown error')}")
-                        else:
-                            click.echo(f"  QUAST Results: Skipped")
+                        # Display assembly statistics
+                        stats = validation.get('statistics', {})
+                        if stats:
+                            click.echo("  Assembly Statistics:")
+                            for key, value in stats.items():
+                                click.echo(f"    {key}: {value}")
                 
                 # Display gene prediction results
                 if 'gene_predictions' in results and results['gene_predictions'].get('status') == 'completed':
@@ -493,7 +468,7 @@ def analyse(
     2. Assembly (SPAdes)
     3. Viral contig identification (Kaiju)
     4. Gene prediction and annotation (Prodigal + VOG)
-    5. Validation and quantification (QUAST + BWA)
+    5. Validation and quantification (CheckV + BWA)
     """
     
     # Validate input files
@@ -615,7 +590,7 @@ def analyse(
         click.echo(f"  01_assemblies/          - Assembly outputs (contigs, scaffolds)")
         click.echo(f"  02_viral_contigs/       - Viral-specific contig files")
         click.echo(f"  03_classifications/     - Classification results (Kaiju)")
-        click.echo(f"  04_quality_assessment/  - Quality metrics (CheckV, QUAST)")
+        click.echo(f"  04_quality_assessment/  - Quality metrics (CheckV)")
         click.echo(f"  05_gene_predictions/    - Gene prediction and annotation")
         click.echo(f"  06_quantification/      - Read mapping and abundance")
         
@@ -652,17 +627,12 @@ def analyse(
                 genome_name = Path(genome_file).stem
                 click.echo(f"\n{genome_name}:")
                 
-                # Display QUAST results
-                quast_results = validation.get('quast', {})
-                if quast_results.get('status') == 'completed':
-                    click.echo(f"  QUAST results: Completed")
-                    for key, value in quast_results.items():
-                        if key not in ['status', 'output_directory']:
-                            click.echo(f"    {key}: {value}")
-                elif quast_results.get('status') == 'failed':
-                    click.echo(f"  QUAST results: Failed - {quast_results.get('error', 'Unknown error')}")
-                else:
-                    click.echo(f"  QUAST results: Skipped")
+                # Display assembly statistics
+                stats = validation.get('statistics', {})
+                if stats:
+                    click.echo(f"  Assembly statistics:")
+                    for key, value in stats.items():
+                        click.echo(f"    {key}: {value}")
         
         # Display gene prediction results
         if 'gene_prediction_results' in results:
@@ -874,7 +844,7 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
 @click.option('--genome', '-g', required=True, help='Genome file to validate')
 @click.option('--output-dir', '-o', help='Output directory for validation results')
 @click.option('--reference', help='Reference genome for comparison')
-@click.option('--assembly-dir', help='Optional assembly directory for comprehensive QUAST')
+@click.option('--assembly-dir', help='Optional assembly directory for comparative statistics')
 @click.option('--threads', '-t', default=8, help='Number of threads')
 def validate(genome: str, output_dir: Optional[str], reference: Optional[str], assembly_dir: Optional[str], threads: int):
     """Validate and assess quality of assembled viral genomes."""
@@ -887,21 +857,15 @@ def validate(genome: str, output_dir: Optional[str], reference: Optional[str], a
         # Initialize validator
         validator = AssemblyValidator(threads=threads)
         
-        # Run comprehensive QUAST if assembly directory is provided
-        if assembly_dir and Path(assembly_dir).exists():
-            click.echo("Running comprehensive QUAST evaluation...")
-            comprehensive_quast = validator.run_comprehensive_quast(Path(assembly_dir), f"{output_dir}/comprehensive_quast" if output_dir else None)
-            click.echo(f"Comprehensive QUAST: {comprehensive_quast.get('status', 'Unknown')}")
+        # Assembly quality evaluation removed
         
         # Run validation tools
         if output_dir:
             # Create output directory if specified
             Path(output_dir).mkdir(parents=True, exist_ok=True)
-            quast_results = validator.run_quast(genome, reference=reference, output_dir=f"{output_dir}/quast")
             checkv_results = validator.run_checkv(genome, output_dir=f"{output_dir}/checkv")
         else:
-            quast_results = validator.run_quast(genome, reference=reference)
-        checkv_results = validator.run_checkv(genome)
+            checkv_results = validator.run_checkv(genome)
         stats = validator.calculate_genome_statistics(genome)
         
         # Print results
@@ -929,11 +893,9 @@ def validate(genome: str, output_dir: Optional[str], reference: Optional[str], a
         else:
             click.echo(f"\nCheckV: Failed - {checkv_results.get('error', 'Unknown error')}")
         
-        if quast_results.get("status") == "completed":
-            click.echo("\nQUAST Results:")
-            for key, value in quast_results.items():
-                if key != "status":
-                    click.echo(f"  {key}: {value}")
+        click.echo("\nAssembly Statistics:")
+        for key, value in stats.items():
+            click.echo(f"  {key}: {value}")
         
         # Generate report if output directory specified
         if output_dir:
