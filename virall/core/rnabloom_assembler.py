@@ -259,7 +259,7 @@ class RNABloomAssembler:
         # In a full implementation, this would parse cell barcodes and create separate entries
         with open(output_file, 'w') as f:
             f.write("#name left right\n")
-            f.write(f"cell_1 {r1_file} {r2_file}\n")
+            f.write(f"pooled {r1_file} {r2_file}\n")
         
         logger.info(f"Created reads list: {output_file}")
     
