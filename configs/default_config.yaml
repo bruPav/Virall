@@ -11,7 +11,7 @@ assembly:
 quality_control:
   quality_threshold: 20
   min_read_length: 50
-  trim_adapters: true
+  trim_adapters: true  # Uses fastp with automatic adapter detection (no adapter files needed)
   error_correction: true
 
 # Viral identification parameters

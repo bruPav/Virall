@@ -77,7 +77,7 @@ class Preprocessor:
         min_length: int = 1000
     ) -> str:
         """
-        Process long reads (PacBio/ONT) with quality control and trimming.
+        Process long reads (PacBio/ONT) with quality control and trimming using fastplong.
         
         Args:
             reads: Path to long reads
@@ -89,28 +89,30 @@ class Preprocessor:
         """
         logger.info(f"Processing long reads: {reads}")
         
-        # Quality control
-        self._run_fastqc(reads)
-        
-        # Adapter trimming (for ONT reads)
-        trimmed_reads = reads
+        # Use fastplong for all-in-one QC, adapter detection, and trimming
         try:
-            if self._should_trim_ont_by_detection(reads):
-                trimmed_reads = self._trim_ont_adapters(reads)
+            trimmed_reads = self._trim_long_reads_fastplong(reads, quality_threshold, min_length)
         except Exception as e:
-            logger.warning(f"ONT adapter detection failed ({e}); continuing without adapter trimming")
-        
-        # Quality filtering
-        filtered_reads = self._filter_long_reads(
-            trimmed_reads, quality_threshold, min_length
-        )
+            logger.warning(f"fastplong failed ({e}); falling back to Porechop/manual filtering")
+            # Fallback to old method
+            trimmed_reads = reads
+            try:
+                if self._should_trim_ont_by_detection(reads):
+                    trimmed_reads = self._trim_ont_adapters(reads)
+            except Exception as e2:
+                logger.warning(f"ONT adapter detection also failed ({e2}); continuing without adapter trimming")
+            
+            # Quality filtering
+            trimmed_reads = self._filter_long_reads(
+                trimmed_reads, quality_threshold, min_length
+            )
         
         # Error correction (optional)
         if self._should_correct_long_reads():
-            corrected_reads = self._correct_long_reads(filtered_reads)
+            corrected_reads = self._correct_long_reads(trimmed_reads)
             return corrected_reads
         
-        return filtered_reads
+        return trimmed_reads
     
     def process_single_reads(
         self, 
@@ -173,39 +175,65 @@ class Preprocessor:
         quality_threshold: int,
         min_length: int
     ) -> Tuple[str, str]:
-        """Trim paired-end reads with Trimmomatic."""
-        logger.info("Trimming paired-end reads with Trimmomatic")
+        """Trim paired-end reads with fastp (automatic adapter detection)."""
+        logger.info("Trimming paired-end reads with fastp (automatic adapter detection)")
         
         output_1 = self.temp_dir / "trimmed_1.fastq.gz"
         output_2 = self.temp_dir / "trimmed_2.fastq.gz"
         output_1_plain = self.temp_dir / "trimmed_1.fastq"
         output_2_plain = self.temp_dir / "trimmed_2.fastq"
-        unpaired_1 = self.temp_dir / "unpaired_1.fastq.gz"
-        unpaired_2 = self.temp_dir / "unpaired_2.fastq.gz"
         
+        # fastp HTML and JSON reports
+        fastp_html = self.temp_dir / "fastp_report.html"
+        fastp_json = self.temp_dir / "fastp_report.json"
+        
+        # Build fastp command with automatic adapter detection
         cmd = [
-            "trimmomatic",
-            "PE",
-            "-threads", str(self.threads),
-            reads_1, reads_2,
-            str(output_1), str(unpaired_1),
-            str(output_2), str(unpaired_2),
-            f"LEADING:{quality_threshold}",
-            f"TRAILING:{quality_threshold}",
-            f"SLIDINGWINDOW:4:{quality_threshold}",
-            f"MINLEN:{min_length}",
-            "ILLUMINACLIP:TruSeq3-PE.fa:2:30:10"
+            "fastp",
+            "-i", reads_1,
+            "-I", reads_2,
+            "-o", str(output_1),
+            "-O", str(output_2),
+            "--thread", str(self.threads),
+            "--qualified_quality_phred", str(quality_threshold),
+            "--length_required", str(min_length),
+            "--html", str(fastp_html),
+            "--json", str(fastp_json),
+            # Automatic adapter detection and trimming
+            "--detect_adapter_for_pe",
+            # Quality filtering (qualified_quality_phred enables quality filtering)
+            # Per-read quality cutting
+            "--cut_front",  # Remove low quality bases from 5' end
+            "--cut_tail",   # Remove low quality bases from 3' end
+            "--cut_mean_quality", str(quality_threshold),
+            "--cut_window_size", "4",
+            # Overlap analysis and correction for PE data
+            "--correction",
+            "--overlap_len_require", "30",
+            "--overlap_diff_limit", "5",
+            # PolyG tail trimming (common in Illumina)
+            "--trim_poly_g",
+            "--poly_g_min_len", "10"
         ]
         
-        # Set Java heap space for Trimmomatic
-        env = os.environ.copy()
-        env['_JAVA_OPTIONS'] = '-Xmx8g'
+        # Check if fastp is available, fallback to Trimmomatic
+        if not self._check_tool_available("fastp"):
+            logger.warning("fastp not available, falling back to Trimmomatic")
+            return self._trim_paired_reads_trimmomatic(
+                reads_1, reads_2, quality_threshold, min_length
+            )
         
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"Trimmomatic failed: {result.stderr}")
+            logger.error(f"fastp failed: {result.stderr}")
+            # Fallback to Trimmomatic
+            logger.info("Falling back to Trimmomatic")
+            return self._trim_paired_reads_trimmomatic(
+                reads_1, reads_2, quality_threshold, min_length
+            )
         
-        logger.info("Paired-end trimming completed")
+        logger.info("fastp paired-end trimming completed (with automatic adapter detection)")
+        logger.info(f"Quality reports saved: {fastp_html}, {fastp_json}")
 
         # Also write plain FASTQ copies alongside gzipped outputs
         try:
@@ -223,34 +251,56 @@ class Preprocessor:
         quality_threshold: int,
         min_length: int
     ) -> str:
-        """Trim single-end reads with Trimmomatic."""
-        logger.info("Trimming single-end reads with Trimmomatic")
+        """Trim single-end reads with fastp (automatic adapter detection)."""
+        logger.info("Trimming single-end reads with fastp (automatic adapter detection)")
         
         output = self.temp_dir / "trimmed_single.fastq.gz"
         output_plain = self.temp_dir / "trimmed_single.fastq"
         
+        # fastp HTML and JSON reports
+        fastp_html = self.temp_dir / "fastp_report_single.html"
+        fastp_json = self.temp_dir / "fastp_report_single.json"
+        
+        # Build fastp command with automatic adapter detection
         cmd = [
-            "trimmomatic",
-            "SE",
-            "-threads", str(self.threads),
-            reads,
-            str(output),
-            f"LEADING:{quality_threshold}",
-            f"TRAILING:{quality_threshold}",
-            f"SLIDINGWINDOW:4:{quality_threshold}",
-            f"MINLEN:{min_length}",
-            "ILLUMINACLIP:TruSeq3-SE.fa:2:30:10"
+            "fastp",
+            "-i", reads,
+            "-o", str(output),
+            "--thread", str(self.threads),
+            "--qualified_quality_phred", str(quality_threshold),
+            "--length_required", str(min_length),
+            "--html", str(fastp_html),
+            "--json", str(fastp_json),
+            # Automatic adapter detection (enabled by default for single-end reads)
+            # Quality filtering (qualified_quality_phred enables quality filtering)
+            # Per-read quality cutting
+            "--cut_front",  # Remove low quality bases from 5' end
+            "--cut_tail",   # Remove low quality bases from 3' end
+            "--cut_mean_quality", str(quality_threshold),
+            "--cut_window_size", "4",
+            # PolyG tail trimming (common in Illumina)
+            "--trim_poly_g",
+            "--poly_g_min_len", "10"
         ]
         
-        # Set Java heap space for Trimmomatic
-        env = os.environ.copy()
-        env['_JAVA_OPTIONS'] = '-Xmx8g'
+        # Check if fastp is available, fallback to Trimmomatic
+        if not self._check_tool_available("fastp"):
+            logger.warning("fastp not available, falling back to Trimmomatic")
+            return self._trim_single_reads_trimmomatic(
+                reads, quality_threshold, min_length
+            )
         
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"Trimmomatic failed: {result.stderr}")
+            logger.error(f"fastp failed: {result.stderr}")
+            # Fallback to Trimmomatic
+            logger.info("Falling back to Trimmomatic")
+            return self._trim_single_reads_trimmomatic(
+                reads, quality_threshold, min_length
+            )
         
-        logger.info("Single-end trimming completed")
+        logger.info("fastp single-end trimming completed (with automatic adapter detection)")
+        logger.info(f"Quality reports saved: {fastp_html}, {fastp_json}")
 
         # Also write plain FASTQ copy alongside gzipped output
         try:
@@ -260,9 +310,66 @@ class Preprocessor:
             logger.warning(f"Failed to create plain FASTQ copy: {e}")
         return str(output)
     
+    def _trim_long_reads_fastplong(
+        self,
+        reads: str,
+        quality_threshold: int,
+        min_length: int
+    ) -> str:
+        """Trim long reads using fastplong (automatic adapter detection for ONT/PacBio)."""
+        logger.info("Trimming long reads with fastplong (automatic adapter detection)")
+        
+        output = self.temp_dir / "trimmed_long.fastq"
+        output_gz = self.temp_dir / "trimmed_long.fastq.gz"
+        
+        # fastplong HTML and JSON reports
+        fastplong_html = self.temp_dir / "fastplong_report.html"
+        fastplong_json = self.temp_dir / "fastplong_report.json"
+        
+        # Build fastplong command with automatic adapter detection
+        cmd = [
+            "fastplong",
+            "-i", reads,
+            "-o", str(output),
+            "--thread", str(self.threads),
+            "--qualified_quality_phred", str(quality_threshold),
+            "--length_required", str(min_length),
+            "--html", str(fastplong_html),
+            "--json", str(fastplong_json),
+            # Automatic adapter detection is enabled by default in fastplong
+            # Quality filtering
+            # Per-read quality cutting
+            "--cut_front",  # Remove low quality bases from 5' end
+            "--cut_tail",   # Remove low quality bases from 3' end
+            "--cut_mean_quality", str(quality_threshold),
+            "--cut_window_size", "10"  # Larger window for long reads
+        ]
+        
+        # Check if fastplong is available, fallback to Porechop
+        if not self._check_tool_available("fastplong"):
+            logger.warning("fastplong not available, will fall back to Porechop/manual filtering")
+            raise RuntimeError("fastplong not available")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"fastplong failed: {result.stderr}")
+            raise RuntimeError(f"fastplong failed: {result.stderr}")
+        
+        logger.info("fastplong trimming completed (with automatic adapter detection)")
+        logger.info(f"Quality reports saved: {fastplong_html}, {fastplong_json}")
+
+        # Also create gzipped version
+        try:
+            with open(output, "rb") as fin, gzip.open(output_gz, "wb") as fout:
+                fout.writelines(fin)
+        except Exception as e:
+            logger.warning(f"Failed to create gzipped version: {e}")
+        
+        return str(output)
+    
     def _trim_ont_adapters(self, reads: str) -> str:
-        """Trim ONT adapters using Porechop (write plain + gz FASTQ)."""
-        logger.info("Trimming ONT adapters with Porechop")
+        """Fallback: Trim ONT adapters using Porechop (write plain + gz FASTQ)."""
+        logger.info("Using Porechop fallback for ONT adapter trimming")
         
         output = self.temp_dir / "trimmed_ont.fastq"
         output_gz = self.temp_dir / "trimmed_ont.fastq.gz"
@@ -279,7 +386,7 @@ class Preprocessor:
             logger.warning(f"Porechop failed: {result.stderr}")
             return reads  # Return original if trimming fails
         
-        logger.info("ONT adapter trimming completed")
+        logger.info("ONT adapter trimming completed with Porechop")
 
         # Also gzip a copy
         try:
@@ -443,17 +550,133 @@ class Preprocessor:
         filename = Path(reads).name.lower()
         return "ont" in filename or "nanopore" in filename or "minion" in filename
     
+    def _trim_paired_reads_trimmomatic(
+        self,
+        reads_1: str,
+        reads_2: str,
+        quality_threshold: int,
+        min_length: int
+    ) -> Tuple[str, str]:
+        """Fallback: Trim paired-end reads with Trimmomatic."""
+        logger.info("Using Trimmomatic fallback for paired-end reads")
+        
+        output_1 = self.temp_dir / "trimmed_1.fastq.gz"
+        output_2 = self.temp_dir / "trimmed_2.fastq.gz"
+        output_1_plain = self.temp_dir / "trimmed_1.fastq"
+        output_2_plain = self.temp_dir / "trimmed_2.fastq"
+        unpaired_1 = self.temp_dir / "unpaired_1.fastq.gz"
+        unpaired_2 = self.temp_dir / "unpaired_2.fastq.gz"
+        
+        cmd = [
+            "trimmomatic",
+            "PE",
+            "-threads", str(self.threads),
+            reads_1, reads_2,
+            str(output_1), str(unpaired_1),
+            str(output_2), str(unpaired_2),
+            f"LEADING:{quality_threshold}",
+            f"TRAILING:{quality_threshold}",
+            f"SLIDINGWINDOW:4:{quality_threshold}",
+            f"MINLEN:{min_length}",
+            "ILLUMINACLIP:TruSeq3-PE.fa:2:30:10"
+        ]
+        
+        env = os.environ.copy()
+        env['_JAVA_OPTIONS'] = '-Xmx8g'
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        if result.returncode != 0:
+            raise RuntimeError(f"Trimmomatic failed: {result.stderr}")
+        
+        # Also write plain FASTQ copies
+        try:
+            with gzip.open(output_1, "rt") as fin, open(output_1_plain, "w") as fout:
+                shutil.copyfileobj(fin, fout)
+            with gzip.open(output_2, "rt") as fin, open(output_2_plain, "w") as fout:
+                shutil.copyfileobj(fin, fout)
+        except Exception as e:
+            logger.warning(f"Failed to create plain FASTQ copies: {e}")
+        
+        return str(output_1), str(output_2)
+    
+    def _trim_single_reads_trimmomatic(
+        self,
+        reads: str,
+        quality_threshold: int,
+        min_length: int
+    ) -> str:
+        """Fallback: Trim single-end reads with Trimmomatic."""
+        logger.info("Using Trimmomatic fallback for single-end reads")
+        
+        output = self.temp_dir / "trimmed_single.fastq.gz"
+        output_plain = self.temp_dir / "trimmed_single.fastq"
+        
+        cmd = [
+            "trimmomatic",
+            "SE",
+            "-threads", str(self.threads),
+            reads,
+            str(output),
+            f"LEADING:{quality_threshold}",
+            f"TRAILING:{quality_threshold}",
+            f"SLIDINGWINDOW:4:{quality_threshold}",
+            f"MINLEN:{min_length}",
+            "ILLUMINACLIP:TruSeq3-SE.fa:2:30:10"
+        ]
+        
+        env = os.environ.copy()
+        env['_JAVA_OPTIONS'] = '-Xmx8g'
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        if result.returncode != 0:
+            raise RuntimeError(f"Trimmomatic failed: {result.stderr}")
+        
+        # Also write plain FASTQ copy
+        try:
+            with gzip.open(output, "rt") as fin, open(output_plain, "w") as fout:
+                shutil.copyfileobj(fin, fout)
+        except Exception as e:
+            logger.warning(f"Failed to create plain FASTQ copy: {e}")
+        
+        return str(output)
+    
+    def _check_tool_available(self, tool: str) -> bool:
+        """Check if a tool is available in PATH."""
+        result = subprocess.run(
+            ["which", tool],
+            capture_output=True,
+            text=True
+        )
+        return result.returncode == 0
+    
     def get_quality_report(self) -> Dict:
-        """Get quality control report from FastQC results."""
+        """Get quality control report from FastQC/fastp/fastplong results."""
         report = {}
         
-        # Parse FastQC results (simplified)
-        fastqc_dir = self.temp_dir
-        for file in fastqc_dir.glob("*.html"):
+        # Check for fastp reports (short reads)
+        for file in self.temp_dir.glob("fastp_report*.html"):
             report[file.stem] = {
                 "status": "completed",
-                "report_file": str(file)
+                "report_file": str(file),
+                "type": "fastp"
             }
+        
+        # Check for fastplong reports (long reads)
+        for file in self.temp_dir.glob("fastplong_report*.html"):
+            report[file.stem] = {
+                "status": "completed",
+                "report_file": str(file),
+                "type": "fastplong"
+            }
+        
+        # Also include FastQC reports if present
+        for file in self.temp_dir.glob("*.html"):
+            if "fastp" not in file.stem and "fastplong" not in file.stem:
+                report[file.stem] = {
+                    "status": "completed",
+                    "report_file": str(file),
+                    "type": "fastqc"
+                }
         
         return report
     

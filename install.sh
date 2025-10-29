@@ -78,7 +78,7 @@ conda install -c conda-forge -y click tqdm pyyaml loguru psutil
 # Install bioinformatics tools
 echo "Installing bioinformatics tools..."
 conda install -c bioconda -y spades bwa samtools minimap2 flye
-conda install -c bioconda -y fastqc trimmomatic
+conda install -c bioconda -y fastqc fastp fastplong trimmomatic
 conda install -c bioconda -y checkv
 # Minimal extras needed by the pipeline
 conda install -c bioconda -y hmmer prodigal

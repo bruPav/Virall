@@ -16,11 +16,15 @@ flowchart TD
     F --> H[Single-Cell Preprocessing]
     
     %% Standard Preprocessing
-    G --> I[Quality Control<br/>FastQC]
-    I --> J[Adapter Trimming<br/>Trimmomatic]
-    J --> K{Quality Threshold<br/>>=20 Phred}
+    G --> I{Read Type}
+    I -->|Short Reads| J[Quality Control & Adapter Trimming<br/>fastp<br/>Automatic Adapter Detection]
+    I -->|Long Reads| J2[Quality Control & Adapter Trimming<br/>fastplong<br/>Automatic Adapter Detection]
+    J --> K{Quality Threshold<br/>>=20 Phred Short}
+    J2 --> K2{Quality Threshold<br/>>=7 Phred Long}
     K -->|Pass| L[Error Correction<br/>SPAdes]
     K -->|Fail| M[Discard Reads]
+    K2 -->|Pass| L
+    K2 -->|Fail| M
     L --> N[Preprocessed Reads]
     
     %% Single-Cell Preprocessing
@@ -96,8 +100,8 @@ flowchart TD
     classDef viral fill:#ffebee,stroke:#c62828,stroke-width:2px
     
     class A,C,D,E,F input
-    class G,H,I,J,L,O,P,Q,R,S process
-    class B,K,U,PP decision
+    class G,H,J,J2,L,O,P,Q,R,S process
+    class B,I,K,K2,U,PP decision
     class UU,VV,WW,XX output
     class EE,FF,GG,HH,II,JJ,KK viral
 ```
@@ -109,9 +113,11 @@ flowchart TD
 - Automatic read type detection and routing to appropriate preprocessing pipelines
 
 ### 2. **Preprocessing**
-- **Standard Pipeline**: FastQC → Trimmomatic → Error Correction
+- **Short Reads**: fastp (QC + automatic adapter detection + trimming) → Error Correction
+- **Long Reads**: fastplong (QC + automatic adapter detection + trimming for ONT/PacBio) → Error Correction
 - **Single-Cell Pipeline**: Cell barcode extraction → UMI processing → Read restructuring
-- Quality filtering with configurable thresholds (default: Phred ≥20)
+- Quality filtering with configurable thresholds (default: Phred ≥20 for short, ≥7 for long)
+- Both fastp and fastplong automatically detect and trim adapters without requiring adapter sequence files
 
 ### 3. **Assembly**
 - **Hybrid**: Combines short and long reads using SPAdes + Flye
