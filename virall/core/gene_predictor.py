@@ -71,11 +71,10 @@ class ViralGenePredictor:
                     # Check if it's RNA mode by looking at the classification method
                     if 'rna' in str(classification.get('classification_method', '')).lower():
                         is_rna_mode = True
-                # Also check for the old classification_method field
-                elif classification.get('classification_method') == 'kaiju_rna_mode':
-                    is_rna_mode = True
+                # Also check for the classification_method field
+                elif classification.get('classification_method') == 'kaiju_contigs_mode':
                     is_kaiju_mode = True
-                elif classification.get('classification_method') in ['kaiju_dna_mode', 'kaiju_rna_mode']:
+                elif classification.get('classification_method') in ['kaiju_dna_mode', 'kaiju_rna_mode', 'kaiju_contigs_mode']:
                     is_kaiju_mode = True
                 # Check for Kaiju-specific fields
                 elif 'taxon_id' in classification and 'taxon_name' in classification:

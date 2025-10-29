@@ -319,7 +319,7 @@ class ViralAssembler:
                 if kaiju_result.get("status") == "completed":
                     all_classification_data[f"kaiju_{assembly_type}"] = {
                         "method": "kaiju",
-                        "classification_method": f"kaiju_dna_mode",  # Assume DNA mode for now
+                        "classification_method": "kaiju_contigs_mode",
                         "status": "completed",
                         "classifications": kaiju_result.get("classifications", {}),
                         "summary_file": kaiju_result.get("summary_file", "")

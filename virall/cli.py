@@ -743,7 +743,7 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
                 classification_data = {
                     'kaiju_contigs': {
                         'method': 'kaiju',
-                        'classification_method': 'kaiju_dna_mode',
+                        'classification_method': 'kaiju_contigs_mode',
                         'status': 'completed',
                         'classifications': classifications,
                         'summary_file': kaiju_summary_file
@@ -755,7 +755,7 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
                 classification_data = {
                     'kaiju_contigs': {
                         'method': 'kaiju',
-                        'classification_method': 'kaiju_dna_mode',
+                        'classification_method': 'kaiju_contigs_mode',
                         'status': 'completed',
                         'classifications': {},
                         'summary_file': ''
@@ -766,7 +766,7 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
             classification_data = {
                 'kaiju_contigs': {
                     'method': 'kaiju',
-                    'classification_method': 'kaiju_dna_mode',
+                    'classification_method': 'kaiju_contigs_mode',
                     'status': 'completed',
                     'classifications': {},
                     'summary_file': ''

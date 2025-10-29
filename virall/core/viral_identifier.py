@@ -241,7 +241,7 @@ class ViralIdentifier:
         # Run Kaiju classification on all sequences
         classifications_dir = Path(contigs_file).parent.parent / "03_classifications"
         classifications_dir.mkdir(parents=True, exist_ok=True)
-        kaiju_results = self._run_kaiju_classification(contigs_file, classifications_dir / f"kaiju_{mode.lower()}")
+        kaiju_results = self._run_kaiju_classification(contigs_file, classifications_dir / "kaiju_contigs")
         
         if kaiju_results.get("status") != "completed":
             logger.error(f"Kaiju classification failed: {kaiju_results.get('error', 'Unknown error')}")
@@ -273,7 +273,7 @@ class ViralIdentifier:
         return {
             "viral_contigs": viral_contigs,
             "viral_contig_count": len(viral_contigs),
-            "classification_method": f"kaiju_{mode.lower()}_mode",
+            "classification_method": "kaiju_contigs_mode",
             "kaiju_results": kaiju_results,
             "kaiju_classifications": kaiju_classifications
         }
