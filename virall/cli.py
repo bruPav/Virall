@@ -172,6 +172,12 @@ def assemble(
         if long_reads_path:
             reads_dict["long"] = long_reads_path
 
+        # Store read paths in config for downstream quantification steps
+        assembler.config["short_reads_1"] = reads_dict.get("short_1")
+        assembler.config["short_reads_2"] = reads_dict.get("short_2")
+        assembler.config["single_reads"] = reads_dict.get("single")
+        assembler.config["long_reads"] = reads_dict.get("long")
+
         assembly_results = assembler._perform_assembly(reads_dict, reference)
 
         # Viral contig identification from assembled contigs
