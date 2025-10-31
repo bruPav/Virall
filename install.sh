@@ -77,7 +77,10 @@ conda install -c conda-forge -y click tqdm pyyaml loguru psutil
 
 # Install bioinformatics tools
 echo "Installing bioinformatics tools..."
-conda install -c bioconda -y spades bwa samtools minimap2 flye
+conda install -c bioconda -y spades bwa samtools minimap2
+# Install flye separately with both bioconda and conda-forge channels to avoid dependency conflicts
+echo "Installing flye (with specific channels to avoid dependency conflicts)..."
+mamba install -n virall -c bioconda -c conda-forge flye=2.9.6 -y
 conda install -c bioconda -y fastqc fastp fastplong
 conda install -c bioconda -y checkv bcftools pilon
 # Minimal extras needed by the pipeline
