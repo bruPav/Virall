@@ -87,7 +87,10 @@ fi
 
 # Install bioinformatics tools
 echo "Installing bioinformatics tools..."
-conda install -c bioconda -y spades bwa samtools minimap2
+conda install -c bioconda -y bwa samtools minimap2
+# Install spades separately with both bioconda and conda-forge channels to avoid dependency conflicts
+echo "Installing spades (with specific channels to avoid dependency conflicts)..."
+mamba install -n virall -c conda-forge -c bioconda spades=4.2.0 -y
 # Install flye separately with both bioconda and conda-forge channels to avoid dependency conflicts
 echo "Installing flye (with specific channels to avoid dependency conflicts)..."
 mamba install -n virall -c bioconda -c conda-forge flye=2.9.6 -y

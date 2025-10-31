@@ -289,6 +289,19 @@ class ViralAssembler:
         preprocessed_reads = self._preprocess_reads(
             short_reads_1, short_reads_2, long_reads, single_reads
         )
+        # Make preprocessed read paths available for downstream steps (e.g., quantification)
+        try:
+            if isinstance(preprocessed_reads, dict):
+                if preprocessed_reads.get("short_1"):
+                    self.config["short_reads_1"] = preprocessed_reads.get("short_1")
+                if preprocessed_reads.get("short_2"):
+                    self.config["short_reads_2"] = preprocessed_reads.get("short_2")
+                if preprocessed_reads.get("single"):
+                    self.config["single_reads"] = preprocessed_reads.get("single")
+                if preprocessed_reads.get("long"):
+                    self.config["long_reads"] = preprocessed_reads.get("long")
+        except Exception as e:
+            logger.debug(f"Could not propagate preprocessed read paths to config: {e}")
         
         # Step 2: Single assembly of all reads
         logger.info("Step 2: Performing initial assembly of all reads")
@@ -690,26 +703,34 @@ class ViralAssembler:
         if result.returncode != 0:
             raise RuntimeError(f"SPAdes failed: {result.stderr}")
         
-        # In RNA mode, SPAdes rnaviral outputs transcripts instead of contigs/scaffolds
+        # In RNA mode, prefer transcripts; if missing, prefer top-level contigs/scaffolds, then fallback
         if self.rna_mode:
-            # Check if transcripts.fasta exists, otherwise fall back to final_contigs.fasta
-            # This handles cases where SPAdes has paired-end read orientation issues
-            contigs_file = output_dir / "transcripts.fasta"
-            if not contigs_file.exists():
-                # Look for final_contigs.fasta in the highest k-mer directory
-                k_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.startswith('K')]
-                if k_dirs:
-                    # Sort by k-mer size and take the highest
-                    k_dirs.sort(key=lambda x: int(x.name[1:]) if x.name[1:].isdigit() else 0)
-                    highest_k_dir = k_dirs[-1]
-                    fallback_contigs = highest_k_dir / "final_contigs.fasta"
-                    if fallback_contigs.exists():
-                        logger.warning(f"transcripts.fasta not found, using {fallback_contigs} as fallback")
-                        contigs_file = fallback_contigs
-            
+            contigs_path = output_dir / "transcripts.fasta"
+            if not contigs_path.exists():
+                # Prefer standard SPAdes top-level contigs.fasta if present
+                top_contigs = output_dir / "contigs.fasta"
+                if top_contigs.exists():
+                    logger.warning("transcripts.fasta not found, using top-level contigs.fasta")
+                    contigs_path = top_contigs
+                else:
+                    # Fallback to highest-K final_contigs.fasta
+                    k_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.startswith('K')]
+                    if k_dirs:
+                        k_dirs.sort(key=lambda x: int(x.name[1:]) if x.name[1:].isdigit() else 0)
+                        highest_k_dir = k_dirs[-1]
+                        fallback_contigs = highest_k_dir / "final_contigs.fasta"
+                        if fallback_contigs.exists():
+                            logger.warning(f"transcripts.fasta not found, using {fallback_contigs} as fallback")
+                            contigs_path = fallback_contigs
+            # Choose scaffolds file preference in RNA mode
+            scaffolds_path = output_dir / "hard_filtered_transcripts.fasta"
+            if not scaffolds_path.exists():
+                std_scaffolds = output_dir / "scaffolds.fasta"
+                if std_scaffolds.exists():
+                    scaffolds_path = std_scaffolds
             return {
-                "contigs": str(contigs_file),
-                "scaffolds": str(output_dir / "hard_filtered_transcripts.fasta"),
+                "contigs": str(contigs_path),
+                "scaffolds": str(scaffolds_path),
                 "assembly_graph": str(output_dir / "assembly_graph.fastg")
             }
         else:
@@ -767,24 +788,31 @@ class ViralAssembler:
             logger.error(f"SPAdes stdout: {result.stdout}")
             raise RuntimeError(f"SPAdes failed: {result.stderr}")
         
-        # In RNA mode, SPAdes rnaviral outputs transcripts instead of contigs/scaffolds
+        # In RNA mode, prefer transcripts; if missing, prefer top-level contigs/scaffolds, then fallback
         if self.rna_mode:
-            # Check if transcripts.fasta exists, otherwise fall back to final_contigs.fasta
-            contigs_file = output_dir / "transcripts.fasta"
-            if not contigs_file.exists():
-                # Look for final_contigs.fasta in the highest k-mer directory
-                k_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.startswith('K')]
-                if k_dirs:
-                    k_dirs.sort(key=lambda x: int(x.name[1:]) if x.name[1:].isdigit() else 0)
-                    highest_k_dir = k_dirs[-1]
-                    fallback_contigs = highest_k_dir / "final_contigs.fasta"
-                    if fallback_contigs.exists():
-                        logger.warning(f"transcripts.fasta not found, using {fallback_contigs} as fallback")
-                        contigs_file = fallback_contigs
-            
+            contigs_path = output_dir / "transcripts.fasta"
+            if not contigs_path.exists():
+                top_contigs = output_dir / "contigs.fasta"
+                if top_contigs.exists():
+                    logger.warning("transcripts.fasta not found, using top-level contigs.fasta")
+                    contigs_path = top_contigs
+                else:
+                    k_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.startswith('K')]
+                    if k_dirs:
+                        k_dirs.sort(key=lambda x: int(x.name[1:]) if x.name[1:].isdigit() else 0)
+                        highest_k_dir = k_dirs[-1]
+                        fallback_contigs = highest_k_dir / "final_contigs.fasta"
+                        if fallback_contigs.exists():
+                            logger.warning(f"transcripts.fasta not found, using {fallback_contigs} as fallback")
+                            contigs_path = fallback_contigs
+            scaffolds_path = output_dir / "hard_filtered_transcripts.fasta"
+            if not scaffolds_path.exists():
+                std_scaffolds = output_dir / "scaffolds.fasta"
+                if std_scaffolds.exists():
+                    scaffolds_path = std_scaffolds
             return {
-                "contigs": str(contigs_file),
-                "scaffolds": str(output_dir / "hard_filtered_transcripts.fasta")
+                "contigs": str(contigs_path),
+                "scaffolds": str(scaffolds_path)
             }
         else:
             return {
