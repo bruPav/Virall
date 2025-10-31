@@ -58,7 +58,7 @@ class Preprocessor:
         # Quality control with FastQC
         self._run_fastqc(reads_1, reads_2)
         
-        # Trimming with Trimmomatic
+        # Trimming with fastp (automatic adapter detection)
         trimmed_1, trimmed_2 = self._trim_paired_reads(
             reads_1, reads_2, quality_threshold, min_length
         )
@@ -216,21 +216,13 @@ class Preprocessor:
             "--poly_g_min_len", "10"
         ]
         
-        # Check if fastp is available, fallback to Trimmomatic
+        # Check if fastp is available
         if not self._check_tool_available("fastp"):
-            logger.warning("fastp not available, falling back to Trimmomatic")
-            return self._trim_paired_reads_trimmomatic(
-                reads_1, reads_2, quality_threshold, min_length
-            )
+            raise RuntimeError("fastp is not available. Please install fastp for read trimming.")
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            logger.error(f"fastp failed: {result.stderr}")
-            # Fallback to Trimmomatic
-            logger.info("Falling back to Trimmomatic")
-            return self._trim_paired_reads_trimmomatic(
-                reads_1, reads_2, quality_threshold, min_length
-            )
+            raise RuntimeError(f"fastp failed: {result.stderr}")
         
         logger.info("fastp paired-end trimming completed (with automatic adapter detection)")
         logger.info(f"Quality reports saved: {fastp_html}, {fastp_json}")
@@ -283,21 +275,13 @@ class Preprocessor:
             "--poly_g_min_len", "10"
         ]
         
-        # Check if fastp is available, fallback to Trimmomatic
+        # Check if fastp is available
         if not self._check_tool_available("fastp"):
-            logger.warning("fastp not available, falling back to Trimmomatic")
-            return self._trim_single_reads_trimmomatic(
-                reads, quality_threshold, min_length
-            )
+            raise RuntimeError("fastp is not available. Please install fastp for read trimming.")
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            logger.error(f"fastp failed: {result.stderr}")
-            # Fallback to Trimmomatic
-            logger.info("Falling back to Trimmomatic")
-            return self._trim_single_reads_trimmomatic(
-                reads, quality_threshold, min_length
-            )
+            raise RuntimeError(f"fastp failed: {result.stderr}")
         
         logger.info("fastp single-end trimming completed (with automatic adapter detection)")
         logger.info(f"Quality reports saved: {fastp_html}, {fastp_json}")
@@ -549,96 +533,6 @@ class Preprocessor:
         # Simple heuristic: check file name or first few reads
         filename = Path(reads).name.lower()
         return "ont" in filename or "nanopore" in filename or "minion" in filename
-    
-    def _trim_paired_reads_trimmomatic(
-        self,
-        reads_1: str,
-        reads_2: str,
-        quality_threshold: int,
-        min_length: int
-    ) -> Tuple[str, str]:
-        """Fallback: Trim paired-end reads with Trimmomatic."""
-        logger.info("Using Trimmomatic fallback for paired-end reads")
-        
-        output_1 = self.temp_dir / "trimmed_1.fastq.gz"
-        output_2 = self.temp_dir / "trimmed_2.fastq.gz"
-        output_1_plain = self.temp_dir / "trimmed_1.fastq"
-        output_2_plain = self.temp_dir / "trimmed_2.fastq"
-        unpaired_1 = self.temp_dir / "unpaired_1.fastq.gz"
-        unpaired_2 = self.temp_dir / "unpaired_2.fastq.gz"
-        
-        cmd = [
-            "trimmomatic",
-            "PE",
-            "-threads", str(self.threads),
-            reads_1, reads_2,
-            str(output_1), str(unpaired_1),
-            str(output_2), str(unpaired_2),
-            f"LEADING:{quality_threshold}",
-            f"TRAILING:{quality_threshold}",
-            f"SLIDINGWINDOW:4:{quality_threshold}",
-            f"MINLEN:{min_length}",
-            "ILLUMINACLIP:TruSeq3-PE.fa:2:30:10"
-        ]
-        
-        env = os.environ.copy()
-        env['_JAVA_OPTIONS'] = '-Xmx8g'
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
-        if result.returncode != 0:
-            raise RuntimeError(f"Trimmomatic failed: {result.stderr}")
-        
-        # Also write plain FASTQ copies
-        try:
-            with gzip.open(output_1, "rt") as fin, open(output_1_plain, "w") as fout:
-                shutil.copyfileobj(fin, fout)
-            with gzip.open(output_2, "rt") as fin, open(output_2_plain, "w") as fout:
-                shutil.copyfileobj(fin, fout)
-        except Exception as e:
-            logger.warning(f"Failed to create plain FASTQ copies: {e}")
-        
-        return str(output_1), str(output_2)
-    
-    def _trim_single_reads_trimmomatic(
-        self,
-        reads: str,
-        quality_threshold: int,
-        min_length: int
-    ) -> str:
-        """Fallback: Trim single-end reads with Trimmomatic."""
-        logger.info("Using Trimmomatic fallback for single-end reads")
-        
-        output = self.temp_dir / "trimmed_single.fastq.gz"
-        output_plain = self.temp_dir / "trimmed_single.fastq"
-        
-        cmd = [
-            "trimmomatic",
-            "SE",
-            "-threads", str(self.threads),
-            reads,
-            str(output),
-            f"LEADING:{quality_threshold}",
-            f"TRAILING:{quality_threshold}",
-            f"SLIDINGWINDOW:4:{quality_threshold}",
-            f"MINLEN:{min_length}",
-            "ILLUMINACLIP:TruSeq3-SE.fa:2:30:10"
-        ]
-        
-        env = os.environ.copy()
-        env['_JAVA_OPTIONS'] = '-Xmx8g'
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
-        if result.returncode != 0:
-            raise RuntimeError(f"Trimmomatic failed: {result.stderr}")
-        
-        # Also write plain FASTQ copy
-        try:
-            with gzip.open(output, "rt") as fin, open(output_plain, "w") as fout:
-                shutil.copyfileobj(fin, fout)
-        except Exception as e:
-            logger.warning(f"Failed to create plain FASTQ copy: {e}")
-        
-        return str(output)
     
     def _check_tool_available(self, tool: str) -> bool:
         """Check if a tool is available in PATH."""

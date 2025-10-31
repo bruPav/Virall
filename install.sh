@@ -62,7 +62,7 @@ conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 
 
 # Create conda environment for viral assembler
 echo "Creating conda environment 'virall'..."
-conda create -n virall -y python=3.9
+conda create -n virall -y python=3.11
 
 # Activate environment
 echo "Activating conda environment..."
@@ -78,8 +78,8 @@ conda install -c conda-forge -y click tqdm pyyaml loguru psutil
 # Install bioinformatics tools
 echo "Installing bioinformatics tools..."
 conda install -c bioconda -y spades bwa samtools minimap2 flye
-conda install -c bioconda -y fastqc fastp fastplong trimmomatic
-conda install -c bioconda -y checkv
+conda install -c bioconda -y fastqc fastp fastplong
+conda install -c bioconda -y checkv bcftools pilon
 # Minimal extras needed by the pipeline
 conda install -c bioconda -y hmmer prodigal
 # RNA-Bloom for transcriptome assembly (supports single-cell, bulk RNA-seq, and long reads)

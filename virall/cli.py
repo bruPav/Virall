@@ -5,7 +5,7 @@ Command-line interface for Virall - comprehensive viral genome analysis.
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 import click
 import yaml
@@ -37,7 +37,8 @@ def main(verbose: bool, log_file: Optional[str]):
 @main.command()
 @click.option('--short-reads-1', help='Path to first mate of paired-end reads')
 @click.option('--short-reads-2', help='Path to second mate of paired-end reads')
-@click.option('--long-reads', help='Path to long reads (PacBio/ONT)')
+@click.option('--nanopore', help='Path to ONT Nanopore long reads')
+@click.option('--pacbio', help='Path to PacBio long reads')
 @click.option('--single-reads', help='Path to single-end reads')
 @click.option('--reference', help='Optional reference genome for guided assembly')
 @click.option('--output-dir', '-o', required=True, help='Output directory')
@@ -60,7 +61,8 @@ def main(verbose: bool, log_file: Optional[str]):
 def assemble(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
-    long_reads: Optional[str],
+    nanopore: Optional[str],
+    pacbio: Optional[str],
     single_reads: Optional[str],
     reference: Optional[str],
     output_dir: str,
@@ -82,7 +84,7 @@ def assemble(
     """Assemble reads and identify viral contigs.
     
     This command performs:
-    1. Assembly (SPAdes/Flye based on read type)
+    1. Assembly (SPAdes-only; rnaviral/sc/metaviral modes)
     2. Viral contig identification (Kaiju)
     3. Basic assembly validation
     
@@ -90,8 +92,13 @@ def assemble(
     Output: Assembled contigs and viral contigs ready for annotation.
     """
     
+    # Validate mutually exclusive long-read inputs
+    if nanopore and pacbio:
+        click.echo("Error: Specify only one of --nanopore or --pacbio", err=True)
+        sys.exit(1)
+
     # Validate input files
-    input_files = [short_reads_1, short_reads_2, long_reads, single_reads]
+    input_files = [short_reads_1, short_reads_2, nanopore, pacbio, single_reads]
     input_files = [f for f in input_files if f is not None]
     
     if not input_files:
@@ -118,42 +125,30 @@ def assemble(
             config_dict.update(file_config)
     
     try:
-        # Handle single-cell mode preprocessing
+        # Handle single-cell mode as pooled scRNA-seq: use R2 as single-end, enable RNA mode
         if single_cell:
-            click.echo("Single-cell mode enabled - preprocessing reads...")
-            click.echo("Note: Single-cell data is typically RNA-seq, enabling RNA mode")
-            from .core.single_cell_preprocessor import SingleCellPreprocessor
-            
-            # Initialize single-cell preprocessor
-            sc_preprocessor = SingleCellPreprocessor(
-                threads=threads,
-                cellranger_path=cellranger_path
-            )
-            
-            # Process single-cell data
+            click.echo("Single-cell mode enabled - pooling R2 as single-end for scRNA-seq...")
+            click.echo("Note: Using SPAdes --rnaviral without --sc for scRNA-seq")
+            # Require paired-end inputs to extract cDNA reads (R2)
             if short_reads_1 and short_reads_2:
-                sc_results = sc_preprocessor.process_10x_data(
-                    r1_file=short_reads_1,
-                    r2_file=short_reads_2,
-                    sample_id="sample",
-                    output_dir=output_dir + "/single_cell_processed",
-                    min_cells=min_cells
-                )
-                
-                # Update read paths to processed files
-                short_reads_1 = sc_results["processed_reads"]["processed_r1"]
-                short_reads_2 = sc_results["processed_reads"]["processed_r2"]
-                
-                # Enable RNA mode for single-cell data
+                # Set RNA mode and mark single-cell intent in config
                 rna_mode = True
                 config_dict["rna_mode"] = True
-                
-                click.echo(f"Processed {sc_results['num_cells']} cells")
-                click.echo("RNA mode enabled for single-cell transcript assembly")
+                config_dict["single_cell_mode"] = True
+                # Treat R2 (cDNA) as single-end input; ignore barcode/UMI R1 for assembly
+                single_reads = short_reads_2
+                short_reads_1 = None
+                short_reads_2 = None
             else:
                 click.echo("Error: Single-cell mode requires paired-end reads (R1 and R2)", err=True)
                 sys.exit(1)
         
+        # Record long-read technology in config
+        if nanopore:
+            config_dict["long_read_tech"] = "nanopore"
+        elif pacbio:
+            config_dict["long_read_tech"] = "pacbio"
+
         # Initialize assembler
         assembler = ViralAssembler(
             output_dir=output_dir,
@@ -172,8 +167,10 @@ def assemble(
             reads_dict["short_2"] = short_reads_2
         if single_reads:
             reads_dict["single"] = single_reads
-        if long_reads:
-            reads_dict["long"] = long_reads
+        # Map long reads
+        long_reads_path = nanopore or pacbio
+        if long_reads_path:
+            reads_dict["long"] = long_reads_path
 
         assembly_results = assembler._perform_assembly(reads_dict, reference)
 
@@ -419,7 +416,8 @@ def assemble(
 @main.command()
 @click.option('--short-reads-1', help='Path to first mate of paired-end reads')
 @click.option('--short-reads-2', help='Path to second mate of paired-end reads')
-@click.option('--long-reads', help='Path to long reads (PacBio/ONT)')
+@click.option('--nanopore', help='Path to ONT Nanopore long reads')
+@click.option('--pacbio', help='Path to PacBio long reads')
 @click.option('--single-reads', help='Path to single-end reads')
 @click.option('--reference', help='Optional reference genome for guided assembly')
 @click.option('--output-dir', '-o', required=True, help='Output directory')
@@ -442,7 +440,8 @@ def assemble(
 def analyse(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
-    long_reads: Optional[str],
+    nanopore: Optional[str],
+    pacbio: Optional[str],
     single_reads: Optional[str],
     reference: Optional[str],
     output_dir: str,
@@ -471,8 +470,13 @@ def analyse(
     5. Validation and quantification (CheckV + BWA)
     """
     
+    # Validate mutually exclusive long-read inputs
+    if nanopore and pacbio:
+        click.echo("Error: Specify only one of --nanopore or --pacbio", err=True)
+        sys.exit(1)
+
     # Validate input files
-    input_files = [short_reads_1, short_reads_2, long_reads, single_reads]
+    input_files = [short_reads_1, short_reads_2, nanopore, pacbio, single_reads]
     input_files = [f for f in input_files if f is not None]
     
     if not input_files:
@@ -498,42 +502,27 @@ def analyse(
             config_dict.update(file_config)
     
     try:
-        # Handle single-cell mode preprocessing
+        # Handle single-cell mode as pooled scRNA-seq: use R2 as single-end, enable RNA mode
         if single_cell:
-            click.echo("Single-cell mode enabled - preprocessing reads...")
-            click.echo("Note: Single-cell data is typically RNA-seq, enabling RNA mode")
-            from .core.single_cell_preprocessor import SingleCellPreprocessor
-            
-            # Initialize single-cell preprocessor
-            sc_preprocessor = SingleCellPreprocessor(
-                threads=threads,
-                cellranger_path=cellranger_path
-            )
-            
-            # Process single-cell data
+            click.echo("Single-cell mode enabled - pooling R2 as single-end for scRNA-seq...")
+            click.echo("Note: Using SPAdes --rnaviral without --sc for scRNA-seq")
             if short_reads_1 and short_reads_2:
-                sc_results = sc_preprocessor.process_10x_data(
-                    r1_file=short_reads_1,
-                    r2_file=short_reads_2,
-                    sample_id="sample",
-                    output_dir=output_dir + "/single_cell_processed",
-                    min_cells=min_cells
-                )
-                
-                # Update read paths to processed files
-                short_reads_1 = sc_results["processed_reads"]["processed_r1"]
-                short_reads_2 = sc_results["processed_reads"]["processed_r2"]
-                
-                # Enable RNA mode for single-cell data
                 rna_mode = True
                 config_dict["rna_mode"] = True
-                
-                click.echo(f"Processed {sc_results['num_cells']} cells")
-                click.echo("RNA mode enabled for single-cell transcript assembly")
+                config_dict["single_cell_mode"] = True
+                single_reads = short_reads_2
+                short_reads_1 = None
+                short_reads_2 = None
             else:
                 click.echo("Error: Single-cell mode requires paired-end reads (R1 and R2)", err=True)
                 sys.exit(1)
         
+        # Record long-read technology in config
+        if nanopore:
+            config_dict["long_read_tech"] = "nanopore"
+        elif pacbio:
+            config_dict["long_read_tech"] = "pacbio"
+
         # Initialize assembler
         assembler = ViralAssembler(
             output_dir=output_dir,
@@ -545,10 +534,11 @@ def analyse(
         )
         
         # Run complete analysis pipeline
+        long_reads_path = nanopore or pacbio
         results = assembler.assemble(
             short_reads_1=short_reads_1,
             short_reads_2=short_reads_2,
-            long_reads=long_reads,
+            long_reads=long_reads_path,
             single_reads=single_reads,
             reference=reference
         )
@@ -913,7 +903,8 @@ def validate(genome: str, output_dir: Optional[str], reference: Optional[str], a
 @click.option('--short-reads-1', help='Path to first mate of paired-end reads')
 @click.option('--short-reads-2', help='Path to second mate of paired-end reads')
 @click.option('--single-reads', help='Path to single-end reads')
-@click.option('--long-reads', help='Path to long reads (PacBio/ONT)')
+@click.option('--nanopore', help='Path to ONT Nanopore long reads')
+@click.option('--pacbio', help='Path to PacBio long reads')
 @click.option('--output-dir', '-o', required=True, help='Output directory for quantification results')
 @click.option('--threads', '-t', default=8, help='Number of threads')
 def quantify(
@@ -921,7 +912,8 @@ def quantify(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
     single_reads: Optional[str],
-    long_reads: Optional[str],
+    nanopore: Optional[str],
+    pacbio: Optional[str],
     output_dir: str,
     threads: int
 ):
@@ -941,7 +933,11 @@ def quantify(
         sys.exit(1)
     
     # Validate that at least one read file is provided
-    read_files = [short_reads_1, short_reads_2, single_reads, long_reads]
+    if nanopore and pacbio:
+        click.echo("Error: Specify only one of --nanopore or --pacbio", err=True)
+        sys.exit(1)
+
+    read_files = [short_reads_1, short_reads_2, single_reads, nanopore, pacbio]
     read_files = [f for f in read_files if f is not None]
     
     if not read_files:
@@ -961,12 +957,13 @@ def quantify(
         viral_identifier = ViralIdentifier()
         
         # Run quantification
+        long_reads_path = nanopore or pacbio
         results = viral_identifier.quantify_viral_contigs(
             contigs_file=viral_contigs,
             reads_1=short_reads_1,
             reads_2=short_reads_2,
             single_reads=single_reads,
-            long_reads=long_reads,
+            long_reads=long_reads_path,
             output_dir=output_dir
         )
         
@@ -1152,23 +1149,28 @@ def train_model(viral_sequences: str, non_viral_sequences: str, output_model: st
 @click.option('--reads-1', help='First mate of paired-end reads')
 @click.option('--reads-2', help='Second mate of paired-end reads')
 @click.option('--single-reads', help='Single-end reads file')
-@click.option('--long-reads', help='Long reads file (PacBio/ONT)')
+@click.option('--nanopore', help='ONT Nanopore long reads file')
+@click.option('--pacbio', help='PacBio long reads file')
 @click.option('--output-dir', '-o', required=True, help='Output directory')
 @click.option('--threads', '-t', default=8, help='Number of threads')
 def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Optional[str], 
-               long_reads: Optional[str], output_dir: str, threads: int):
+               nanopore: Optional[str], pacbio: Optional[str], output_dir: str, threads: int):
     """Preprocess sequencing reads (quality control, trimming, error correction).
     
     This command performs:
     1. Quality control (FastQC)
-    2. Adapter trimming (Trimmomatic)
+    2. Adapter trimming (fastp with automatic adapter detection)
     3. Error correction (SPAdes)
     
     Supports: Single-end, paired-end, and long reads
     """
     
     # Validate input files
-    input_files = [reads_1, reads_2, single_reads, long_reads]
+    if nanopore and pacbio:
+        click.echo("Error: Specify only one of --nanopore or --pacbio", err=True)
+        sys.exit(1)
+
+    input_files = [reads_1, reads_2, single_reads, nanopore, pacbio]
     input_files = [f for f in input_files if f is not None]
     
     if not input_files:
@@ -1220,6 +1222,7 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
             click.echo(f"Single-end reads processed: {output_single}")
         
         # Process long reads
+        long_reads = nanopore or pacbio
         if long_reads:
             click.echo("Processing long reads...")
             processed_long = preprocessor.process_long_reads(long_reads)

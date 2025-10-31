@@ -90,13 +90,8 @@ class ViralAssembler:
             vog_db_path=self.config.get('databases', {}).get('vog_db_path')
         )
         
-        # Initialize RNA-Bloom assembler for RNA-seq data
-        try:
-            self.rnabloom_assembler = RNABloomAssembler(threads=threads, memory=memory)
-            logger.info("RNA-Bloom assembler initialized for RNA-seq data")
-        except RuntimeError as e:
-            logger.warning(f"RNA-Bloom not available: {e}")
-            self.rnabloom_assembler = None
+        # Disable RNA-Bloom in favor of SPAdes-only workflow
+        self.rnabloom_assembler = None
         
         logger.info(f"ViralAssembler initialized with {threads} threads, {memory} memory")
     
@@ -235,11 +230,11 @@ class ViralAssembler:
                 "use_database_search": True,
                 "min_viral_length": 1000
             },
-            # Flye-specific parameters
+            # Deprecated Flye parameters (kept for backward compat; unused)
             "genome_size": "1m",
             "flye_iterations": 1,
             "flye_min_overlap": 1000,
-            "flye_read_mode": "raw",  # raw, corr, hq, hifi
+            "flye_read_mode": "raw",
             "flye_read_error": 0.1,
             # Long-read subsampling parameters
             "max_long_reads": 50000,  # Subsample if more than this many reads
@@ -648,53 +643,8 @@ class ViralAssembler:
             raise ValueError(f"Invalid assembly strategy '{strategy}' for available reads")
     
     def _hybrid_assembly(self, reads: Dict[str, str], output_dir: Path, reference: Optional[Union[str, Path]] = None) -> Dict[str, str]:
-        """Perform hybrid assembly using SPAdes or RNA-Bloom."""
+        """Perform hybrid assembly using SPAdes only."""
         
-        # Use RNA-Bloom for RNA-seq data if available
-        if self.rna_mode and self.rnabloom_assembler is not None:
-            logger.info("Running hybrid assembly with RNA-Bloom (optimized for RNA-seq)")
-            
-            try:
-                # Determine if this is single-cell data
-                is_single_cell = self._detect_single_cell_data(reads)
-                
-                if is_single_cell:
-                    logger.info("Detected single-cell data, using RNA-Bloom hybrid assembly")
-                    results = self.rnabloom_assembler.assemble_hybrid(
-                        short_r1=reads.get("short_1", ""),
-                        short_r2=reads.get("short_2", ""),
-                        long_reads=reads.get("long", ""),
-                        output_dir=output_dir,
-                        sample_name="sample",
-                        min_length=self.config.get("min_contig_length", 200),
-                        stranded=self.config.get("stranded", False),
-                        pacbio=self.config.get("pacbio", False)
-                    )
-                else:
-                    logger.info("Detected bulk RNA-seq data, using RNA-Bloom hybrid assembly")
-                    results = self.rnabloom_assembler.assemble_hybrid(
-                        short_r1=reads.get("short_1", ""),
-                        short_r2=reads.get("short_2", ""),
-                        long_reads=reads.get("long", ""),
-                        output_dir=output_dir,
-                        sample_name="sample",
-                        min_length=self.config.get("min_contig_length", 200),
-                        stranded=self.config.get("stranded", False),
-                        pacbio=self.config.get("pacbio", False)
-                    )
-                
-                # Convert RNA-Bloom output format to expected format
-                return {
-                    "contigs": results.get("transcripts", ""),
-                    "scaffolds": results.get("transcripts_nr", results.get("transcripts", "")),
-                    "assembly_graph": str(output_dir / "assembly_graph.fastg")
-                }
-                
-            except Exception as e:
-                logger.warning(f"RNA-Bloom hybrid assembly failed: {e}")
-                logger.info("Falling back to SPAdes hybrid assembly")
-        
-        # Fallback to SPAdes for DNA assembly or if RNA-Bloom fails
         logger.info("Running hybrid assembly with SPAdes")
         
         # Convert memory from "16G" format to just number for SPAdes
@@ -712,19 +662,26 @@ class ViralAssembler:
             cmd.extend(["--trusted-contigs", str(reference)])
             logger.info(f"Using reference genome for guided assembly: {reference}")
         
-        # Add RNA-specific parameters if in RNA mode
+        # Decide SPAdes mode flags
+        is_single_cell = False
+        try:
+            is_single_cell = bool(self.config.get("single_cell_mode")) or self._detect_single_cell_data(reads)
+        except Exception:
+            is_single_cell = bool(self.config.get("single_cell_mode"))
         if self.rna_mode:
-            cmd.extend(["--rna", "-k", "21,33,55"])
-            logger.info("Using RNA-specific assembly parameters")
+            cmd.append("--rnaviral")
+            # Do not use SPAdes --sc (genomic single-cell mode) for scRNA-seq
+            logger.info("Using SPAdes rna-viral mode")
         else:
-            # Add --careful flag only for non-RNA mode
-            cmd.insert(1, "--careful")
+            cmd.append("--metaviral")
+            logger.info("Using SPAdes metaviral mode")
         
         # Add read files
         if "short_1" in reads and "short_2" in reads:
             cmd.extend(["-1", reads["short_1"], "-2", reads["short_2"]])
         if "long" in reads:
-            cmd.extend(["--nanopore", reads["long"]])
+            long_flag = "--pacbio" if str(self.config.get("long_read_tech", "")).lower() == "pacbio" else "--nanopore"
+            cmd.extend([long_flag, reads["long"]])
         if "single" in reads:
             cmd.extend(["-s", reads["single"]])
         
@@ -733,7 +690,7 @@ class ViralAssembler:
         if result.returncode != 0:
             raise RuntimeError(f"SPAdes failed: {result.stderr}")
         
-        # In RNA mode, SPAdes outputs transcripts instead of contigs/scaffolds
+        # In RNA mode, SPAdes rnaviral outputs transcripts instead of contigs/scaffolds
         if self.rna_mode:
             # Check if transcripts.fasta exists, otherwise fall back to final_contigs.fasta
             # This handles cases where SPAdes has paired-end read orientation issues
@@ -763,65 +720,8 @@ class ViralAssembler:
             }
     
     def _short_read_assembly(self, reads: Dict[str, str], output_dir: Path, reference: Optional[Union[str, Path]] = None) -> Dict[str, str]:
-        """Perform short-read only assembly."""
+        """Perform short-read only assembly with SPAdes."""
         
-        # Use RNA-Bloom for RNA-seq data if available
-        if self.rna_mode and self.rnabloom_assembler is not None:
-            logger.info("Running short-read assembly with RNA-Bloom (optimized for RNA-seq)")
-            
-            try:
-                # Determine if this is single-cell data (check for cell barcode patterns in read IDs)
-                is_single_cell = self._detect_single_cell_data(reads)
-                
-                if is_single_cell:
-                    logger.info("Detected single-cell data, using RNA-Bloom single-cell assembly")
-                    results = self.rnabloom_assembler.assemble_single_cell(
-                        r1_file=reads.get("short_1", ""),
-                        r2_file=reads.get("short_2", ""),
-                        output_dir=output_dir,
-                        sample_name="sample",
-                        min_length=self.config.get("min_contig_length", 200),
-                        stranded=self.config.get("stranded", False),
-                        reference=str(reference) if reference else None
-                    )
-                else:
-                    logger.info("Detected bulk RNA-seq data, using RNA-Bloom bulk assembly")
-                    results = self.rnabloom_assembler.assemble_bulk_rna(
-                        r1_file=reads.get("short_1", ""),
-                        r2_file=reads.get("short_2", ""),
-                        output_dir=output_dir,
-                        sample_name="sample",
-                        min_length=self.config.get("min_contig_length", 200),
-                        stranded=self.config.get("stranded", False),
-                        reference=str(reference) if reference else None,
-                        single_end=reads.get("single")
-                    )
-                
-                # Convert RNA-Bloom output format to expected format
-                # For RNA-seq, we should use both long and short transcripts
-                transcripts_file = results.get("transcripts", "")
-                transcripts_short_file = results.get("transcripts_short", "")
-                
-                # If we have both long and short transcripts, combine them for viral identification
-                if transcripts_file and transcripts_short_file and Path(transcripts_file).exists() and Path(transcripts_short_file).exists():
-                    # Create a combined file with both long and short transcripts
-                    combined_file = output_dir / "combined_transcripts.fa"
-                    self._combine_transcript_files(transcripts_file, transcripts_short_file, combined_file)
-                    return {
-                        "contigs": str(combined_file),
-                        "scaffolds": results.get("transcripts_nr", transcripts_file)
-                    }
-                else:
-                    return {
-                        "contigs": transcripts_file,
-                        "scaffolds": results.get("transcripts_nr", transcripts_file)
-                    }
-                
-            except Exception as e:
-                logger.warning(f"RNA-Bloom assembly failed: {e}")
-                logger.info("Falling back to SPAdes assembly")
-        
-        # Fallback to SPAdes for DNA assembly or if RNA-Bloom fails
         logger.info("Running short-read assembly with SPAdes")
         
         # Convert memory from "16G" format to just number for SPAdes
@@ -839,13 +739,19 @@ class ViralAssembler:
             cmd.extend(["--trusted-contigs", str(reference)])
             logger.info(f"Using reference genome for guided assembly: {reference}")
         
-        # Add RNA-specific parameters if in RNA mode
+        # Decide SPAdes mode flags
+        is_single_cell = False
+        try:
+            is_single_cell = bool(self.config.get("single_cell_mode")) or self._detect_single_cell_data(reads)
+        except Exception:
+            is_single_cell = bool(self.config.get("single_cell_mode"))
         if self.rna_mode:
-            cmd.extend(["--rna", "-k", "21,33,55"])
-            logger.info("Using RNA-specific assembly parameters")
+            cmd.append("--rnaviral")
+            # Do not use SPAdes --sc (genomic single-cell mode) for scRNA-seq
+            logger.info("Using SPAdes rna-viral mode")
         else:
-            # Add --careful flag only for non-RNA mode
-            cmd.insert(1, "--careful")
+            cmd.append("--metaviral")
+            logger.info("Using SPAdes metaviral mode")
         
         if "short_1" in reads and "short_2" in reads:
             cmd.extend(["-1", reads["short_1"], "-2", reads["short_2"]])
@@ -861,7 +767,7 @@ class ViralAssembler:
             logger.error(f"SPAdes stdout: {result.stdout}")
             raise RuntimeError(f"SPAdes failed: {result.stderr}")
         
-        # In RNA mode, SPAdes outputs transcripts instead of contigs/scaffolds
+        # In RNA mode, SPAdes rnaviral outputs transcripts instead of contigs/scaffolds
         if self.rna_mode:
             # Check if transcripts.fasta exists, otherwise fall back to final_contigs.fasta
             contigs_file = output_dir / "transcripts.fasta"
@@ -887,51 +793,54 @@ class ViralAssembler:
         }
     
     def _long_read_assembly(self, reads: Dict[str, str], output_dir: Path, reference: Optional[Union[str, Path]] = None) -> Dict[str, str]:
-        """Perform long-read assembly using Flye."""
-        logger.info("Running long-read assembly with Flye")
-        
-        # Check if we need to subsample for memory constraints
-        subsampled_reads = self._subsample_long_reads_if_needed(reads["long"])
-        input_file = subsampled_reads if subsampled_reads else reads["long"]
-        
-        # Use configurable memory-efficient parameters
-        cmd = [
+        """Perform long-read only assembly using Flye (ONT or PacBio)."""
+        logger.info("Running long-read only assembly with Flye")
+
+        # Determine long-read technology and input file
+        long_reads_file = reads.get("long")
+        if not long_reads_file:
+            raise ValueError("No long reads provided for long-read assembly")
+
+        subsampled = self._subsample_long_reads_if_needed(long_reads_file)
+        input_file = subsampled if subsampled else long_reads_file
+
+        tech = str(self.config.get("long_read_tech", "")).lower()
+        if tech not in ("nanopore", "pacbio"):
+            logger.warning("long_read_tech not set; defaulting to Nanopore flags for Flye")
+            tech = "nanopore"
+
+        flye_dir = output_dir / "flye_assembly"
+        flye_dir.mkdir(parents=True, exist_ok=True)
+
+        # Choose Flye input flag by technology
+        if tech == "pacbio":
+            input_flag = "--pacbio-raw"
+        else:
+            input_flag = "--nano-raw"
+
+        flye_cmd = [
             "flye",
-            "--nano-raw", input_file,
+            input_flag, input_file,
+            "--out-dir", str(flye_dir),
             "--threads", str(self.threads),
-            "--out-dir", str(output_dir),
-            "--meta"  # Use metagenome mode for viral assembly
+            "--meta"
         ]
-        
-        # Only add --read-error for corrected/high-quality modes
-        read_mode = self.config.get("flye_read_mode", "raw")
-        if read_mode in ["corr", "hq", "hifi"]:
-            cmd.extend(["--read-error", str(self.config.get("flye_read_error", 0.1))])
-        
-        # Add reference genome for guided assembly if provided
-        if reference:
-            cmd.extend(["--iterations", "3"])  # More iterations for reference-guided assembly
-            logger.info(f"Using reference genome for guided assembly: {reference}")
-        
-        logger.info(f"Flye command: {' '.join(cmd)}")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        logger.info(f"Flye command: {' '.join(flye_cmd)}")
+        result = subprocess.run(flye_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            logger.warning(f"Flye failed: {result.stderr}")
-            logger.info("Falling back to simple read selection strategy...")
-            return self._long_read_assembly_simple_fallback(reads, output_dir, reference)
-        
-        # Find output files
-        contigs_file = output_dir / "assembly.fasta"
-        scaffolds_file = output_dir / "assembly.fasta"  # Flye doesn't separate contigs/scaffolds
-        
+            logger.error(f"Flye failed: {result.stderr}")
+            # Fallback to simple longest-reads selection if Flye fails
+            return self._long_read_assembly_simple_fallback(reads, output_dir)
+
+        contigs_file = flye_dir / "assembly.fasta"
         if not contigs_file.exists():
-            raise FileNotFoundError(f"Assembly output not found: {contigs_file}")
-        
-        logger.info("Long-read assembly completed successfully")
+            logger.warning("Flye produced no contigs; using fallback strategy")
+            return self._long_read_assembly_simple_fallback(reads, output_dir)
+
         return {
             "contigs": str(contigs_file),
-            "scaffolds": str(scaffolds_file)
+            "scaffolds": str(contigs_file)
         }
     
     
@@ -1225,9 +1134,9 @@ class ViralAssembler:
         has_long_reads = "long" in preprocessed_reads
         
         if has_short_reads and has_long_reads:
-            # Both short and long reads - use SPAdes hybrid assembly with reference-guided mode
-            logger.info("Step 2: Running hybrid reference-guided assembly with SPAdes (short + long reads)")
-            guided_assembly_results = self._run_reference_guided_spades(
+            # Both short and long reads - build long-read consensus against reference and polish with short reads
+            logger.info("Step 2: Running reference-guided long-read assembly + short-read polishing (minimap2 + bcftools + pilon)")
+            guided_assembly_results = self._run_reference_guided_long_then_polish(
                 preprocessed_reads, reference
             )
         elif has_short_reads and not has_long_reads:
@@ -1237,9 +1146,9 @@ class ViralAssembler:
                 preprocessed_reads, reference
             )
         elif has_long_reads and not has_short_reads:
-            # Only long reads - use Flye de novo assembly, then filter against reference
-            logger.info("Step 2: Running de novo assembly with Flye (long reads only), then filtering against reference")
-            guided_assembly_results = self._run_reference_guided_flye(
+            # Only long reads - build consensus against reference (no short-read polishing)
+            logger.info("Step 2: Running reference-guided long-read consensus (minimap2 + bcftools)")
+            guided_assembly_results = self._run_reference_guided_long_only_consensus(
                 preprocessed_reads, reference
             )
         else:
@@ -1615,15 +1524,21 @@ class ViralAssembler:
         if "single" in reads:
             cmd.extend(["-s", reads["single"]])
         if "long" in reads:
-            cmd.extend(["--nanopore", reads["long"]])
+            long_flag = "--pacbio" if str(self.config.get("long_read_tech", "")).lower() == "pacbio" else "--nanopore"
+            cmd.extend([long_flag, reads["long"]])
         
         # Add reference genome for guided assembly
         cmd.extend(["--trusted-contigs", str(reference)])
         
-        # Add RNA mode if applicable
+        # Add mode flags (rnaviral/sc/metaviral)
+        is_single_cell = bool(self.config.get("single_cell_mode", False))
         if self.rna_mode:
-            cmd.extend(["--rna", "-k", "21,33,55"])
-            logger.info("Using RNA-specific assembly parameters with k-mers 21,33,55")
+            cmd.append("--rnaviral")
+            # Do not use SPAdes --sc (genomic single-cell mode) for scRNA-seq
+            logger.info("Using SPAdes rna-viral mode")
+        else:
+            cmd.append("--metaviral")
+            logger.info("Using SPAdes metaviral mode")
         
         logger.info(f"SPAdes command: {' '.join(cmd)}")
         
@@ -1683,6 +1598,220 @@ class ViralAssembler:
             "original_scaffolds": str(scaffolds_file) if scaffolds_file.exists() else str(contigs_file),
             "reference_hits": reference_hits
         }
+
+    def _run_reference_guided_long_only_consensus(
+        self,
+        reads: Dict[str, str],
+        reference: Union[str, Path]
+    ) -> Optional[Dict[str, str]]:
+        """
+        Reference-guided consensus using only long reads (no short-read polishing):
+        minimap2 + samtools + bcftools consensus.
+        Uses map-ont for Nanopore and map-hifi for PacBio.
+        """
+        try:
+            output_dir = self.output_dir / "reference_guided_assembly"
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            long_reads = reads.get("long")
+            if not long_reads:
+                logger.error("Long reads are required for reference-guided consensus")
+                return None
+
+            aligned_bam = output_dir / "aligned.bam"
+            tech = str(self.config.get("long_read_tech", "")).lower()
+            preset = "map-hifi" if tech == "pacbio" else "map-ont"
+
+            # Align and sort
+            minimap2_cmd = [
+                "minimap2", "-t", str(self.threads), "-ax", preset, str(reference), str(long_reads)
+            ]
+            sort_cmd = ["samtools", "sort", "-o", str(aligned_bam)]
+
+            logger.info(f"Running minimap2: {' '.join(minimap2_cmd)} | {' '.join(sort_cmd)}")
+            p1 = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE, text=False)
+            p2 = subprocess.run(sort_cmd, stdin=p1.stdout, capture_output=True)
+            p1.stdout.close()  # type: ignore
+            if p1.wait() != 0 or p2.returncode != 0:
+                logger.error(f"Alignment failed: {p2.stderr.decode('utf-8', 'ignore')}")
+                return None
+
+            # Index BAM
+            result = subprocess.run(["samtools", "index", str(aligned_bam)], capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"samtools index failed: {result.stderr}")
+                return None
+
+            # Variant calling and consensus
+            vcf_gz = output_dir / "calls.vcf.gz"
+            mpileup_cmd = ["bcftools", "mpileup", "-Ou", "-f", str(reference), str(aligned_bam)]
+            call_cmd = ["bcftools", "call", "-mv", "-Oz", "-o", str(vcf_gz)]
+            logger.info(f"Calling variants: {' '.join(mpileup_cmd)} | {' '.join(call_cmd)}")
+            p3 = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE, text=False)
+            p4 = subprocess.run(call_cmd, stdin=p3.stdout, capture_output=True)
+            p3.stdout.close()  # type: ignore
+            if p3.wait() != 0 or p4.returncode != 0:
+                logger.error(f"bcftools call failed: {p4.stderr.decode('utf-8', 'ignore')}")
+                return None
+
+            # Index VCF and build consensus
+            subprocess.run(["bcftools", "index", str(vcf_gz)], check=False)
+            consensus_fa = output_dir / "consensus.fa"
+            consensus_cmd = ["bcftools", "consensus", "-f", str(reference), str(vcf_gz)]
+            logger.info(f"Building consensus: {' '.join(consensus_cmd)} > {consensus_fa}")
+            with open(consensus_fa, "w") as fh:
+                result = subprocess.run(consensus_cmd, stdout=fh, capture_output=True, text=True)
+            if result.returncode != 0 or not consensus_fa.exists():
+                logger.error(f"bcftools consensus failed: {result.stderr}")
+                return None
+
+            return {
+                "contigs": str(consensus_fa),
+                "scaffolds": str(consensus_fa),
+                "long_alignment_bam": str(aligned_bam),
+                "variants_vcf": str(vcf_gz)
+            }
+        except Exception as e:
+            logger.error(f"Reference-guided long-read consensus failed: {e}")
+            return None
+
+    def _run_reference_guided_long_then_polish(
+        self,
+        reads: Dict[str, str],
+        reference: Union[str, Path]
+    ) -> Optional[Dict[str, str]]:
+        """
+        Build a draft assembly by aligning long reads to the reference (minimap2 + bcftools)
+        and polish with short reads using Pilon.
+        """
+        try:
+            output_dir = self.output_dir / "reference_guided_assembly"
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            long_reads = reads.get("long")
+            if not long_reads:
+                logger.error("Long reads are required for reference-guided long-read assembly")
+                return None
+
+            # 1) Long-read consensus against reference
+            long_bam = output_dir / "long_aligned.bam"
+            long_bam_index = output_dir / "long_aligned.bam.bai"
+            tech = str(self.config.get("long_read_tech", "")).lower()
+            preset = "map-pb" if tech == "pacbio" else "map-ont"
+
+            minimap2_cmd = [
+                "minimap2", "-t", str(self.threads), "-ax", preset, str(reference), str(long_reads)
+            ]
+            samtools_sort_cmd = ["samtools", "sort", "-o", str(long_bam)]
+
+            logger.info(f"Running minimap2 for long reads: {' '.join(minimap2_cmd)} | {' '.join(samtools_sort_cmd)}")
+            # Pipe minimap2 -> samtools sort
+            minimap_proc = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE, text=False)
+            sort_proc = subprocess.run(samtools_sort_cmd, stdin=minimap_proc.stdout, capture_output=True)
+            minimap_proc.stdout.close()  # type: ignore
+            ret1 = minimap_proc.wait()
+            if ret1 != 0 or sort_proc.returncode != 0:
+                logger.error(f"Long-read alignment failed: {sort_proc.stderr.decode('utf-8', 'ignore')}")
+                return None
+
+            # Index BAM
+            result = subprocess.run(["samtools", "index", str(long_bam)], capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"samtools index failed: {result.stderr}")
+                return None
+
+            # Call variants and build consensus
+            variants_bcf = output_dir / "variants.bcf"
+            variants_norm_bcf = output_dir / "variants.norm.bcf"
+            draft_fa = output_dir / "draft_assembly.fa"
+
+            mpileup_cmd = ["bcftools", "mpileup", "-Ou", "-f", str(reference), str(long_bam)]
+            call_cmd = ["bcftools", "call", "-mv", "-Ob", "-o", str(variants_bcf)]
+            logger.info(f"Calling variants: {' '.join(mpileup_cmd)} | {' '.join(call_cmd)}")
+            mpileup_proc = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE, text=False)
+            call_proc = subprocess.run(call_cmd, stdin=mpileup_proc.stdout, capture_output=True)
+            mpileup_proc.stdout.close()  # type: ignore
+            ret2 = mpileup_proc.wait()
+            if ret2 != 0 or call_proc.returncode != 0:
+                logger.error(f"bcftools call failed: {call_proc.stderr.decode('utf-8', 'ignore')}")
+                return None
+
+            norm_cmd = ["bcftools", "norm", "-f", str(reference), "-Ob", "-o", str(variants_norm_bcf), str(variants_bcf)]
+            logger.info(f"Normalizing variants: {' '.join(norm_cmd)}")
+            result = subprocess.run(norm_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.warning(f"bcftools norm failed, proceeding with raw variants: {result.stderr}")
+                variants_for_consensus = variants_bcf
+            else:
+                variants_for_consensus = variants_norm_bcf
+
+            # Index BCF
+            subprocess.run(["bcftools", "index", str(variants_for_consensus)], check=False)
+
+            consensus_cmd = ["bcftools", "consensus", "-f", str(reference), str(variants_for_consensus)]
+            logger.info(f"Building draft consensus: {' '.join(consensus_cmd)} > {draft_fa}")
+            with open(draft_fa, "w") as dfh:
+                result = subprocess.run(consensus_cmd, stdout=dfh, capture_output=True, text=True)
+            if result.returncode != 0 or not draft_fa.exists():
+                logger.error(f"bcftools consensus failed: {result.stderr}")
+                return None
+
+            # 2) Polish with short reads using Pilon
+            short_1 = reads.get("short_1")
+            short_2 = reads.get("short_2")
+            single = reads.get("single")
+
+            # Build short-read alignment
+            subprocess.run(["bwa", "index", str(draft_fa)], check=False)
+            short_bam = output_dir / "short_aligned.bam"
+            if short_1 and short_2:
+                bwa_cmd = ["bwa", "mem", str(draft_fa), str(short_1), str(short_2)]
+            elif single:
+                bwa_cmd = ["bwa", "mem", str(draft_fa), str(single)]
+            else:
+                logger.error("Short reads are required for polishing with Pilon")
+                return None
+
+            logger.info(f"Aligning short reads to draft: {' '.join(bwa_cmd)} | samtools sort -o {short_bam}")
+            bwa_proc = subprocess.Popen(bwa_cmd, stdout=subprocess.PIPE, text=False)
+            sort2_proc = subprocess.run(["samtools", "sort", "-o", str(short_bam)], stdin=bwa_proc.stdout, capture_output=True)
+            bwa_proc.stdout.close()  # type: ignore
+            ret3 = bwa_proc.wait()
+            if ret3 != 0 or sort2_proc.returncode != 0:
+                logger.error(f"Short-read alignment failed: {sort2_proc.stderr.decode('utf-8', 'ignore')}")
+                return None
+            subprocess.run(["samtools", "index", str(short_bam)], check=False)
+
+            polished_prefix = output_dir / "polished_assembly"
+            pilon_cmd = [
+                "pilon",
+                "--genome", str(draft_fa),
+                "--frags", str(short_bam),
+                "--output", str(polished_prefix.name),
+                "--outdir", str(output_dir),
+            ]
+            logger.info(f"Running Pilon: {' '.join(pilon_cmd)}")
+            result = subprocess.run(pilon_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"Pilon failed: {result.stderr}")
+                return None
+
+            polished_fa = output_dir / f"{polished_prefix.name}.fasta"
+            if not polished_fa.exists():
+                # Some Pilon builds output .fa
+                alt = output_dir / f"{polished_prefix.name}.fa"
+                polished_fa = alt if alt.exists() else draft_fa
+
+            return {
+                "contigs": str(polished_fa),
+                "scaffolds": str(polished_fa),
+                "original_contigs": str(draft_fa),
+                "long_alignment_bam": str(long_bam),
+                "short_alignment_bam": str(short_bam)
+            }
+        except Exception as e:
+            logger.error(f"Reference-guided long+short polishing pipeline failed: {e}")
+            return None
     
     def _check_reference_hits(
         self, 

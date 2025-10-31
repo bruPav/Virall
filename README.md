@@ -18,6 +18,7 @@ A comprehensive tool for viral genome analysis including assembly, classificatio
 - **Gene prediction**: Automated gene finding with Prodigal
 - **Functional annotation**: VOG database integration for viral protein annotation
 - **Quality assessment**: CheckV integration for viral genome completeness
+ - **Single-cell RNA-seq (pooled)**: Supports pooled scRNA-seq by assembling cDNA (R2) with SPAdes rna-viral mode
 
 ## Installation
 
@@ -70,6 +71,23 @@ Add a '--mem-efficient' flag. For example
 # For large datasets
 virall analyse --long-reads large_dataset.fastq --mem-efficient -o output_dir
 ```
+
+### Single-cell RNA-seq (pooled)
+
+```bash
+# Provide paired-end inputs; R2 (cDNA) will be pooled and assembled as single-end
+virall analyse \
+  --single-cell \
+  --short-reads-1 sample_R1.fastq.gz \
+  --short-reads-2 sample_R2.fastq.gz \
+  -o sc_rna_pooled_out
+```
+
+Notes for single-cell mode:
+- Only RNA-seq is supported at the moment. DNA single-cell support will be added in future versions.
+- The pipeline does not track individual cells yet. Reads are pooled across cells for assembly. Per-cell tracking and outputs will be added in future versions.
+- Implementation details: when `--single-cell` is set, the pipeline treats R2 (cDNA) as single-end input, enables RNA mode automatically, and assembles using SPAdes `--rnaviral` without the genomic single-cell flag.
+- Preprocessing: short-read trimming is performed with fastp (automatic adapter detection) according to configuration (`trim_adapters: true`).
 
 ## All Commands
 
@@ -201,8 +219,9 @@ databases:
 - **Prodigal**: Gene prediction
 - **HMMER**: Protein annotation
 - **FastQC**: Quality control
-- **Trimmomatic**: Read trimming
-- **Porechop**: Long-read trimming
+- **fastp**: Read trimming (automatic adapter detection)
+- **fastplong**: Long-read trimming (automatic adapter detection)
+- **Porechop**: Long-read trimming (optional fallback)
 
 ### Python Packages
 - click
