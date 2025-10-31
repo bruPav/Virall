@@ -75,13 +75,26 @@ conda install -c conda-forge -y numpy pandas matplotlib seaborn plotly
 conda install -c conda-forge -y biopython scikit-learn
 conda install -c conda-forge -y click tqdm pyyaml loguru psutil
 
+# Ensure mamba is available before using it
+echo "Checking for mamba (faster dependency solver)..."
+if ! command -v mamba &> /dev/null; then
+    echo "Mamba not found. Installing mamba..."
+    conda install -c conda-forge mamba -y
+    echo "Mamba installed successfully"
+else
+    echo "Mamba found"
+fi
+
 # Install bioinformatics tools
 echo "Installing bioinformatics tools..."
 conda install -c bioconda -y spades bwa samtools minimap2
 # Install flye separately with both bioconda and conda-forge channels to avoid dependency conflicts
 echo "Installing flye (with specific channels to avoid dependency conflicts)..."
 mamba install -n virall -c bioconda -c conda-forge flye=2.9.6 -y
-conda install -c bioconda -y fastqc fastp fastplong
+# Install fastplong separately with both bioconda and conda-forge channels to resolve isa-l dependency
+echo "Installing fastplong (with specific channels to avoid dependency conflicts)..."
+mamba install -n virall -c bioconda -c conda-forge fastplong=0.4.1 -y
+conda install -c bioconda -y fastqc fastp
 conda install -c bioconda -y checkv bcftools pilon
 # Minimal extras needed by the pipeline
 conda install -c bioconda -y hmmer prodigal
@@ -108,15 +121,6 @@ fi
 
 # Install problematic tools in separate environments
 echo "Installing additional tools in separate environments..."
-
-# Check if mamba is available, install if not
-if ! command -v mamba &> /dev/null; then
-    echo "Mamba not found. Installing mamba..."
-    conda install -c conda-forge mamba -y
-    echo "Mamba installed successfully"
-else
-    echo "Mamba found"
-fi
 
 # Install BWA and minimap2 for viral contig quantification
 echo "Installing BWA and minimap2 for viral contig quantification..."
