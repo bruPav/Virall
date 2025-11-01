@@ -87,7 +87,10 @@ fi
 
 # Install bioinformatics tools
 echo "Installing bioinformatics tools..."
-conda install -c bioconda -y bwa samtools minimap2
+# Install samtools (newer version 1.22+ works with modern OpenSSL 3.x, avoiding libcrypto.so.1.0.0 issues)
+echo "Installing samtools (will get latest version compatible with modern OpenSSL)..."
+conda install -c bioconda -y bwa minimap2
+mamba install -n virall -c bioconda -c conda-forge samtools -y || conda install -c bioconda samtools -y
 # Install spades separately with both bioconda and conda-forge channels to avoid dependency conflicts
 echo "Installing spades (with specific channels to avoid dependency conflicts)..."
 mamba install -n virall -c conda-forge -c bioconda spades=4.2.0 -y
@@ -125,9 +128,27 @@ fi
 # Install problematic tools in separate environments
 echo "Installing additional tools in separate environments..."
 
-# Install BWA and minimap2 for viral contig quantification
-echo "Installing BWA and minimap2 for viral contig quantification..."
-mamba install -n virall -c bioconda bwa minimap2 samtools -y
+# Verify BWA, minimap2, and samtools are properly installed
+echo "Verifying bioinformatics tools installation..."
+# Test samtools - check if it runs (newer versions work with modern OpenSSL)
+if samtools --version >/dev/null 2>&1; then
+    echo "samtools is working correctly"
+    samtools --version 2>&1 | head -1
+else
+    echo "Warning: samtools has dependency issues"
+    echo "  Attempting to fix by reinstalling samtools..."
+    # Reinstall samtools (will get latest version compatible with system OpenSSL)
+    mamba install -n virall -c bioconda -c conda-forge samtools --force-reinstall -y 2>/dev/null || \
+    conda install -c bioconda samtools --force-reinstall -y 2>/dev/null
+    # Test again
+    if samtools --version >/dev/null 2>&1; then
+        echo "samtools fixed successfully"
+    else
+        echo "Warning: samtools still has issues, but the pipeline has a fallback mode"
+        echo "  The pipeline will use SAM file processing when BAM conversion fails"
+        echo "  This is slower but works without BAM conversion"
+    fi
+fi
 
 # Install the virall package in development mode
 echo "Installing virall package..."

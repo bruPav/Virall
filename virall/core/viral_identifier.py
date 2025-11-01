@@ -1186,22 +1186,46 @@ class ViralIdentifier:
     ) -> Dict[str, Union[str, Dict]]:
         """Process mapping results and calculate abundance."""
         
-        # Convert SAM to BAM and sort
+        # Try to convert SAM to BAM and sort
         logger.info("Processing mapping results")
         sort_cmd = ["samtools", "sort", "-o", str(bam_file), str(sam_file)]
         result = subprocess.run(" ".join(sort_cmd), capture_output=True, text=True, shell=True)
         if result.returncode != 0:
-            logger.error(f"SAMtools sort failed: {result.stderr}")
-            return {"status": "failed", "error": f"SAMtools sort failed: {result.stderr}"}
+            logger.warning(f"SAMtools sort failed (likely library dependency issue): {result.stderr}")
+            logger.warning("Falling back to SAM file processing (may be slower but works without BAM conversion)")
+            # Fall back to processing SAM directly
+            quantification_results = self._calculate_contig_abundance_from_sam(
+                contigs_file, sam_file, output_dir, classification_data
+            )
+            return {
+                "status": "completed",
+                "method": method,
+                "sam_file": str(sam_file),
+                "bam_file": None,  # BAM conversion failed
+                "quantification_results": quantification_results,
+                "warning": "BAM conversion failed, used SAM file directly"
+            }
         
         # Index BAM file
         index_cmd = ["samtools", "index", str(bam_file)]
         result = subprocess.run(" ".join(index_cmd), capture_output=True, text=True, shell=True)
         if result.returncode != 0:
-            logger.error(f"SAMtools index failed: {result.stderr}")
-            return {"status": "failed", "error": f"SAMtools index failed: {result.stderr}"}
+            logger.warning(f"SAMtools index failed: {result.stderr}")
+            logger.warning("Falling back to SAM file processing")
+            # Fall back to processing SAM directly
+            quantification_results = self._calculate_contig_abundance_from_sam(
+                contigs_file, sam_file, output_dir, classification_data
+            )
+            return {
+                "status": "completed",
+                "method": method,
+                "sam_file": str(sam_file),
+                "bam_file": None,
+                "quantification_results": quantification_results,
+                "warning": "BAM indexing failed, used SAM file directly"
+            }
         
-        # Calculate coverage and abundance
+        # Calculate coverage and abundance from BAM
         quantification_results = self._calculate_contig_abundance(contigs_file, bam_file, output_dir, classification_data)
         
         logger.info("Viral contig quantification completed")
@@ -1213,6 +1237,157 @@ class ViralIdentifier:
             "quantification_results": quantification_results
         }
     
+    def _calculate_contig_abundance_from_sam(
+        self,
+        contigs_file: str,
+        sam_file: Path,
+        output_dir: Path,
+        classification_data: Optional[Dict] = None
+    ) -> Dict[str, Dict]:
+        """Calculate abundance metrics from SAM file directly (fallback when BAM conversion fails)."""
+        logger.info("Calculating contig abundance from SAM file (fallback mode)")
+        
+        # Get contig lengths
+        contig_lengths = {}
+        for record in SeqIO.parse(contigs_file, "fasta"):
+            contig_lengths[record.id] = len(record.seq)
+        
+        # Parse SAM file to calculate coverage
+        # Track coverage per position per contig
+        contig_coverage = {contig_id: {} for contig_id in contig_lengths.keys()}
+        mapped_reads_by_contig = {contig_id: 0 for contig_id in contig_lengths.keys()}
+        
+        logger.info("Parsing SAM file to calculate coverage")
+        with open(sam_file, 'r') as f:
+            for line in f:
+                # Skip header lines
+                if line.startswith('@'):
+                    continue
+                
+                parts = line.strip().split('\t')
+                if len(parts) < 11:
+                    continue
+                
+                # SAM format: QNAME, FLAG, RNAME, POS, MAPQ, CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL
+                flag = int(parts[1])
+                # Skip unmapped reads (flag 4) and secondary/supplementary alignments (flag 256/2048)
+                if flag & 4 or flag & 256 or flag & 2048:
+                    continue
+                
+                contig_id = parts[2]
+                if contig_id == '*':
+                    continue
+                
+                if contig_id not in contig_lengths:
+                    continue
+                
+                pos = int(parts[3]) - 1  # Convert to 0-based
+                cigar = parts[5]
+                seq_length = len(parts[9])
+                
+                mapped_reads_by_contig[contig_id] += 1
+                
+                # Parse CIGAR to get aligned positions
+                # Simple parsing: handle M (match), D (deletion), I (insertion)
+                current_pos = pos
+                i = 0
+                while i < len(cigar):
+                    num_str = ''
+                    while i < len(cigar) and cigar[i].isdigit():
+                        num_str += cigar[i]
+                        i += 1
+                    if i >= len(cigar):
+                        break
+                    op = cigar[i]
+                    i += 1
+                    
+                    if num_str:
+                        num = int(num_str)
+                        if op == 'M':  # Match - both reference and query advance
+                            for p in range(current_pos, current_pos + num):
+                                if p < contig_lengths[contig_id]:
+                                    if p not in contig_coverage[contig_id]:
+                                        contig_coverage[contig_id][p] = 0
+                                    contig_coverage[contig_id][p] += 1
+                            current_pos += num
+                        elif op == 'D':  # Deletion - only reference advances
+                            current_pos += num
+                        elif op == 'N':  # Skipped region - only reference advances
+                            current_pos += num
+                        # Ignore I (insertion), S (soft clip), H (hard clip)
+        
+        # Convert coverage dict to lists for consistency with BAM-based method
+        contig_coverage_lists = {}
+        for contig_id, coverage_dict in contig_coverage.items():
+            if coverage_dict:
+                # Create full coverage list
+                coverage_list = []
+                for pos in range(contig_lengths[contig_id]):
+                    coverage_list.append(coverage_dict.get(pos, 0))
+                contig_coverage_lists[contig_id] = coverage_list
+            else:
+                contig_coverage_lists[contig_id] = []
+        
+        # Calculate abundance metrics (same as BAM-based method)
+        return self._calculate_abundance_from_coverage(
+            contig_lengths, contig_coverage_lists, mapped_reads_by_contig,
+            output_dir, classification_data
+        )
+    
+    def _calculate_abundance_from_coverage(
+        self,
+        contig_lengths: Dict[str, int],
+        contig_coverage: Dict[str, List[int]],
+        mapped_reads_by_contig: Dict[str, int],
+        output_dir: Path,
+        classification_data: Optional[Dict] = None
+    ) -> Dict[str, Dict]:
+        """Calculate abundance metrics from coverage data (shared by BAM and SAM processing)."""
+        abundance_results = {}
+        total_mapped_reads = 0
+        
+        for contig_id, depths in contig_coverage.items():
+            if depths:
+                mean_coverage = sum(depths) / len(depths)
+                max_coverage = max(depths)
+                coverage_breadth = sum(1 for d in depths if d > 0) / len(depths) if depths else 0
+                total_coverage = sum(depths)
+                total_mapped_reads += total_coverage
+                
+                abundance_results[contig_id] = {
+                    'contig_length': contig_lengths.get(contig_id, 0),
+                    'mean_coverage': round(mean_coverage, 2),
+                    'max_coverage': max_coverage,
+                    'coverage_breadth': round(coverage_breadth, 3),
+                    'total_coverage': total_coverage,
+                    'mapped_reads': mapped_reads_by_contig.get(contig_id, 0),
+                    'mapped_positions': sum(1 for d in depths if d > 0)
+                }
+            else:
+                abundance_results[contig_id] = {
+                    'contig_length': contig_lengths.get(contig_id, 0),
+                    'mean_coverage': 0.0,
+                    'max_coverage': 0,
+                    'coverage_breadth': 0.0,
+                    'total_coverage': 0,
+                    'mapped_reads': mapped_reads_by_contig.get(contig_id, 0),
+                    'mapped_positions': 0
+                }
+        
+        # Calculate relative abundance
+        for contig_id, metrics in abundance_results.items():
+            if total_mapped_reads > 0:
+                relative_abundance = metrics['total_coverage'] / total_mapped_reads
+                metrics['relative_abundance'] = round(relative_abundance, 6)
+            else:
+                metrics['relative_abundance'] = 0.0
+        
+        # Write abundance summary
+        self._write_abundance_summary(abundance_results, output_dir, classification_data)
+        
+        logger.info(f"Calculated abundance for {len(abundance_results)} contigs")
+        return abundance_results
+    
     def _calculate_contig_abundance(
         self, 
         contigs_file: str, 
@@ -1220,7 +1395,7 @@ class ViralIdentifier:
         output_dir: Path,
         classification_data: Optional[Dict] = None
     ) -> Dict[str, Dict]:
-        """Calculate abundance metrics for each contig."""
+        """Calculate abundance metrics for each contig from BAM file."""
         logger.info("Calculating contig abundance metrics")
         
         # Get contig lengths
@@ -1238,63 +1413,33 @@ class ViralIdentifier:
                 logger.error(f"SAMtools depth failed: {result.stderr}")
                 return {}
         
-        # Parse depth data
+        # Parse depth data - convert to per-position coverage lists
         contig_coverage = {}
+        for contig_id in contig_lengths.keys():
+            contig_coverage[contig_id] = [0] * contig_lengths[contig_id]
+        
         with open(depth_file, 'r') as f:
             for line in f:
                 parts = line.strip().split('\t')
                 if len(parts) >= 3:
                     contig_id = parts[0]
-                    position = int(parts[1])
+                    position = int(parts[1]) - 1  # Convert to 0-based
                     depth = int(parts[2])
                     
-                    if contig_id not in contig_coverage:
-                        contig_coverage[contig_id] = []
-                    contig_coverage[contig_id].append(depth)
+                    if contig_id in contig_coverage and position < len(contig_coverage[contig_id]):
+                        contig_coverage[contig_id][position] = depth
         
-        # Calculate abundance metrics
-        abundance_results = {}
-        total_mapped_reads = 0
-        
+        # Count mapped reads per contig (approximate from total coverage)
+        mapped_reads_by_contig = {}
         for contig_id, depths in contig_coverage.items():
-            if depths:
-                mean_coverage = sum(depths) / len(depths)
-                max_coverage = max(depths)
-                coverage_breadth = len(depths) / contig_lengths.get(contig_id, 1)
-                total_coverage = sum(depths)
-                total_mapped_reads += total_coverage
-                
-                abundance_results[contig_id] = {
-                    'contig_length': contig_lengths.get(contig_id, 0),
-                    'mean_coverage': round(mean_coverage, 2),
-                    'max_coverage': max_coverage,
-                    'coverage_breadth': round(coverage_breadth, 3),
-                    'total_coverage': total_coverage,
-                    'mapped_positions': len(depths)
-                }
-            else:
-                abundance_results[contig_id] = {
-                    'contig_length': contig_lengths.get(contig_id, 0),
-                    'mean_coverage': 0.0,
-                    'max_coverage': 0,
-                    'coverage_breadth': 0.0,
-                    'total_coverage': 0,
-                    'mapped_positions': 0
-                }
+            # Estimate mapped reads as total coverage (rough approximation)
+            mapped_reads_by_contig[contig_id] = sum(depths)
         
-        # Calculate relative abundance
-        for contig_id, metrics in abundance_results.items():
-            if total_mapped_reads > 0:
-                relative_abundance = metrics['total_coverage'] / total_mapped_reads
-                metrics['relative_abundance'] = round(relative_abundance, 6)
-            else:
-                metrics['relative_abundance'] = 0.0
-        
-        # Write abundance summary
-        self._write_abundance_summary(abundance_results, output_dir, classification_data)
-        
-        logger.info(f"Calculated abundance for {len(abundance_results)} contigs")
-        return abundance_results
+        # Use shared calculation method
+        return self._calculate_abundance_from_coverage(
+            contig_lengths, contig_coverage, mapped_reads_by_contig,
+            output_dir, classification_data
+        )
     
     def _write_abundance_summary(self, abundance_results: Dict[str, Dict], output_dir: Path, classification_data: Optional[Dict] = None) -> None:
         """Write abundance summary to TSV file."""
