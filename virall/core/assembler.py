@@ -134,7 +134,7 @@ class ViralAssembler:
                     logger.debug(f"Could not check read file {read_path}: {e}")
                     continue
         
-        logger.info("No single-cell patterns detected, treating as bulk RNA-seq")
+        # No single-cell patterns detected - return False silently
         return False
     
     def _combine_transcript_files(self, long_file: str, short_file: str, output_file: Path) -> None:
@@ -686,8 +686,10 @@ class ViralAssembler:
             # Do not use SPAdes --sc (genomic single-cell mode) for scRNA-seq
             logger.info("Using SPAdes rna-viral mode")
         else:
-            cmd.append("--metaviral")
-            logger.info("Using SPAdes metaviral mode")
+            # Use regular SPAdes for DNA assemblies (not --metaviral)
+            # Metaviral mode can be too strict and fail to produce final contigs
+            logger.info("Using SPAdes standard mode for DNA assembly")
+            # Note: --metaviral removed for better compatibility with single-end reads
         
         # Add read files
         if "short_1" in reads and "short_2" in reads:
@@ -771,8 +773,10 @@ class ViralAssembler:
             # Do not use SPAdes --sc (genomic single-cell mode) for scRNA-seq
             logger.info("Using SPAdes rna-viral mode")
         else:
-            cmd.append("--metaviral")
-            logger.info("Using SPAdes metaviral mode")
+            # Use regular SPAdes for DNA assemblies (not --metaviral)
+            # Metaviral mode can be too strict and fail to produce final contigs
+            logger.info("Using SPAdes standard mode for DNA assembly")
+            # Note: --metaviral removed for better compatibility with single-end reads
         
         if "short_1" in reads and "short_2" in reads:
             cmd.extend(["-1", reads["short_1"], "-2", reads["short_2"]])
@@ -787,6 +791,19 @@ class ViralAssembler:
             logger.error(f"SPAdes stderr: {result.stderr}")
             logger.error(f"SPAdes stdout: {result.stdout}")
             raise RuntimeError(f"SPAdes failed: {result.stderr}")
+        
+        # Log what files SPAdes actually produced (for debugging)
+        logger.debug(f"SPAdes completed. Checking output directory: {output_dir}")
+        output_files = list(output_dir.glob("*.fasta")) + list(output_dir.glob("*.fa"))
+        if output_files:
+            logger.debug(f"Found {len(output_files)} FASTA files in output: {[f.name for f in output_files]}")
+        else:
+            logger.warning(f"No FASTA files found in {output_dir}. Checking subdirectories...")
+            for subdir in output_dir.iterdir():
+                if subdir.is_dir():
+                    sub_files = list(subdir.glob("*.fasta")) + list(subdir.glob("*.fa"))
+                    if sub_files:
+                        logger.debug(f"Found files in {subdir.name}: {[f.name for f in sub_files]}")
         
         # In RNA mode, prefer transcripts; if missing, prefer top-level contigs/scaffolds, then fallback
         if self.rna_mode:
@@ -815,10 +832,40 @@ class ViralAssembler:
                 "scaffolds": str(scaffolds_path)
             }
         else:
+            # DNA mode: check for standard SPAdes output files
+            contigs_path = output_dir / "contigs.fasta"
+            scaffolds_path = output_dir / "scaffolds.fasta"
+            
+            # If standard files don't exist, check for fallback locations
+            if not contigs_path.exists():
+                logger.warning("contigs.fasta not found in output directory, checking for alternative locations...")
+                # Check K-mer directories for final_contigs.fasta
+                k_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.startswith('K')]
+                if k_dirs:
+                    k_dirs.sort(key=lambda x: int(x.name[1:]) if x.name[1:].isdigit() else 0)
+                    highest_k_dir = k_dirs[-1]
+                    fallback_contigs = highest_k_dir / "final_contigs.fasta"
+                    if fallback_contigs.exists():
+                        logger.warning(f"Using {fallback_contigs} as fallback for contigs")
+                        contigs_path = fallback_contigs
+                    else:
+                        # Check for before_rr.fasta as last resort
+                        before_rr = output_dir / "before_rr.fasta"
+                        if before_rr.exists():
+                            logger.warning(f"Using {before_rr} as fallback for contigs")
+                            contigs_path = before_rr
+            
+            if not scaffolds_path.exists():
+                logger.warning("scaffolds.fasta not found in output directory")
+                # If scaffolds don't exist, use contigs as scaffolds
+                if contigs_path.exists():
+                    logger.warning("Using contigs.fasta as scaffolds (scaffolds not available)")
+                    scaffolds_path = contigs_path
+            
             return {
-            "contigs": str(output_dir / "contigs.fasta"),
-            "scaffolds": str(output_dir / "scaffolds.fasta")
-        }
+                "contigs": str(contigs_path) if contigs_path.exists() else str(output_dir / "contigs.fasta"),
+                "scaffolds": str(scaffolds_path) if scaffolds_path.exists() else str(output_dir / "scaffolds.fasta")
+            }
     
     def _long_read_assembly(self, reads: Dict[str, str], output_dir: Path, reference: Optional[Union[str, Path]] = None) -> Dict[str, str]:
         """Perform long-read only assembly using Flye (ONT or PacBio)."""
@@ -1558,15 +1605,17 @@ class ViralAssembler:
         # Add reference genome for guided assembly
         cmd.extend(["--trusted-contigs", str(reference)])
         
-        # Add mode flags (rnaviral/sc/metaviral)
+        # Add mode flags (rnaviral/sc/standard)
         is_single_cell = bool(self.config.get("single_cell_mode", False))
         if self.rna_mode:
             cmd.append("--rnaviral")
             # Do not use SPAdes --sc (genomic single-cell mode) for scRNA-seq
             logger.info("Using SPAdes rna-viral mode")
         else:
-            cmd.append("--metaviral")
-            logger.info("Using SPAdes metaviral mode")
+            # Use regular SPAdes for DNA assemblies (not --metaviral)
+            # Metaviral mode can be too strict and fail to produce final contigs
+            logger.info("Using SPAdes standard mode for DNA assembly")
+            # Note: --metaviral removed for better compatibility
         
         logger.info(f"SPAdes command: {' '.join(cmd)}")
         
