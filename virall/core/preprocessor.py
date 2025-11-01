@@ -342,6 +342,11 @@ class Preprocessor:
         logger.info("fastplong trimming completed (with automatic adapter detection)")
         logger.info(f"Quality reports saved: {fastplong_html}, {fastplong_json}")
 
+        # Fix caption mismatches: fastplong adds prefixes to headers when splitting reads
+        # but doesn't update the + line caption, causing Flye errors
+        logger.info("Fixing FASTQ caption mismatches from fastplong...")
+        self._fix_fastq_captions(output)
+        
         # Also create gzipped version
         try:
             with open(output, "rb") as fin, gzip.open(output_gz, "wb") as fout:
@@ -533,6 +538,74 @@ class Preprocessor:
         # Simple heuristic: check file name or first few reads
         filename = Path(reads).name.lower()
         return "ont" in filename or "nanopore" in filename or "minion" in filename
+    
+    def _fix_fastq_captions(self, fastq_file: Path) -> None:
+        """
+        Fix FASTQ caption mismatches caused by fastplong.
+        
+        When fastplong splits reads by adapters, it adds prefixes like
+        'split-by-adapter-right-' to the header but doesn't update the
+        + line caption, causing Flye to fail with "Sequence and quality
+        captions differ" error.
+        
+        This method normalizes the FASTQ by removing captions from +
+        lines (making them just '+') when they don't match the header.
+        """
+        try:
+            fixed_count = 0
+            total_reads = 0
+            
+            # Create temporary file for output
+            temp_output = fastq_file.with_suffix('.fixed.tmp')
+            
+            with open(fastq_file, 'r') as fin, open(temp_output, 'w') as fout:
+                lines = []
+                for line in fin:
+                    lines.append(line)
+                    
+                    # Process in groups of 4 lines (one read)
+                    if len(lines) == 4:
+                        header = lines[0].rstrip('\n\r')
+                        sequence = lines[1].rstrip('\n\r')
+                        plus_line = lines[2].rstrip('\n\r')
+                        quality = lines[3].rstrip('\n\r')
+                        
+                        # Extract captions
+                        header_caption = header[1:] if header.startswith('@') else None
+                        plus_caption = plus_line[1:] if plus_line.startswith('+') and len(plus_line) > 1 else None
+                        
+                        # Check if captions mismatch
+                        if plus_caption and header_caption and plus_caption != header_caption:
+                            # Remove caption from + line (make it just '+')
+                            fout.write(header + '\n')
+                            fout.write(sequence + '\n')
+                            fout.write('+\n')  # No caption
+                            fout.write(quality + '\n')
+                            fixed_count += 1
+                        else:
+                            # Write as-is
+                            for l in lines:
+                                fout.write(l)
+                        
+                        lines = []
+                        total_reads += 1
+                
+                # Handle any remaining lines (shouldn't happen in valid FASTQ)
+                if lines:
+                    logger.warning(f"Found {len(lines)} incomplete lines at end of FASTQ file")
+                    for l in lines:
+                        fout.write(l)
+            
+            # Replace original with fixed version
+            shutil.move(str(temp_output), str(fastq_file))
+            
+            if fixed_count > 0:
+                logger.info(f"Fixed {fixed_count} reads with caption mismatches out of {total_reads} total reads")
+            else:
+                logger.debug("No caption mismatches found in FASTQ file")
+                
+        except Exception as e:
+            logger.warning(f"Failed to fix FASTQ captions: {e}. Original file will be used.")
     
     def _check_tool_available(self, tool: str) -> bool:
         """Check if a tool is available in PATH."""

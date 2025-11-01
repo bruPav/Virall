@@ -901,12 +901,48 @@ class ViralAssembler:
             "--meta"
         ]
 
+        # Validate FASTQ file before passing to Flye
+        logger.info(f"Validating FASTQ file format before Flye assembly...")
+        if not self._validate_fastq_file(input_file):
+            logger.warning(f"FASTQ validation failed for {input_file}. Attempting to use original file...")
+            # Try using original file if preprocessed file is corrupted
+            original_file = reads.get("long")
+            if original_file and original_file != input_file:
+                logger.info(f"Trying original file: {original_file}")
+                if self._validate_fastq_file(original_file):
+                    input_file = original_file
+                    flye_cmd[2] = original_file  # Update Flye command with original file
+                else:
+                    logger.error("Both preprocessed and original files failed validation")
+                    raise RuntimeError(f"FASTQ file validation failed. File may be corrupted: {input_file}")
+            else:
+                raise RuntimeError(f"FASTQ file validation failed. File may be corrupted: {input_file}")
+        
         logger.info(f"Flye command: {' '.join(flye_cmd)}")
         result = subprocess.run(flye_cmd, capture_output=True, text=True)
         if result.returncode != 0:
             logger.error(f"Flye failed: {result.stderr}")
-            # Fallback to simple longest-reads selection if Flye fails
-            return self._long_read_assembly_simple_fallback(reads, output_dir)
+            if "Sequence and quality captions differ" in result.stderr or "Sequence and quality captions differ" in result.stdout:
+                logger.error("FASTQ format error detected. The input file may be corrupted or malformed.")
+                logger.error("This often happens when preprocessing tools produce invalid FASTQ format.")
+                logger.error(f"Problematic file: {input_file}")
+                # Try using original file as fallback
+                original_file = reads.get("long")
+                if original_file and original_file != input_file:
+                    logger.info("Attempting to use original (unprocessed) file with Flye...")
+                    flye_cmd[2] = original_file
+                    result = subprocess.run(flye_cmd, capture_output=True, text=True)
+                    if result.returncode == 0:
+                        logger.info("Flye succeeded with original file")
+                    else:
+                        logger.error(f"Flye also failed with original file: {result.stderr}")
+                        return self._long_read_assembly_simple_fallback(reads, output_dir)
+                else:
+                    # Fallback to simple longest-reads selection if Flye fails
+                    return self._long_read_assembly_simple_fallback(reads, output_dir)
+            else:
+                # Fallback to simple longest-reads selection if Flye fails
+                return self._long_read_assembly_simple_fallback(reads, output_dir)
 
         contigs_file = flye_dir / "assembly.fasta"
         if not contigs_file.exists():
@@ -918,6 +954,101 @@ class ViralAssembler:
             "scaffolds": str(contigs_file)
         }
     
+    
+    def _validate_fastq_file(self, fastq_file: str) -> bool:
+        """
+        Validate FASTQ file format by checking sequence/quality line correspondence.
+        
+        Args:
+            fastq_file: Path to FASTQ file (can be gzipped)
+            
+        Returns:
+            True if file is valid, False otherwise
+        """
+        import gzip
+        
+        try:
+            # Check if file exists
+            if not os.path.exists(fastq_file):
+                logger.warning(f"FASTQ file does not exist: {fastq_file}")
+                return False
+            
+            # Check if file is empty
+            if os.path.getsize(fastq_file) == 0:
+                logger.warning(f"FASTQ file is empty: {fastq_file}")
+                return False
+            
+            # Open file (handle gzipped)
+            if str(fastq_file).endswith('.gz'):
+                f = gzip.open(fastq_file, 'rt')
+            else:
+                f = open(fastq_file, 'r')
+            
+            with f:
+                read_count = 0
+                lines = []
+                for i, line in enumerate(f):
+                    if i >= 4000:  # Check first 1000 reads (4 lines each)
+                        break
+                    lines.append(line.rstrip('\n\r'))
+                
+                # Validate FASTQ structure: groups of 4 lines
+                if len(lines) % 4 != 0:
+                    logger.warning(f"FASTQ file has incomplete read groups (total lines: {len(lines)}, should be multiple of 4)")
+                    return False
+                
+                # Check each read group
+                for read_idx in range(0, min(len(lines), 4000), 4):
+                    if read_idx + 3 >= len(lines):
+                        break
+                    
+                    header = lines[read_idx]
+                    sequence = lines[read_idx + 1]
+                    separator = lines[read_idx + 2]
+                    quality = lines[read_idx + 3]
+                    
+                    # Validate header
+                    if not header.startswith('@'):
+                        logger.warning(f"Invalid FASTQ header at read {read_idx//4 + 1}: '{header[:20]}...'")
+                        return False
+                    
+                    # Validate separator
+                    if not separator.startswith('+'):
+                        logger.warning(f"Invalid FASTQ separator at read {read_idx//4 + 1}: '{separator[:20]}...'")
+                        return False
+                    
+                    # Check sequence and quality lengths match (critical for Flye)
+                    seq_len = len(sequence)
+                    qual_len = len(quality)
+                    
+                    if seq_len == 0:
+                        logger.warning(f"Empty sequence at read {read_idx//4 + 1}")
+                        return False
+                    
+                    if qual_len == 0:
+                        logger.warning(f"Empty quality line at read {read_idx//4 + 1}")
+                        return False
+                    
+                    if seq_len != qual_len:
+                        logger.warning(
+                            f"Sequence and quality lengths differ at read {read_idx//4 + 1}: "
+                            f"sequence length={seq_len}, quality length={qual_len}. "
+                            f"This is the error Flye reports!"
+                        )
+                        return False
+                    
+                    read_count += 1
+                
+                if read_count == 0:
+                    logger.warning(f"No valid reads found in FASTQ file: {fastq_file}")
+                    return False
+                
+                logger.debug(f"FASTQ validation passed: {read_count} reads checked, all have matching sequence/quality lengths")
+                return True
+                
+        except Exception as e:
+            logger.warning(f"FASTQ validation error for {fastq_file}: {e}")
+            return False
     
     def _long_read_assembly_simple_fallback(self, reads: Dict[str, str], output_dir: Path, reference: Optional[Union[str, Path]] = None) -> Dict[str, str]:
         """Simple fallback: select longest reads as contigs when all assemblers fail."""
