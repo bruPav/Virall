@@ -104,16 +104,7 @@ conda install -c bioconda -y fastqc fastp
 conda install -c bioconda -y checkv bcftools pilon
 # Minimal extras needed by the pipeline
 conda install -c bioconda -y hmmer prodigal
-# RNA-Bloom for transcriptome assembly (supports single-cell, bulk RNA-seq, and long reads)
-conda install -c bioconda -y rnabloom
 
-# Optional: ONT adapter trimming with Porechop
-echo "Installing optional ONT trimming tool (Porechop)..."
-if conda install -c bioconda -y porechop; then
-    echo "Porechop installed successfully"
-else
-    echo "Warning: Porechop installation failed. Long-read trimming will be skipped if unavailable."
-fi
 
 # Fix SPAdes PATH issue (create symlink)
 echo "Creating SPAdes symlink..."

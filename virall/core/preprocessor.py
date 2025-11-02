@@ -93,19 +93,15 @@ class Preprocessor:
         try:
             trimmed_reads = self._trim_long_reads_fastplong(reads, quality_threshold, min_length)
         except Exception as e:
-            logger.warning(f"fastplong failed ({e}); falling back to Porechop/manual filtering")
-            # Fallback to old method
+            logger.error(f"fastplong failed ({e})")
+            # If fastplong fails, return original reads (no trimming)
+            logger.warning("Skipping trimming - using original reads")
             trimmed_reads = reads
-            try:
-                if self._should_trim_ont_by_detection(reads):
-                    trimmed_reads = self._trim_ont_adapters(reads)
-            except Exception as e2:
-                logger.warning(f"ONT adapter detection also failed ({e2}); continuing without adapter trimming")
-            
-            # Quality filtering
-            trimmed_reads = self._filter_long_reads(
-                trimmed_reads, quality_threshold, min_length
-            )
+        
+        # Quality filtering
+        trimmed_reads = self._filter_long_reads(
+            trimmed_reads, quality_threshold, min_length
+        )
         
         # Error correction (optional)
         if self._should_correct_long_reads():
@@ -329,9 +325,9 @@ class Preprocessor:
             "--cut_window_size", "10"  # Larger window for long reads
         ]
         
-        # Check if fastplong is available, fallback to Porechop
+        # Check if fastplong is available
         if not self._check_tool_available("fastplong"):
-            logger.warning("fastplong not available, will fall back to Porechop/manual filtering")
+            logger.error("fastplong not available")
             raise RuntimeError("fastplong not available")
         
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -356,107 +352,13 @@ class Preprocessor:
         
         return str(output)
     
-    def _trim_ont_adapters(self, reads: str) -> str:
-        """Fallback: Trim ONT adapters using Porechop (write plain + gz FASTQ)."""
-        logger.info("Using Porechop fallback for ONT adapter trimming")
-        
-        output = self.temp_dir / "trimmed_ont.fastq"
-        output_gz = self.temp_dir / "trimmed_ont.fastq.gz"
-        
-        cmd = [
-            "porechop",
-            "-i", reads,
-            "-o", str(output),
-            "--threads", str(self.threads)
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            logger.warning(f"Porechop failed: {result.stderr}")
-            return reads  # Return original if trimming fails
-        
-        logger.info("ONT adapter trimming completed with Porechop")
-
-        # Also gzip a copy
-        try:
-            with open(output, "rt") as fin, gzip.open(output_gz, "wt") as fout:
-                shutil.copyfileobj(fin, fout)
-        except Exception as e:
-            logger.warning(f"Failed to create gzipped ONT-trimmed copy: {e}")
-        return str(output)
-
     def _should_trim_ont_by_detection(self, reads: str) -> bool:
-        """Detect ONT adapters using Porechop's adapter catalog.
+        """Detect if ONT reads should be trimmed based on filename heuristic.
 
-        Returns True when known ONT adapter motifs are observed in a sample of reads.
-        Falls back to filename heuristic if the catalog is unavailable.
+        Returns True when filename suggests ONT reads.
         """
-        # Quick hint from filename
-        if self._is_ont_reads(reads):
-            return True
-        adapters = self._load_known_ont_adapters()
-        if not adapters:
-            return False
-        return self._reads_contain_any_sequence(reads, adapters, max_reads=2000)
-
-    def _load_known_ont_adapters(self) -> Set[str]:
-        """Load ONT adapter sequences from Porechop's adapters.py if available."""
-        try:
-            import importlib
-            adapters_mod = importlib.import_module("porechop.adapters")
-        except Exception:
-            return set()
-        candidates: Set[str] = set()
-
-        def add_seq(s: str) -> None:
-            s_clean = s.strip().upper()
-            if len(s_clean) >= 12 and all(c in "ACGTN" for c in s_clean):
-                candidates.add(s_clean)
-
-        for name in dir(adapters_mod):
-            if name.startswith("__"):
-                continue
-            try:
-                obj = getattr(adapters_mod, name)
-            except Exception:
-                continue
-            if isinstance(obj, str):
-                add_seq(obj)
-            elif isinstance(obj, (list, tuple, set)):
-                for item in obj:
-                    if isinstance(item, str):
-                        add_seq(item)
-                    elif isinstance(item, dict):
-                        for v in item.values():
-                            if isinstance(v, str):
-                                add_seq(v)
-            elif isinstance(obj, dict):
-                for v in obj.values():
-                    if isinstance(v, str):
-                        add_seq(v)
-                    elif isinstance(v, (list, tuple, set)):
-                        for x in v:
-                            if isinstance(x, str):
-                                add_seq(x)
-        return candidates
-
-    def _reads_contain_any_sequence(self, reads: str, motifs: Set[str], max_reads: int = 2000) -> bool:
-        """Scan the first max_reads for presence of any motif (simple substring search)."""
-        try:
-            motifs_upper = {m.upper() for m in motifs}
-            count = 0
-            for record in SeqIO.parse(reads, "fastq"):
-                seq_upper = str(record.seq).upper()
-                for m in motifs_upper:
-                    if m in seq_upper:
-                        logger.info("Detected ONT adapter motifs in reads (via Porechop catalog)")
-                        return True
-                count += 1
-                if count >= max_reads:
-                    break
-        except Exception:
-            return False
-        return False
+        # Use filename heuristic to detect ONT reads
+        return self._is_ont_reads(reads)
     
     def _filter_long_reads(
         self, 

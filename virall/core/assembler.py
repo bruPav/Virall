@@ -19,7 +19,6 @@ from .preprocessor import Preprocessor
 from .viral_identifier import ViralIdentifier
 from .validator import AssemblyValidator
 from .gene_predictor import ViralGenePredictor
-from .rnabloom_assembler import RNABloomAssembler
 
 
 class ViralAssembler:
@@ -90,84 +89,7 @@ class ViralAssembler:
             vog_db_path=self.config.get('databases', {}).get('vog_db_path')
         )
         
-        # Disable RNA-Bloom in favor of SPAdes-only workflow
-        self.rnabloom_assembler = None
-        
         logger.info(f"ViralAssembler initialized with {threads} threads, {memory} memory")
-    
-    def _detect_single_cell_data(self, reads: Dict[str, str]) -> bool:
-        """
-        Detect if the data appears to be single-cell RNA-seq based on read ID patterns.
-        
-        Args:
-            reads: Dictionary containing read file paths
-            
-        Returns:
-            True if single-cell data is detected, False otherwise
-        """
-        # Check for cell barcode patterns in read IDs
-        for read_type, read_path in reads.items():
-            if read_type in ["short_1", "short_2"] and read_path:
-                try:
-                    # Handle gzipped files
-                    import gzip
-                    if str(read_path).endswith('.gz'):
-                        f = gzip.open(read_path, 'rt')
-                    else:
-                        f = open(read_path, 'r')
-                    
-                    with f:
-                        for i, line in enumerate(f):
-                            if i >= 10:  # Check first 10 reads
-                                break
-                            if line.startswith('@'):
-                                # Look for cell barcode patterns in read IDs
-                                read_id = line.strip()
-                                if '_cell_' in read_id and '_umi_' in read_id:
-                                    logger.info("Detected single-cell data based on read ID patterns")
-                                    return True
-                                # Also check for 10X Genomics patterns
-                                if 'CB:Z:' in read_id or 'UB:Z:' in read_id:
-                                    logger.info("Detected 10X Genomics single-cell data")
-                                    return True
-                except Exception as e:
-                    logger.debug(f"Could not check read file {read_path}: {e}")
-                    continue
-        
-        # No single-cell patterns detected - return False silently
-        return False
-    
-    def _combine_transcript_files(self, long_file: str, short_file: str, output_file: Path) -> None:
-        """
-        Combine long and short transcript files for comprehensive viral identification.
-        
-        Args:
-            long_file: Path to long transcripts file
-            short_file: Path to short transcripts file  
-            output_file: Path to combined output file
-        """
-        logger.info(f"Combining long and short transcripts for comprehensive viral identification")
-        
-        from Bio import SeqIO
-        
-        # Read all sequences from both files
-        all_sequences = []
-        
-        # Add long transcripts
-        if Path(long_file).exists():
-            for record in SeqIO.parse(long_file, "fasta"):
-                all_sequences.append(record)
-            logger.info(f"Added {len(list(SeqIO.parse(long_file, 'fasta')))} long transcripts")
-        
-        # Add short transcripts
-        if Path(short_file).exists():
-            for record in SeqIO.parse(short_file, "fasta"):
-                all_sequences.append(record)
-            logger.info(f"Added {len(list(SeqIO.parse(short_file, 'fasta')))} short transcripts")
-        
-        # Write combined file
-        SeqIO.write(all_sequences, output_file, "fasta")
-        logger.info(f"Combined {len(all_sequences)} transcripts into {output_file}")
     
     def _find_installation_directory(self) -> Path:
         """Find the actual installation directory where databases are located."""
@@ -676,11 +598,7 @@ class ViralAssembler:
             logger.info(f"Using reference genome for guided assembly: {reference}")
         
         # Decide SPAdes mode flags
-        is_single_cell = False
-        try:
-            is_single_cell = bool(self.config.get("single_cell_mode")) or self._detect_single_cell_data(reads)
-        except Exception:
-            is_single_cell = bool(self.config.get("single_cell_mode"))
+        is_single_cell = bool(self.config.get("single_cell_mode", False))
         if self.rna_mode:
             cmd.append("--rnaviral")
             # Do not use SPAdes --sc (genomic single-cell mode) for scRNA-seq
@@ -763,11 +681,7 @@ class ViralAssembler:
             logger.info(f"Using reference genome for guided assembly: {reference}")
         
         # Decide SPAdes mode flags
-        is_single_cell = False
-        try:
-            is_single_cell = bool(self.config.get("single_cell_mode")) or self._detect_single_cell_data(reads)
-        except Exception:
-            is_single_cell = bool(self.config.get("single_cell_mode"))
+        is_single_cell = bool(self.config.get("single_cell_mode", False))
         if self.rna_mode:
             cmd.append("--rnaviral")
             # Do not use SPAdes --sc (genomic single-cell mode) for scRNA-seq

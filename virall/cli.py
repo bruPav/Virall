@@ -4,12 +4,14 @@ Command-line interface for Virall - comprehensive viral genome analysis.
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
 
 import click
 import yaml
 from loguru import logger
+from tqdm import tqdm
 
 from .core.assembler import ViralAssembler
 from .core.preprocessor import Preprocessor
@@ -17,21 +19,71 @@ from .core.viral_identifier import ViralIdentifier
 from .core.validator import AssemblyValidator
 
 
+def setup_logging(output_dir: Optional[str] = None, log_file: Optional[str] = None, verbose: bool = False):
+    """
+    Set up logging configuration.
+    
+    Args:
+        output_dir: Output directory where log file will be created
+        log_file: Explicit log file path (overrides output_dir)
+        verbose: If True, also log to stderr
+    
+    Returns:
+        Path to log file
+    """
+    # Remove default handler (stderr)
+    logger.remove()
+    
+    # Determine log file path
+    if log_file:
+        log_path = Path(log_file)
+    elif output_dir:
+        # Create logs subdirectory in output directory
+        logs_dir = Path(output_dir) / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        # Create timestamped log file
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        log_path = logs_dir / f"virall_{timestamp}.log"
+    else:
+        # Fallback: create log in current directory
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        log_path = Path(f"virall_{timestamp}.log")
+    
+    # Add file handler - all debug/info/warning/error messages go here
+    logger.add(
+        log_path,
+        level="DEBUG",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+        rotation="100 MB",
+        retention="10 days",
+        enqueue=True  # Thread-safe logging
+    )
+    
+    # If verbose, also add stderr handler for errors/warnings only
+    if verbose:
+        logger.add(
+            sys.stderr,
+            level="WARNING",  # Only warnings and errors to console
+            format="{time:HH:mm:ss} | {level: <8} | {message}",
+            colorize=True
+        )
+    
+    logger.info(f"Virall started - log file: {log_path}")
+    # Note: Log file path is logged but not displayed to keep console clean
+    return log_path
+
+
 @click.group()
-@click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
-@click.option('--log-file', help='Log file path')
-def main(verbose: bool, log_file: Optional[str]):
+@click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging to console')
+@click.option('--log-file', help='Log file path (overrides automatic log creation)')
+@click.pass_context
+def main(ctx: click.Context, verbose: bool, log_file: Optional[str]):
     """Virall - Comprehensive viral genome analysis including assembly, classification, gene prediction, and annotation. Available commands: assemble, analyse, classify, preprocess, quantify, validate, annotate. Under development: train-model (machine learning model training)"""
     
-    # Configure logging
-    if verbose:
-        logger.remove()
-        logger.add(sys.stderr, level="DEBUG")
-    
-    if log_file:
-        logger.add(log_file, level="DEBUG")
-    
-    logger.info("Virall started")
+    # Store verbose and log_file in context for use by subcommands
+    ctx.ensure_object(dict)
+    ctx.obj['verbose'] = verbose
+    ctx.obj['log_file'] = log_file
 
 
 @main.command()
@@ -53,11 +105,6 @@ def main(verbose: bool, log_file: Optional[str]):
 @click.option('--rna-mode', is_flag=True, help='Enable RNA-specific assembly parameters')
 @click.option('--mem-efficient', '-m', is_flag=True, help='Enable memory-efficient mode with read subsampling for large datasets')
 @click.option('--single-cell', is_flag=True, help='Enable single-cell sequencing mode')
-@click.option('--cell-barcodes', help='Path to cell barcodes file (if not 10X format)')
-@click.option('--min-cells', default=100, help='Minimum number of cells to process')
-@click.option('--cellranger-path', help='Path to Cell Ranger installation')
-@click.option('--barcode-whitelist', help='Path to barcode whitelist file')
-@click.option('--index-reads', help='Path to index reads (I1) for single-cell data')
 def assemble(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -74,12 +121,7 @@ def assemble(
     assembly_strategy: str,
     rna_mode: bool,
     mem_efficient: bool,
-    single_cell: bool,
-    cell_barcodes: Optional[str],
-    min_cells: int,
-    cellranger_path: Optional[str],
-    barcode_whitelist: Optional[str],
-    index_reads: Optional[str]
+    single_cell: bool
 ):
     """Assemble reads and identify viral contigs.
     
@@ -91,6 +133,13 @@ def assemble(
     Note: No preprocessing is performed - use preprocessed reads as input.
     Output: Assembled contigs and viral contigs ready for annotation.
     """
+    
+    # Set up logging
+    from click import get_current_context
+    ctx = get_current_context()
+    verbose = ctx.obj.get('verbose', False) if ctx.obj else False
+    log_file = ctx.obj.get('log_file', None) if ctx.obj else None
+    setup_logging(output_dir=output_dir, log_file=log_file, verbose=verbose)
     
     # Validate mutually exclusive long-read inputs
     if nanopore and pacbio:
@@ -178,16 +227,32 @@ def assemble(
         assembler.config["single_reads"] = reads_dict.get("single")
         assembler.config["long_reads"] = reads_dict.get("long")
 
+        # Display progress
+        click.echo("\n" + "="*60)
+        click.echo("Virall - Viral Genome Assembly Pipeline")
+        click.echo("="*60)
+        
+        # Step 1: Assembly
+        click.echo("\nStep 1/3: Assembling sequences...")
         assembly_results = assembler._perform_assembly(reads_dict, reference)
+        click.echo("  Assembly completed")
 
-        # Viral contig identification from assembled contigs
+        # Step 2: Viral contig identification
+        click.echo("\nStep 2/3: Identifying viral contigs...")
         viral_contig_results = assembler._identify_viral_contigs_efficiently(assembly_results)
+        viral_count = sum(
+            info.get("viral_contig_count", len(info.get("viral_contigs", [])))
+            for info in viral_contig_results.get("viral_contig_info", {}).values()
+        )
+        click.echo(f"  Found {viral_count} viral contigs")
 
-        # Basic validation
+        # Step 3: Basic validation
+        click.echo("\nStep 3/3: Validating assemblies...")
         validation_results = assembler._validate_assemblies(
             viral_contig_results.get("viral_genomes", []),
             assembly_dir=assembler.output_dir / "01_assemblies"
         )
+        click.echo("  Validation completed")
 
         # Prepare a compact results dict for reporting
         results = {
@@ -202,10 +267,10 @@ def assemble(
         }
         
         # Print results summary
-        click.echo("\n" + "="*50)
-        click.echo("ASSEMBLY AND VIRAL IDENTIFICATION COMPLETED SUCCESSFULLY")
-        click.echo("="*50)
-        click.echo(f"Output directory: {results['assembly_dir']}")
+        click.echo("\n" + "="*60)
+        click.echo("ASSEMBLY AND VIRAL IDENTIFICATION COMPLETED")
+        click.echo("="*60)
+        click.echo(f"\nOutput directory: {results['assembly_dir']}")
         
         # Check if this was a reference-guided assembly
         if results.get('assembly_type') == 'reference_guided':
@@ -411,7 +476,12 @@ def assemble(
                     click.echo("  • For publication: Use SCAFFOLDS (if gap percentage < 5%)")
                     click.echo("="*60)
         
-        click.echo("\nDetailed validation results available in output directory.")
+        click.echo(f"\nDetailed validation results available in output directory.")
+        log_path = Path(output_dir) / "logs"
+        if log_path.exists():
+            log_files = list(log_path.glob("*.log"))
+            if log_files:
+                click.echo(f"Detailed log file: {log_files[-1]}")
         
     except Exception as e:
         logger.error(f"Assembly failed: {e}")
@@ -438,11 +508,6 @@ def assemble(
 @click.option('--rna-mode', is_flag=True, help='Enable RNA-specific assembly parameters')
 @click.option('--mem-efficient', '-m', is_flag=True, help='Enable memory-efficient mode with read subsampling for large datasets')
 @click.option('--single-cell', is_flag=True, help='Enable single-cell sequencing mode')
-@click.option('--cell-barcodes', help='Path to cell barcodes file (if not 10X format)')
-@click.option('--min-cells', default=100, help='Minimum number of cells to process')
-@click.option('--cellranger-path', help='Path to Cell Ranger installation')
-@click.option('--barcode-whitelist', help='Path to barcode whitelist file')
-@click.option('--index-reads', help='Path to index reads (I1) for single-cell data')
 def analyse(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -459,12 +524,7 @@ def analyse(
     assembly_strategy: str,
     rna_mode: bool,
     mem_efficient: bool,
-    single_cell: bool,
-    cell_barcodes: Optional[str],
-    min_cells: int,
-    cellranger_path: Optional[str],
-    barcode_whitelist: Optional[str],
-    index_reads: Optional[str]
+    single_cell: bool
 ):
     """Run complete viral genome analysis pipeline from sequencing reads.
     
@@ -475,6 +535,13 @@ def analyse(
     4. Gene prediction and annotation (Prodigal + VOG)
     5. Validation and quantification (CheckV + BWA)
     """
+    
+    # Set up logging
+    from click import get_current_context
+    ctx = get_current_context()
+    verbose = ctx.obj.get('verbose', False) if ctx.obj else False
+    log_file = ctx.obj.get('log_file', None) if ctx.obj else None
+    setup_logging(output_dir=output_dir, log_file=log_file, verbose=verbose)
     
     # Validate mutually exclusive long-read inputs
     if nanopore and pacbio:
@@ -539,6 +606,12 @@ def analyse(
             mem_efficient=mem_efficient
         )
         
+        # Display progress
+        click.echo("\n" + "="*60)
+        click.echo("Virall - Complete Viral Genome Analysis Pipeline")
+        click.echo("="*60)
+        click.echo("\nStarting analysis pipeline...")
+        
         # Run complete analysis pipeline
         long_reads_path = nanopore or pacbio
         results = assembler.assemble(
@@ -566,10 +639,10 @@ def analyse(
             return
         
         # Print results summary for successful analysis
-        click.echo("\n" + "="*50)
+        click.echo("\n" + "="*60)
         click.echo("ANALYSIS COMPLETED SUCCESSFULLY")
-        click.echo("="*50)
-        click.echo(f"Output directory: {results['assembly_dir']}")
+        click.echo("="*60)
+        click.echo(f"\nOutput directory: {results['assembly_dir']}")
         # Display viral contig information
         total_viral_contigs = results.get('total_viral_contigs', 0)
         click.echo(f"Viral contigs found: {total_viral_contigs}")
@@ -664,6 +737,11 @@ def analyse(
             click.echo(f"  Gene prediction directory: {vog_results.get('output_directory', 'N/A')}")
         
         click.echo(f"\nDetailed validation results available in output directory.")
+        log_path = Path(output_dir) / "logs"
+        if log_path.exists():
+            log_files = list(log_path.glob("*.log"))
+            if log_files:
+                click.echo(f"Detailed log file: {log_files[-1]}")
         
     except Exception as e:
         logger.error(f"Analysis failed: {e}")
@@ -690,6 +768,13 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
     Optional: Kaiju classification results directory
     Output: Annotated genes and proteins, optionally grouped by species
     """
+    
+    # Set up logging
+    from click import get_current_context
+    ctx = get_current_context()
+    verbose = ctx.obj.get('verbose', False) if ctx.obj else False
+    log_file = ctx.obj.get('log_file', None) if ctx.obj else None
+    setup_logging(output_dir=output_dir, log_file=log_file, verbose=verbose)
     
     if not os.path.exists(viral_contigs):
         click.echo(f"Error: Viral contigs file not found: {viral_contigs}", err=True)
@@ -845,6 +930,16 @@ def annotate(viral_contigs: str, output_dir: str, threads: int, config: Optional
 def validate(genome: str, output_dir: Optional[str], reference: Optional[str], assembly_dir: Optional[str], threads: int):
     """Validate and assess quality of assembled viral genomes."""
     
+    # Set up logging
+    from click import get_current_context
+    ctx = get_current_context()
+    verbose = ctx.obj.get('verbose', False) if ctx.obj else False
+    log_file = ctx.obj.get('log_file', None) if ctx.obj else None
+    if output_dir:
+        setup_logging(output_dir=output_dir, log_file=log_file, verbose=verbose)
+    elif log_file:
+        setup_logging(log_file=log_file, verbose=verbose)
+    
     if not Path(genome).exists():
         click.echo(f"Error: Genome file not found: {genome}", err=True)
         sys.exit(1)
@@ -933,6 +1028,13 @@ def quantify(
     Input: Viral contigs file + sequencing reads
     Output: Quantification statistics and BAM files
     """
+    
+    # Set up logging
+    from click import get_current_context
+    ctx = get_current_context()
+    verbose = ctx.obj.get('verbose', False) if ctx.obj else False
+    log_file = ctx.obj.get('log_file', None) if ctx.obj else None
+    setup_logging(output_dir=output_dir, log_file=log_file, verbose=verbose)
     
     if not Path(viral_contigs).exists():
         click.echo(f"Error: Viral contigs file not found: {viral_contigs}", err=True)
@@ -1035,6 +1137,16 @@ def classify(viral_contigs: str, output_dir: Optional[str], threads: int):
     Input: Viral contigs file (FASTA)
     Output: Classification results and summary file
     """
+    
+    # Set up logging
+    from click import get_current_context
+    ctx = get_current_context()
+    verbose = ctx.obj.get('verbose', False) if ctx.obj else False
+    log_file = ctx.obj.get('log_file', None) if ctx.obj else None
+    if output_dir:
+        setup_logging(output_dir=output_dir, log_file=log_file, verbose=verbose)
+    elif log_file:
+        setup_logging(log_file=log_file, verbose=verbose)
     
     if not Path(viral_contigs).exists():
         click.echo(f"Error: Viral contigs file not found: {viral_contigs}", err=True)
@@ -1171,6 +1283,13 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
     Supports: Single-end, paired-end, and long reads
     """
     
+    # Set up logging
+    from click import get_current_context
+    ctx = get_current_context()
+    verbose = ctx.obj.get('verbose', False) if ctx.obj else False
+    log_file = ctx.obj.get('log_file', None) if ctx.obj else None
+    setup_logging(output_dir=output_dir, log_file=log_file, verbose=verbose)
+    
     # Validate input files
     if nanopore and pacbio:
         click.echo("Error: Specify only one of --nanopore or --pacbio", err=True)
@@ -1189,6 +1308,10 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
             sys.exit(1)
     
     try:
+        click.echo("\n" + "="*60)
+        click.echo("Virall - Read Preprocessing")
+        click.echo("="*60)
+        
         # Initialize preprocessor
         preprocessor = Preprocessor(threads=threads)
         
@@ -1199,7 +1322,8 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
         
         # Process paired-end reads
         if reads_1 and reads_2:
-            click.echo("Processing paired-end reads...")
+            click.echo("\nProcessing paired-end reads...")
+            click.echo("  Running quality control and trimming...")
             processed_1, processed_2 = preprocessor.process_paired_reads(reads_1, reads_2)
             
             # Copy to output directory
@@ -1216,7 +1340,8 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
         
         # Process single-end reads
         if single_reads:
-            click.echo("Processing single-end reads...")
+            click.echo("\nProcessing single-end reads...")
+            click.echo("  Running quality control and trimming...")
             processed_single = preprocessor.process_single_reads(single_reads)
             
             # Copy to output directory
@@ -1230,7 +1355,8 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
         # Process long reads
         long_reads = nanopore or pacbio
         if long_reads:
-            click.echo("Processing long reads...")
+            click.echo("\nProcessing long reads...")
+            click.echo("  Running quality control and trimming...")
             processed_long = preprocessor.process_long_reads(long_reads)
 
             # Copy to output directory
@@ -1241,8 +1367,10 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
 
             click.echo(f"Long reads processed: {output_long}")
         
-        click.echo(f"\nPreprocessing completed successfully!")
-        click.echo(f"Processed files saved to: {output_dir}")
+        click.echo("\n" + "="*60)
+        click.echo("PREPROCESSING COMPLETED SUCCESSFULLY")
+        click.echo("="*60)
+        click.echo(f"\nProcessed files saved to: {output_dir}")
         
         # Generate quality report and copy to output directory
         quality_report = preprocessor.get_quality_report()

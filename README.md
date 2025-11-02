@@ -20,6 +20,10 @@ A comprehensive tool for viral genome analysis including assembly, classificatio
 - **Quality assessment**: CheckV integration for viral genome completeness
  - **Single-cell RNA-seq (pooled)**: Supports pooled scRNA-seq by assembling cDNA (R2) with SPAdes rna-viral mode
 
+## Workflow
+
+See the [complete workflow diagram](viral_assembly_workflow.md) for a visual overview of the pipeline, including preprocessing, assembly, viral identification, and annotation steps.
+
 ## Installation
 
 ### Quick Start
@@ -34,8 +38,8 @@ bash install.sh
 ```
 
 The installation script will:
-- Install all required dependencies (SPAdes, Flye, Kaiju, CheckV, etc.)
-- Download and set up viral databases
+- Install all required dependencies (SPAdes, Flye, Kaiju, CheckV, BWA, minimap2, samtools, fastp, fastplong, etc.)
+- Download and set up viral databases (Kaiju viral database, VOG database)
 - Install the Python package
 
 ## Usage
@@ -48,11 +52,14 @@ virall analyse --single-reads reads.fastq -o output_dir
 
 virall analyse --short-reads-1 reads_1.fastq --short-reads-2 reads_2.fastq -o output_dir
 
-# Long reads only
-virall analyse --long-reads reads.fastq -o output_dir
+# Long reads only (ONT Nanopore)
+virall analyse --nanopore nanopore_reads.fastq -o output_dir
+
+# Long reads only (PacBio)
+virall analyse --pacbio pacbio_reads.fastq -o output_dir
 
 # Hybrid assembly (short + long reads)
-virall analyse --short-reads-1 reads_1.fastq --short-reads-2 reads_2.fastq --long-reads reads.fastq -o output_dir
+virall analyse --short-reads-1 reads_1.fastq --short-reads-2 reads_2.fastq --nanopore long_reads.fastq -o output_dir
 ```
 
 ### Reference-guided analysis
@@ -69,7 +76,7 @@ virall analyse --single-reads reads.fastq --reference ref.fasta -o output_dir
 Add a '--mem-efficient' flag. For example
 ```bash
 # For large datasets
-virall analyse --long-reads large_dataset.fastq --mem-efficient -o output_dir
+virall analyse --nanopore large_dataset.fastq --mem-efficient -o output_dir
 ```
 
 ### Single-cell RNA-seq (pooled)
@@ -158,7 +165,8 @@ Usage: virall analyse [OPTIONS]
 Options:
   --short-reads-1 TEXT         Path to first mate of paired-end reads
   --short-reads-2 TEXT         Path to second mate of paired-end reads
-  --long-reads TEXT            Path to long reads (PacBio/ONT)
+  --nanopore TEXT              Path to ONT Nanopore long reads
+  --pacbio TEXT                Path to PacBio long reads
   --single-reads TEXT          Path to single-end reads
   --reference TEXT             Optional reference genome for guided assembly
   -o, --output-dir TEXT        Output directory [required]
@@ -170,6 +178,7 @@ Options:
   --assembly-strategy [hybrid|short_only|long_only]  Assembly strategy [default: hybrid]
   --rna-mode                   Enable RNA-specific assembly parameters
   -m, --mem-efficient          Enable memory-efficient mode with read subsampling for large datasets
+  --single-cell                Enable single-cell sequencing mode (pooled scRNA-seq)
   --help                       Show this message and exit.
 ```
 
@@ -212,23 +221,34 @@ databases:
 ## Dependencies
 
 ### Required Tools
-- **SPAdes**: Short-read assembly
+- **SPAdes**: Short-read assembly (including RNA viral mode)
 - **Flye**: Long-read assembly
 - **Kaiju**: Taxonomic classification
 - **CheckV**: Viral genome validation
 - **Prodigal**: Gene prediction
-- **HMMER**: Protein annotation
+- **HMMER**: Protein annotation (VOG database searches)
+- **BWA**: Short-read mapping for quantification
+- **minimap2**: Long-read mapping for quantification and polishing
+- **samtools**: BAM file processing
+- **bcftools**: Variant calling and consensus generation
+- **pilon**: Assembly polishing
 - **FastQC**: Quality control
-- **fastp**: Read trimming (automatic adapter detection)
+- **fastp**: Short-read trimming (automatic adapter detection)
 - **fastplong**: Long-read trimming (automatic adapter detection)
-- **Porechop**: Long-read trimming (optional fallback)
 
 ### Python Packages
-- click
-- pyyaml
-- biopython
-- pandas
-- numpy
+- click (command-line interface)
+- pyyaml (configuration files)
+- biopython (sequence handling)
+- pandas (data manipulation)
+- numpy (numerical computing)
+- scikit-learn (machine learning)
+- loguru (logging)
+- tqdm (progress bars)
+- psutil (system utilities)
+- matplotlib (plotting - for future features)
+- seaborn (plotting - for future features)
+- plotly (plotting - for future features)
 
 ## Examples
 
@@ -247,7 +267,7 @@ virall analyse \
 
 ```bash
 virall analyse \
-  --long-reads nanopore_reads.fastq \
+  --nanopore nanopore_reads.fastq \
   --reference viral_reference.fasta \
   --mem-efficient \
   -o long_read_analysis
@@ -259,7 +279,7 @@ virall analyse \
 virall analyse \
   --short-reads-1 rna_R1.fastq \
   --short-reads-2 rna_R2.fastq \
-  --long-reads rna_long.fastq \
+  --nanopore rna_long.fastq \
   --rna-mode \
   -o rna_analysis
 ```

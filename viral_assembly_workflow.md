@@ -27,13 +27,11 @@ flowchart TD
     K2 -->|Fail| M
     L --> N[Preprocessed Reads]
     
-    %% Single-Cell Preprocessing
-    H --> O[Cell Barcode Extraction<br/>16bp from R1]
-    O --> P[UMI Extraction<br/>12bp from R1]
-    P --> Q[Cell Validation<br/>Min 10 reads/cell]
-    Q --> R[Read Restructuring<br/>R2 cDNA sequences]
-    R --> S[Cell Metadata<br/>Generation]
-    S --> T[Single-Cell QC<br/>Report]
+    %% Single-Cell Preprocessing (Pooled Mode)
+    H --> O[Extract R2 cDNA Reads<br/>from Paired-End Input]
+    O --> P[Pool R2 Reads<br/>as Single-End]
+    P --> Q[Enable RNA Mode<br/>Automatically]
+    Q --> T[Standard Preprocessing<br/>fastp trimming]
     
     %% Assembly Branch
     N --> U{Assembly Strategy}
@@ -41,13 +39,13 @@ flowchart TD
     U --> V[Hybrid Assembly<br/>Short + Long reads]
     U --> W[Short-Read Only<br/>SPAdes]
     U --> X[Long-Read Only<br/>Flye]
-    U --> Y[RNA Assembly<br/>RNA-Bloom]
+    U --> Y[RNA/Single-Cell Mode<br/>SPAdes --rnaviral]
     
     %% Assembly Methods
-    V --> Z[SPAdes<br/>Combined]
+    V --> Z[SPAdes + Flye<br/>Combined]
     W --> AA[SPAdes Assembly<br/>Illumina reads]
     X --> BB[Flye Assembly<br/>ONT/PacBio reads]
-    Y --> CC[RNA-Bloom Assembly<br/>Transcriptome]
+    Y --> CC[SPAdes RNA-Viral<br/>Transcriptome assembly]
     
     %% Assembly Output
     Z --> DD[Assembled Contigs]
@@ -57,8 +55,8 @@ flowchart TD
     
     %% Viral Identification
     DD --> EE[Viral Contig Identification]
-    EE --> FF[Kaiju Classification<br/>Viral Database]
-    FF --> GG[ML Model Prediction<br/>Viral Confidence >=0.8]
+    EE --> FF[Kaiju Classification<br/>Viral Database<br/>Direct Contig Analysis]
+    FF --> GG[Confidence Filtering<br/>Threshold >=0.8]
     GG --> HH[Viral Contigs<br/>Filtered]
     
     %% Gene Prediction & Annotation
@@ -100,7 +98,7 @@ flowchart TD
     classDef viral fill:#ffebee,stroke:#c62828,stroke-width:2px
     
     class A,C,D,E,F input
-    class G,H,J,J2,L,O,P,Q,R,S process
+    class G,H,J,J2,L,O,P,Q,T process
     class B,I,K,K2,U,PP decision
     class UU,VV,WW,XX output
     class EE,FF,GG,HH,II,JJ,KK viral
@@ -115,19 +113,20 @@ flowchart TD
 ### 2. **Preprocessing**
 - **Short Reads**: fastp (QC + automatic adapter detection + trimming) → Error Correction
 - **Long Reads**: fastplong (QC + automatic adapter detection + trimming for ONT/PacBio) → Error Correction
-- **Single-Cell Pipeline**: Cell barcode extraction → UMI processing → Read restructuring
+- **Single-Cell Pipeline (Pooled Mode)**: Extracts R2 (cDNA) reads from paired-end input → Pools as single-end → Enables RNA mode automatically → Standard fastp preprocessing
 - Quality filtering with configurable thresholds (default: Phred ≥20 for short, ≥7 for long)
 - Both fastp and fastplong automatically detect and trim adapters without requiring adapter sequence files
 
 ### 3. **Assembly**
 - **Hybrid**: Combines short and long reads using SPAdes + Flye
-- **Short-read only**: SPAdes for Illumina data
+- **Short-read only**: SPAdes for Illumina data (standard, metaviral, or sc modes)
 - **Long-read only**: Flye for ONT/PacBio data
-- **RNA mode**: RNA-Bloom for transcriptome assembly
+- **RNA mode**: SPAdes `--rnaviral` for transcriptome assembly (RNA-seq and single-cell RNA-seq)
+- **Single-cell mode**: Automatically enables RNA mode and uses SPAdes `--rnaviral` without genomic single-cell flag (pooled assembly)
 
 ### 4. **Viral Identification**
-- Kaiju classification against viral databases
-- Machine learning model for viral confidence scoring
+- Kaiju classification against viral databases (direct contig analysis)
+- Efficient identification from assembled contigs (no read-based filtering)
 - Filtering based on confidence threshold (default: ≥0.8)
 
 ### 5. **Annotation**
@@ -150,6 +149,6 @@ flowchart TD
 - **Modular Design**: Each step can be run independently
 - **Configurable**: YAML configuration file for parameter tuning
 - **Multi-format Support**: Handles various sequencing technologies
-- **Single-cell Ready**: Specialized processing for 10X Genomics data
+- **Single-cell Ready**: Pooled single-cell RNA-seq support (R2 cDNA assembly with SPAdes --rnaviral)
 - **Quality Focused**: Multiple validation and QC steps
 - **Scalable**: Memory-efficient mode for large datasets
