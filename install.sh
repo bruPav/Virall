@@ -71,9 +71,7 @@ conda activate virall
 
 # Install Python dependencies with conda (avoids GCC compilation issues)
 echo "Installing Python dependencies with conda..."
-conda install -c conda-forge -y numpy pandas matplotlib seaborn plotly
-conda install -c conda-forge -y biopython scikit-learn
-conda install -c conda-forge -y click tqdm pyyaml loguru psutil
+conda install -c conda-forge -y numpy pandas matplotlib seaborn plotly biopython scikit-learn click tqdm pyyaml loguru psutil
 
 # Ensure mamba is available before using it
 echo "Checking for mamba (faster dependency solver)..."
@@ -90,16 +88,16 @@ echo "Installing bioinformatics tools..."
 # Install samtools (newer version 1.22+ works with modern OpenSSL 3.x, avoiding libcrypto.so.1.0.0 issues)
 echo "Installing samtools (will get latest version compatible with modern OpenSSL)..."
 conda install -c bioconda -y bwa minimap2
-mamba install -n virall -c bioconda -c conda-forge samtools -y || conda install -c bioconda samtools -y
+mamba install -c bioconda -c conda-forge samtools -y || conda install -c bioconda samtools -y
 # Install spades separately with both bioconda and conda-forge channels to avoid dependency conflicts
 echo "Installing spades (with specific channels to avoid dependency conflicts)..."
-mamba install -n virall -c conda-forge -c bioconda spades=4.2.0 -y
+mamba install -c conda-forge -c bioconda spades=4.2.0 -y
 # Install flye separately with both bioconda and conda-forge channels to avoid dependency conflicts
 echo "Installing flye (with specific channels to avoid dependency conflicts)..."
-mamba install -n virall -c bioconda -c conda-forge flye=2.9.6 -y
+mamba install -c bioconda -c conda-forge flye=2.9.6 -y
 # Install fastplong separately with both bioconda and conda-forge channels to resolve isa-l dependency
 echo "Installing fastplong (with specific channels to avoid dependency conflicts)..."
-mamba install -n virall -c bioconda -c conda-forge fastplong=0.4.1 -y
+mamba install -c bioconda -c conda-forge fastplong=0.4.1 -y
 conda install -c bioconda -y fastqc fastp
 conda install -c bioconda -y checkv bcftools pilon
 # Minimal extras needed by the pipeline
@@ -116,9 +114,6 @@ else
     echo "SPAdes not found, may need manual symlink"
 fi
 
-# Install problematic tools in separate environments
-echo "Installing additional tools in separate environments..."
-
 # Verify BWA, minimap2, and samtools are properly installed
 echo "Verifying bioinformatics tools installation..."
 # Test samtools - check if it runs (newer versions work with modern OpenSSL)
@@ -129,7 +124,7 @@ else
     echo "Warning: samtools has dependency issues"
     echo "  Attempting to fix by reinstalling samtools..."
     # Reinstall samtools (will get latest version compatible with system OpenSSL)
-    mamba install -n virall -c bioconda -c conda-forge samtools --force-reinstall -y 2>/dev/null || \
+    mamba install -c bioconda -c conda-forge samtools --force-reinstall -y 2>/dev/null || \
     conda install -c bioconda samtools --force-reinstall -y 2>/dev/null
     # Test again
     if samtools --version >/dev/null 2>&1; then
@@ -142,8 +137,8 @@ else
 fi
 
 # Install the virall package in development mode
-echo "Installing virall package..."
-pip install -e .
+# (We'll do this after database setup to ensure everything is ready)
+echo "Virall package will be installed after database setup..."
 
 # Set up VOG database for viral gene annotation
 echo "Setting up VOG (Viral Orthologous Groups) database..."
@@ -327,35 +322,35 @@ fi
 
 echo "All tools installed successfully!"
 
-# Install the package
-echo "Installing Viral Genome Assembler package..."
+# Install the virall package in development mode
+echo "Installing Virall package in development mode..."
 cd "$SOFTWARE_DIR"
-python setup.py install
+pip install -e .
 
 # Note: Working directories (data, results, logs, models) will be created automatically when needed
 
-# Clean up unnecessary files and folders
+# Clean up unnecessary files and folders (in SOFTWARE_DIR)
 echo "Cleaning up unnecessary files and folders..."
 echo "Removing build artifacts..."
-rm -rf build/ 2>/dev/null || echo "  - build/ directory not found"
-rm -rf virall.egg-info/ 2>/dev/null || echo "  - virall.egg-info/ directory not found"
+rm -rf "$SOFTWARE_DIR/build/" 2>/dev/null || echo "  - build/ directory not found"
+# Note: virall.egg-info is needed for editable install, don't remove it
 
 echo "Removing Kaiju temporary files..."
-rm -f nodes.dmp merged.dmp names.dmp taxdump.tar.gz 2>/dev/null || echo "  - Kaiju temporary files not found"
+rm -f "$SOFTWARE_DIR/nodes.dmp" "$SOFTWARE_DIR/merged.dmp" "$SOFTWARE_DIR/names.dmp" "$SOFTWARE_DIR/taxdump.tar.gz" 2>/dev/null || echo "  - Kaiju temporary files not found"
 
 # Move viruses directory to databases/kaiju_db if it exists
-if [ -d "viruses" ] && [ "$(ls -A viruses 2>/dev/null)" ]; then
+if [ -d "$SOFTWARE_DIR/viruses" ] && [ "$(ls -A $SOFTWARE_DIR/viruses 2>/dev/null)" ]; then
     echo "Moving viruses directory to databases/kaiju_db..."
-    mv viruses/* databases/kaiju_db/ 2>/dev/null || echo "  - Some files may already be in databases/kaiju_db"
-    rmdir viruses 2>/dev/null || echo "  - viruses directory not empty, keeping it"
+    mv "$SOFTWARE_DIR/viruses"/* "$SOFTWARE_DIR/databases/kaiju_db/" 2>/dev/null || echo "  - Some files may already be in databases/kaiju_db"
+    rmdir "$SOFTWARE_DIR/viruses" 2>/dev/null || echo "  - viruses directory not empty, keeping it"
     echo "  - Moved Kaiju database files to databases/kaiju_db/"
 fi
 
 # Remove empty directories that shouldn't exist
 echo "Removing empty directories..."
 for dir in data results logs models; do
-    if [ -d "$dir" ] && [ -z "$(ls -A $dir 2>/dev/null)" ]; then
-        rmdir "$dir" 2>/dev/null && echo "  - Removed empty $dir/ directory"
+    if [ -d "$SOFTWARE_DIR/$dir" ] && [ -z "$(ls -A $SOFTWARE_DIR/$dir 2>/dev/null)" ]; then
+        rmdir "$SOFTWARE_DIR/$dir" 2>/dev/null && echo "  - Removed empty $dir/ directory"
     fi
 done
 
