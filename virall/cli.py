@@ -606,13 +606,12 @@ def analyse(
             mem_efficient=mem_efficient
         )
         
-        # Display progress
+        # Display header
         click.echo("\n" + "="*60)
         click.echo("Virall - Complete Viral Genome Analysis Pipeline")
         click.echo("="*60)
-        click.echo("\nStarting analysis pipeline...")
         
-        # Run complete analysis pipeline
+        # Run complete analysis pipeline (progress messages are handled in assembler.assemble())
         long_reads_path = nanopore or pacbio
         results = assembler.assemble(
             short_reads_1=short_reads_1,

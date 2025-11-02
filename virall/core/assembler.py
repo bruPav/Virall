@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 from loguru import logger
 
+import click
 import pandas as pd
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
@@ -208,9 +209,11 @@ class ViralAssembler:
         
         # Step 1: Preprocessing
         logger.info("Step 1: Preprocessing reads")
+        click.echo("\nStep 1/5: Preprocessing reads...")
         preprocessed_reads = self._preprocess_reads(
             short_reads_1, short_reads_2, long_reads, single_reads
         )
+        click.echo("  Preprocessing completed")
         # Make preprocessed read paths available for downstream steps (e.g., quantification)
         try:
             if isinstance(preprocessed_reads, dict):
@@ -227,14 +230,23 @@ class ViralAssembler:
         
         # Step 2: Single assembly of all reads
         logger.info("Step 2: Performing initial assembly of all reads")
+        click.echo("\nStep 2/5: Assembling sequences...")
         assembly_results = self._perform_assembly(preprocessed_reads, reference)
+        click.echo("  Assembly completed")
         
         # Step 3: Efficient viral identification from contigs
         logger.info("Step 3: Identifying viral contigs from assembly")
+        click.echo("\nStep 3/5: Identifying viral contigs...")
         viral_contig_results = self._identify_viral_contigs_efficiently(assembly_results)
+        viral_count = sum(
+            info.get("viral_contig_count", len(info.get("viral_contigs", [])))
+            for info in viral_contig_results.get("viral_contig_info", {}).values()
+        )
+        click.echo(f"  Found {viral_count} viral contigs")
         
         # Step 4: Gene prediction and annotation
         logger.info("Step 4: Predicting and annotating viral genes")
+        click.echo("\nStep 4/5: Predicting genes and annotating...")
         
         # Collect classification data from all assembly types
         all_classification_data = {}
@@ -259,13 +271,24 @@ class ViralAssembler:
             viral_contig_results.get("viral_genomes", []),
             all_classification_data
         )
+        if gene_prediction_results and isinstance(gene_prediction_results, dict):
+            summary = gene_prediction_results.get('summary', {})
+            total_genes = summary.get('total_genes', 0) if isinstance(summary, dict) else 0
+            if total_genes > 0:
+                click.echo(f"  Predicted {total_genes} genes")
+            else:
+                click.echo("  Gene prediction completed")
+        else:
+            click.echo("  Gene prediction completed")
         
         # Step 5: Validation and quality assessment
         logger.info("Step 5: Validating viral assemblies")
+        click.echo("\nStep 5/5: Validating assemblies...")
         validation_results = self._validate_assemblies(
             viral_contig_results.get("viral_genomes", []),
             assembly_dir=self.output_dir / "01_assemblies"
         )
+        click.echo("  Validation completed")
         
         # Calculate total viral contigs across all assembly types
         total_viral_contigs = 0
@@ -290,6 +313,7 @@ class ViralAssembler:
         self.cleanup_temp_files()
         
         logger.info("Efficient assembly pipeline completed successfully")
+        click.echo("\nPipeline completed successfully!")
         return results
     
     def assemble_and_identify(
@@ -451,6 +475,7 @@ class ViralAssembler:
                 continue
                 
             logger.info(f"Identifying viral contigs in {assembly_type} assembly")
+            click.echo(f"  Analyzing {assembly_type}...")
             
             # Use the efficient viral identification method
             viral_contigs_dir = self.output_dir / "02_viral_contigs"
@@ -480,6 +505,7 @@ class ViralAssembler:
                     classifications_dir = self.output_dir / "03_classifications"
                     classifications_dir.mkdir(parents=True, exist_ok=True)
                     kaiju_dir = classifications_dir / f"kaiju_{assembly_type}"
+                    click.echo(f"    Running Kaiju classification...")
                     kaiju_results = self.viral_identifier.classify_viral_contigs(
                         contigs_file=str(viral_output_file),
                         output_dir=str(kaiju_dir)
@@ -503,6 +529,7 @@ class ViralAssembler:
                     quantification_dir = self.output_dir / "06_quantification"
                     quantification_dir.mkdir(parents=True, exist_ok=True)
                     quant_dir = quantification_dir / assembly_type
+                    click.echo(f"    Quantifying contigs...")
                     quant_results = self.viral_identifier.quantify_viral_contigs(
                         contigs_file=str(viral_output_file),
                         reads_1=self.config.get("short_reads_1"),
@@ -581,6 +608,7 @@ class ViralAssembler:
         """Perform hybrid assembly using SPAdes only."""
         
         logger.info("Running hybrid assembly with SPAdes")
+        click.echo("  Running SPAdes hybrid assembly (this may take several minutes)...")
         
         # Convert memory from "16G" format to just number for SPAdes
         memory_value = self.memory.replace('G', '').replace('g', '')
@@ -664,6 +692,7 @@ class ViralAssembler:
         """Perform short-read only assembly with SPAdes."""
         
         logger.info("Running short-read assembly with SPAdes")
+        click.echo("  Running SPAdes assembly (this may take several minutes)...")
         
         # Convert memory from "16G" format to just number for SPAdes
         memory_value = self.memory.replace('G', '').replace('g', '')
@@ -784,6 +813,7 @@ class ViralAssembler:
     def _long_read_assembly(self, reads: Dict[str, str], output_dir: Path, reference: Optional[Union[str, Path]] = None) -> Dict[str, str]:
         """Perform long-read only assembly using Flye (ONT or PacBio)."""
         logger.info("Running long-read only assembly with Flye")
+        click.echo("  Running Flye assembly (this may take several minutes)...")
 
         # Determine long-read technology and input file
         long_reads_file = reads.get("long")
