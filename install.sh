@@ -303,17 +303,22 @@ if [ "$VERIFICATION_FAILED" = true ]; then
     echo "Warning: Some tools may not be working correctly. The pipeline may have limited functionality."
 fi
 
+# Get the software installation directory (needed for package installation and database setup)
+SOFTWARE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Install the virall package in development mode
-# (We'll do this after database setup to ensure everything is ready)
-echo "Virall package will be installed after database setup..."
+# (Install before database setup since VOG setup needs it)
+echo "Installing Virall package in development mode..."
+cd "$SOFTWARE_DIR"
+pip install -e . || {
+    echo "Warning: Failed to install virall package"
+    echo "  Continuing anyway - you can install it manually later"
+}
 
 # Set up VOG database for viral gene annotation
 echo "Setting up VOG (Viral Orthologous Groups) database..."
 echo "This will download ~1GB of viral protein data for functional annotation"
 echo "Note: This step may take several minutes depending on your internet connection"
-
-# Get the software installation directory
-SOFTWARE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VOG_DB_DIR="$SOFTWARE_DIR/databases/vog_db"
 mkdir -p "$VOG_DB_DIR"
 
@@ -331,16 +336,21 @@ else
     VOG_OUTPUT=$(python -c "
 from virall.core.vog_annotator import VOGAnnotator
 import sys
-annotator = VOGAnnotator()
-if annotator.setup_vog_database('$VOG_DB_DIR'):
-    print('SUCCESS')
-    sys.exit(0)
-else:
-    print('FAILED')
+try:
+    annotator = VOGAnnotator()
+    if annotator.setup_vog_database('$VOG_DB_DIR'):
+        print('SUCCESS')
+        sys.exit(0)
+    else:
+        print('FAILED')
+        sys.exit(1)
+except Exception as e:
+    print(f'FAILED: {e}')
     sys.exit(1)
-" 2>&1)
+" 2>&1) || true
     
-    if [ $? -eq 0 ] && echo "$VOG_OUTPUT" | grep -q "SUCCESS"; then
+    VOG_EXIT_CODE=$?
+    if [ $VOG_EXIT_CODE -eq 0 ] && echo "$VOG_OUTPUT" | grep -q "SUCCESS"; then
         # Verify the database file was actually created
         if [ -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
             echo "VOG database setup completed successfully"
@@ -524,10 +534,7 @@ fi
 
 echo "All tools installed successfully!"
 
-# Install the virall package in development mode
-echo "Installing Virall package in development mode..."
-cd "$SOFTWARE_DIR"
-pip install -e .
+# Note: Virall package was already installed earlier (before database setup)
 
 # Note: Working directories (data, results, logs, models) will be created automatically when needed
 
