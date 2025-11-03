@@ -218,6 +218,10 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
     # Install other tools (checkv, bcftools, pilon, hmmer, prodigal)
     if [ ${#OTHER_TOOLS[@]} -gt 0 ]; then
         echo "Installing other tools: ${OTHER_TOOLS[*]}..."
+        # Ensure MPI libraries are available for HMMER (if OpenMPI was installed via SPAdes)
+        if [ -d "$CONDA_PREFIX/lib" ]; then
+            export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+        fi
         mamba install -c bioconda "${OTHER_TOOLS[@]}" -y || {
             echo "Warning: Failed to install other tools together, trying individually..."
             for tool in "${OTHER_TOOLS[@]}"; do
@@ -237,12 +241,20 @@ fi
 
 # Fix SPAdes PATH issue (create symlink)
 echo "Creating SPAdes symlink..."
-SPADES_PATH=$(find $CONDA_PREFIX -name "spades.py" -path "*/share/spades-*/bin/*" | head -1)
+SPADES_PATH=$(find $CONDA_PREFIX -name "spades.py" 2>/dev/null | head -1)
 if [ -n "$SPADES_PATH" ]; then
     ln -sf "$SPADES_PATH" "$CONDA_PREFIX/bin/spades"
-    echo "SPAdes symlink created"
+    echo "SPAdes symlink created: $SPADES_PATH -> $CONDA_PREFIX/bin/spades"
 else
-    echo "SPAdes not found, may need manual symlink"
+    # Try alternative locations
+    SPADES_PATH=$(which spades.py 2>/dev/null)
+    if [ -n "$SPADES_PATH" ]; then
+        ln -sf "$SPADES_PATH" "$CONDA_PREFIX/bin/spades"
+        echo "SPAdes symlink created: $SPADES_PATH -> $CONDA_PREFIX/bin/spades"
+    else
+        echo "Warning: SPAdes not found, may need manual symlink"
+        echo "  Try: find $CONDA_PREFIX -name spades.py"
+    fi
 fi
 
 # Verify critical tools are working
@@ -310,22 +322,47 @@ if [ -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
     echo "VOG database already exists and is ready to use"
 else
     echo "Setting up VOG database (this may take 5-10 minutes)..."
-    if python -c "
+    # Fix MPI library path for HMMER (if OpenMPI is installed via SPAdes)
+    if [ -d "$CONDA_PREFIX/lib" ]; then
+        export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+    fi
+    
+    # Run VOG setup and check the actual output
+    VOG_OUTPUT=$(python -c "
 from virall.core.vog_annotator import VOGAnnotator
+import sys
 annotator = VOGAnnotator()
 if annotator.setup_vog_database('$VOG_DB_DIR'):
-    print('VOG database setup completed successfully')
+    print('SUCCESS')
+    sys.exit(0)
 else:
-    print('VOG database setup failed')
-"; then
-        echo "VOG database setup completed successfully"
-        echo "   - Downloaded and extracted VOG HMM database"
-        echo "   - Pressed database for HMMER searches"
-        echo "   - Ready for viral gene annotation"
+    print('FAILED')
+    sys.exit(1)
+" 2>&1)
+    
+    if [ $? -eq 0 ] && echo "$VOG_OUTPUT" | grep -q "SUCCESS"; then
+        # Verify the database file was actually created
+        if [ -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
+            echo "VOG database setup completed successfully"
+            echo "   - Downloaded and extracted VOG HMM database"
+            echo "   - Pressed database for HMMER searches"
+            echo "   - Ready for viral gene annotation"
+        else
+            echo "Warning: VOG database setup reported success but database file not found"
+            echo "   The database may need to be pressed manually:"
+            echo "   hmmpress $VOG_DB_DIR/vog.hmm"
+        fi
     else
-        echo "Warning: VOG database setup failed or was interrupted"
-        echo "   You can run this later with:"
-        echo "   python -c \"from virall.core.vog_annotator import VOGAnnotator; VOGAnnotator().setup_vog_database('$VOG_DB_DIR')\""
+        echo "Warning: VOG database setup failed"
+        echo "$VOG_OUTPUT" | grep -i error || echo "   Check the error messages above"
+        echo ""
+        echo "Common issues:"
+        echo "  1. MPI library not found - try: export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\""
+        echo "  2. Network issues - try running setup again"
+        echo ""
+        echo "You can run this later with:"
+        echo "  export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\""
+        echo "  python -c \"from virall.core.vog_annotator import VOGAnnotator; VOGAnnotator().setup_vog_database('$VOG_DB_DIR')\""
     fi
 fi
 
