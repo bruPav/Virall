@@ -328,14 +328,27 @@ if [ -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
 else
     echo "Setting up VOG database (this may take 5-10 minutes)..."
     # Fix MPI library path for HMMER (if OpenMPI is installed via SPAdes)
+    # Set LD_LIBRARY_PATH in Python environment so subprocess calls inherit it
     if [ -d "$CONDA_PREFIX/lib" ]; then
         export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
     fi
     
     # Run VOG setup and check the actual output
+    # Set LD_LIBRARY_PATH in Python environment so hmmpress subprocess can find MPI libraries
     VOG_OUTPUT=$(python -c "
-from virall.core.vog_annotator import VOGAnnotator
+import os
 import sys
+from virall.core.vog_annotator import VOGAnnotator
+
+# Set LD_LIBRARY_PATH for subprocess calls (hmmpress needs MPI libraries)
+conda_prefix = os.environ.get('CONDA_PREFIX', '')
+if conda_prefix:
+    lib_path = os.path.join(conda_prefix, 'lib')
+    if os.path.isdir(lib_path):
+        current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
+        new_ld_path = f'{lib_path}:{current_ld_path}' if current_ld_path else lib_path
+        os.environ['LD_LIBRARY_PATH'] = new_ld_path
+
 try:
     annotator = VOGAnnotator()
     if annotator.setup_vog_database('$VOG_DB_DIR'):
@@ -365,14 +378,52 @@ except Exception as e:
     else
         echo "Warning: VOG database setup failed"
         echo "$VOG_OUTPUT" | grep -i error || echo "   Check the error messages above"
-        echo ""
-        echo "Common issues:"
-        echo "  1. MPI library not found - try: export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\""
-        echo "  2. Network issues - try running setup again"
-        echo ""
-        echo "You can run this later with:"
-        echo "  export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\""
-        echo "  python -c \"from virall.core.vog_annotator import VOGAnnotator; VOGAnnotator().setup_vog_database('$VOG_DB_DIR')\""
+        
+        # Check if it's an MPI library issue and try to fix it
+        if echo "$VOG_OUTPUT" | grep -q "libmpi.so"; then
+            echo ""
+            echo "Detected MPI library issue. Attempting to fix and retry..."
+            
+            # Ensure LD_LIBRARY_PATH is set and try again
+            if [ -d "$CONDA_PREFIX/lib" ]; then
+                export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+                
+                # Try pressing the database manually if it exists
+                if [ -f "$VOG_DB_DIR/vog.hmm" ] && [ ! -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
+                    echo "Pressing VOG database manually with correct library path..."
+                    if LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH" hmmpress "$VOG_DB_DIR/vog.hmm" 2>&1; then
+                        echo "VOG database pressed successfully!"
+                        if [ -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
+                            echo "VOG database setup completed successfully (fixed MPI issue)"
+                            echo "   - Downloaded and extracted VOG HMM database"
+                            echo "   - Pressed database for HMMER searches"
+                            echo "   - Ready for viral gene annotation"
+                        fi
+                    else
+                        echo "Manual pressing also failed. You can try later with:"
+                        echo "  export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\""
+                        echo "  hmmpress $VOG_DB_DIR/vog.hmm"
+                    fi
+                else
+                    echo "Could not automatically fix. You can run this later with:"
+                    echo "  export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\""
+                    echo "  python -c \"from virall.core.vog_annotator import VOGAnnotator; VOGAnnotator().setup_vog_database('$VOG_DB_DIR')\""
+                fi
+            else
+                echo "Could not find conda lib directory. You can run this later with:"
+                echo "  export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\""
+                echo "  python -c \"from virall.core.vog_annotator import VOGAnnotator; VOGAnnotator().setup_vog_database('$VOG_DB_DIR')\""
+            fi
+        else
+            echo ""
+            echo "Common issues:"
+            echo "  1. Network issues - try running setup again"
+            echo "  2. Disk space - ensure you have enough space"
+            echo ""
+            echo "You can run this later with:"
+            echo "  export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\""
+            echo "  python -c \"from virall.core.vog_annotator import VOGAnnotator; VOGAnnotator().setup_vog_database('$VOG_DB_DIR')\""
+        fi
     fi
 fi
 
