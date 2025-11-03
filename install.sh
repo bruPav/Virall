@@ -83,25 +83,156 @@ else
     echo "Mamba found"
 fi
 
-# Install bioinformatics tools
-echo "Installing bioinformatics tools..."
-# Install samtools (newer version 1.22+ works with modern OpenSSL 3.x, avoiding libcrypto.so.1.0.0 issues)
-echo "Installing samtools (will get latest version compatible with modern OpenSSL)..."
-conda install -c bioconda -y bwa minimap2
-mamba install -c bioconda -c conda-forge samtools -y || conda install -c bioconda samtools -y
-# Install spades separately with both bioconda and conda-forge channels to avoid dependency conflicts
-echo "Installing spades (with specific channels to avoid dependency conflicts)..."
-mamba install -c conda-forge -c bioconda spades=4.2.0 -y
-# Install flye separately with both bioconda and conda-forge channels to avoid dependency conflicts
-echo "Installing flye (with specific channels to avoid dependency conflicts)..."
-mamba install -c bioconda -c conda-forge flye=2.9.6 -y
-# Install fastplong separately with both bioconda and conda-forge channels to resolve isa-l dependency
-echo "Installing fastplong (with specific channels to avoid dependency conflicts)..."
-mamba install -c bioconda -c conda-forge fastplong=0.4.1 -y
-conda install -c bioconda -y fastqc fastp
-conda install -c bioconda -y checkv bcftools pilon
-# Minimal extras needed by the pipeline
-conda install -c bioconda -y hmmer prodigal
+# Helper function to check if a command is available
+check_command() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check for system modules first (common on HPC systems)
+echo "Checking for system modules (HPC environments)..."
+HAS_MODULE_SYSTEM=false
+if command -v module >/dev/null 2>&1; then
+    HAS_MODULE_SYSTEM=true
+    echo "Module system detected (likely HPC environment)"
+fi
+
+# Define all required bioinformatics tools
+declare -A TOOLS_TO_INSTALL
+TOOLS_TO_INSTALL=(
+    ["samtools"]="samtools"
+    ["bwa"]="bwa"
+    ["minimap2"]="minimap2"
+    ["spades"]="spades=4.2.0"
+    ["flye"]="flye=2.9.6"
+    ["fastp"]="fastp"
+    ["fastplong"]="fastplong=0.4.1"
+    ["fastqc"]="fastqc"
+    ["checkv"]="checkv"
+    ["bcftools"]="bcftools"
+    ["pilon"]="pilon"
+    ["hmmer"]="hmmer"
+    ["prodigal"]="prodigal"
+    ["kaiju"]="kaiju"
+)
+
+# Check which tools are already available
+echo "Checking for existing bioinformatics tools..."
+MISSING_TOOLS=()
+FOUND_TOOLS=()
+
+for tool in "${!TOOLS_TO_INSTALL[@]}"; do
+    if check_command "$tool"; then
+        FOUND_TOOLS+=("$tool")
+        echo "  $tool found - skipping installation"
+    else
+        MISSING_TOOLS+=("$tool")
+        echo "  $tool not found - will install"
+    fi
+done
+
+echo ""
+echo "Summary: ${#FOUND_TOOLS[@]} tools found, ${#MISSING_TOOLS[@]} tools need installation"
+
+# Warn about HPC modules if tools are found
+if [ "$HAS_MODULE_SYSTEM" = true ] && [ ${#FOUND_TOOLS[@]} -gt 0 ]; then
+    echo ""
+    echo "Note: Some tools found via modules. Please ensure these modules are loaded when using virall:"
+    echo "  module load ${FOUND_TOOLS[*]}"
+fi
+
+# Install missing bioinformatics tools using mamba
+if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
+    echo ""
+    echo "Installing missing bioinformatics tools using mamba..."
+    
+    # Group tools by installation method for better dependency resolution
+    # Mapping/alignment tools
+    MAPPING_TOOLS=()
+    for tool in "${MISSING_TOOLS[@]}"; do
+        if [[ "$tool" == "samtools" || "$tool" == "bwa" || "$tool" == "minimap2" ]]; then
+            MAPPING_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+        fi
+    done
+    
+    # Assembly tools
+    ASSEMBLY_TOOLS=()
+    for tool in "${MISSING_TOOLS[@]}"; do
+        if [[ "$tool" == "spades" || "$tool" == "flye" ]]; then
+            ASSEMBLY_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+        fi
+    done
+    
+    # QC tools
+    QC_TOOLS=()
+    for tool in "${MISSING_TOOLS[@]}"; do
+        if [[ "$tool" == "fastp" || "$tool" == "fastplong" || "$tool" == "fastqc" ]]; then
+            QC_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+        fi
+    done
+    
+    # Other tools
+    OTHER_TOOLS=()
+    for tool in "${MISSING_TOOLS[@]}"; do
+        if [[ ! "$tool" == "samtools" && ! "$tool" == "bwa" && ! "$tool" == "minimap2" && \
+              ! "$tool" == "spades" && ! "$tool" == "flye" && \
+              ! "$tool" == "fastp" && ! "$tool" == "fastplong" && ! "$tool" == "fastqc" && \
+              ! "$tool" == "kaiju" ]]; then
+            OTHER_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+        fi
+    done
+    
+    # Install mapping tools (samtools, bwa, minimap2)
+    if [ ${#MAPPING_TOOLS[@]} -gt 0 ]; then
+        echo "Installing mapping tools: ${MAPPING_TOOLS[*]}..."
+        mamba install -c bioconda -c conda-forge "${MAPPING_TOOLS[@]}" -y || {
+            echo "Warning: Failed to install mapping tools together, trying individually..."
+            for tool in "${MAPPING_TOOLS[@]}"; do
+                mamba install -c bioconda -c conda-forge "$tool" -y || true
+            done
+        }
+    fi
+    
+    # Install assembly tools (spades, flye)
+    if [ ${#ASSEMBLY_TOOLS[@]} -gt 0 ]; then
+        echo "Installing assembly tools: ${ASSEMBLY_TOOLS[*]}..."
+        for tool in "${ASSEMBLY_TOOLS[@]}"; do
+            if [[ "$tool" == "spades=4.2.0" ]]; then
+                mamba install -c conda-forge -c bioconda spades=4.2.0 -y || true
+            elif [[ "$tool" == "flye=2.9.6" ]]; then
+                mamba install -c bioconda -c conda-forge flye=2.9.6 -y || true
+            fi
+        done
+    fi
+    
+    # Install QC tools (fastp, fastplong, fastqc)
+    if [ ${#QC_TOOLS[@]} -gt 0 ]; then
+        echo "Installing QC tools: ${QC_TOOLS[*]}..."
+        mamba install -c bioconda "${QC_TOOLS[@]}" -y || {
+            echo "Warning: Failed to install QC tools together, trying individually..."
+            for tool in "${QC_TOOLS[@]}"; do
+                mamba install -c bioconda -c conda-forge "$tool" -y || true
+            done
+        }
+    fi
+    
+    # Install other tools (checkv, bcftools, pilon, hmmer, prodigal)
+    if [ ${#OTHER_TOOLS[@]} -gt 0 ]; then
+        echo "Installing other tools: ${OTHER_TOOLS[*]}..."
+        mamba install -c bioconda "${OTHER_TOOLS[@]}" -y || {
+            echo "Warning: Failed to install other tools together, trying individually..."
+            for tool in "${OTHER_TOOLS[@]}"; do
+                mamba install -c bioconda "$tool" -y || true
+            done
+        }
+    fi
+    
+    # Install kaiju separately (it's handled later in the script, but check if it's missing)
+    if [[ " ${MISSING_TOOLS[@]} " =~ " kaiju " ]]; then
+        echo "Note: kaiju will be installed later during database setup"
+    fi
+else
+    echo "All required bioinformatics tools are already available!"
+fi
 
 
 # Fix SPAdes PATH issue (create symlink)
@@ -114,26 +245,50 @@ else
     echo "SPAdes not found, may need manual symlink"
 fi
 
-# Verify BWA, minimap2, and samtools are properly installed
-echo "Verifying bioinformatics tools installation..."
+# Verify critical tools are working
+echo "Verifying critical bioinformatics tools installation..."
+VERIFICATION_FAILED=false
+
 # Test samtools - check if it runs (newer versions work with modern OpenSSL)
-if samtools --version >/dev/null 2>&1; then
-    echo "samtools is working correctly"
-    samtools --version 2>&1 | head -1
-else
-    echo "Warning: samtools has dependency issues"
-    echo "  Attempting to fix by reinstalling samtools..."
-    # Reinstall samtools (will get latest version compatible with system OpenSSL)
-    mamba install -c bioconda -c conda-forge samtools --force-reinstall -y 2>/dev/null || \
-    conda install -c bioconda samtools --force-reinstall -y 2>/dev/null
-    # Test again
+if check_command samtools; then
     if samtools --version >/dev/null 2>&1; then
-        echo "samtools fixed successfully"
+        echo "  samtools is working correctly"
+        samtools --version 2>&1 | head -1
     else
-        echo "Warning: samtools still has issues, but the pipeline has a fallback mode"
-        echo "  The pipeline will use SAM file processing when BAM conversion fails"
-        echo "  This is slower but works without BAM conversion"
+        echo "  samtools found but not working correctly"
+        echo "    Attempting to fix by reinstalling samtools..."
+        # Reinstall samtools (will get latest version compatible with system OpenSSL)
+        mamba install -c bioconda -c conda-forge samtools --force-reinstall -y 2>/dev/null || true
+        # Test again
+        if samtools --version >/dev/null 2>&1; then
+            echo "  samtools fixed successfully"
+        else
+            echo "  Warning: samtools still has issues, but the pipeline has a fallback mode"
+            echo "    The pipeline will use SAM file processing when BAM conversion fails"
+            VERIFICATION_FAILED=true
+        fi
     fi
+else
+    echo "  Warning: samtools not found - this may cause issues"
+    VERIFICATION_FAILED=true
+fi
+
+# Verify other critical tools
+for tool in bwa minimap2; do
+    if check_command "$tool"; then
+        if "$tool" --version >/dev/null 2>&1 || "$tool" -h >/dev/null 2>&1; then
+            echo "   $tool is working correctly"
+        else
+            echo "   $tool found but may not work correctly"
+        fi
+    else
+        echo "  Warning: $tool not found"
+    fi
+done
+
+if [ "$VERIFICATION_FAILED" = true ]; then
+    echo ""
+    echo "Warning: Some tools may not be working correctly. The pipeline may have limited functionality."
 fi
 
 # Install the virall package in development mode
@@ -177,10 +332,19 @@ fi
 # Assembly quality assessment installation removed
 
 echo "Installing Kaiju for viral contig classification..."
-if conda install -c bioconda kaiju -y; then
-    echo "Kaiju installed successfully"
-    
-    # Setup Kaiju viral database
+if check_command kaiju; then
+    echo "Kaiju already installed, skipping installation"
+else
+    echo "Installing Kaiju using mamba..."
+    if mamba install -c bioconda kaiju -y; then
+        echo "Kaiju installed successfully"
+    else
+        echo "Warning: Kaiju installation failed"
+    fi
+fi
+
+# Setup Kaiju viral database (if kaiju is available)
+if check_command kaiju; then
     echo "Setting up Kaiju viral database..."
     KAIJU_DB_DIR="$SOFTWARE_DIR/databases/kaiju_db"
     mkdir -p "$KAIJU_DB_DIR"
@@ -225,7 +389,8 @@ if conda install -c bioconda kaiju -y; then
         echo "You may need to run: kaiju-makedb -s viruses -d $KAIJU_DB_DIR"
     fi
 else
-    echo "Warning: Kaiju installation failed"
+    echo "Warning: Kaiju not available - skipping database setup"
+    echo "You can install Kaiju later and run: kaiju-makedb -s viruses -d $KAIJU_DB_DIR"
 fi
 
 # Set up CheckV database for viral contig quality assessment
