@@ -7,13 +7,13 @@ From: ubuntu:22.04
     Description Virall - Viral Assembly and Analysis Tool with all dependencies and databases
 
 %environment
-    export PATH=/opt/conda/bin:$PATH
-    export CONDA_PREFIX=/opt/conda
-    export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+    export PATH=/opt/conda/bin:/opt/conda/envs/virall/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/conda/lib:/opt/conda/envs/virall/lib:$LD_LIBRARY_PATH
     export VIRALL_DB_DIR=/opt/virall/databases
     export VOG_DB_DIR=/opt/virall/databases/vog_db
     export KAIJU_DB_DIR=/opt/virall/databases/kaiju_db
     export CHECKV_DB_DIR=/opt/virall/databases/checkv_db
+    # Note: CONDA_PREFIX will be set automatically when conda environment is activated
 
 %post
     # Set to non-interactive mode
@@ -111,23 +111,31 @@ From: ubuntu:22.04
         kaiju
     
     # Fix SPAdes PATH issue (create symlink)
-    SPADES_PATH=$(find /opt/conda -name "spades.py" 2>/dev/null | head -1)
+    # Use CONDA_PREFIX which points to the activated environment
+    SPADES_PATH=$(find "$CONDA_PREFIX" -name "spades.py" 2>/dev/null | head -1)
     if [ -n "$SPADES_PATH" ]; then
-        ln -sf "$SPADES_PATH" /opt/conda/bin/spades
+        ln -sf "$SPADES_PATH" "$CONDA_PREFIX/bin/spades"
+    else
+        # Try alternative locations if not found in environment
+        SPADES_PATH=$(find /opt/conda -name "spades.py" 2>/dev/null | head -1)
+        if [ -n "$SPADES_PATH" ]; then
+            ln -sf "$SPADES_PATH" "$CONDA_PREFIX/bin/spades"
+        fi
     fi
     
     # Ensure OpenMPI libraries are accessible (for SPAdes/HMMER)
-    if [ -d /opt/conda/lib ]; then
-        export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+    # Use CONDA_PREFIX which points to the activated environment
+    if [ -d "$CONDA_PREFIX/lib" ]; then
+        export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
         # Find and link OpenMPI libraries if they exist
-        OPENMPI_LIB=$(find /opt/conda -type f -name "libmpi.so.40*" 2>/dev/null | head -1)
+        OPENMPI_LIB=$(find "$CONDA_PREFIX" -type f -name "libmpi.so.40*" 2>/dev/null | head -1)
         if [ -n "$OPENMPI_LIB" ]; then
             OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
-            mkdir -p /opt/conda/lib
+            mkdir -p "$CONDA_PREFIX/lib"
             for lib in "$OPENMPI_LIB_DIR"/*.so*; do
                 if [ -f "$lib" ] || [ -L "$lib" ]; then
                     lib_name=$(basename "$lib")
-                    ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
+                    ln -sf "$lib" "$CONDA_PREFIX/lib/$lib_name" 2>/dev/null || true
                 fi
             done
         fi
@@ -152,6 +160,8 @@ From: ubuntu:22.04
     export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
     . /opt/conda/etc/profile.d/conda.sh
     conda activate virall
+    # Update LD_LIBRARY_PATH after activation to include environment libs
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
     
     # Install virall package
     echo "Installing virall package..."
@@ -160,14 +170,17 @@ From: ubuntu:22.04
     
     # Set up VOG database using virall package
     echo "Setting up VOG database using virall package..."
-    export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+    # LD_LIBRARY_PATH already set above after conda activate
     VOG_DB_DIR=/opt/virall/databases/vog_db
     mkdir -p "$VOG_DB_DIR"
     
     python -c "
 import os
 import sys
-os.environ['LD_LIBRARY_PATH'] = '/opt/conda/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
+# Use CONDA_PREFIX from environment
+conda_prefix = os.environ.get('CONDA_PREFIX', '/opt/conda/envs/virall')
+lib_path = os.path.join(conda_prefix, 'lib')
+os.environ['LD_LIBRARY_PATH'] = lib_path + ':' + os.environ.get('LD_LIBRARY_PATH', '')
 try:
     from virall.core.vog_annotator import VOGAnnotator
     annotator = VOGAnnotator()
@@ -186,7 +199,7 @@ except Exception as e:
     if [ ! -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
         if [ -f "$VOG_DB_DIR/vog.hmm" ]; then
             echo "Pressing VOG database manually..."
-            export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+            export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
             hmmpress "$VOG_DB_DIR/vog.hmm" || echo "Manual VOG database pressing failed"
         fi
     fi
@@ -246,6 +259,8 @@ except Exception as e:
     export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
     . /opt/conda/etc/profile.d/conda.sh
     conda activate virall
+    # Update LD_LIBRARY_PATH after activation to include environment libs
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
     exec virall "$@"
 
 %help
