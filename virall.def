@@ -10,7 +10,8 @@ From: continuumio/miniconda3:latest
 %environment
     # Set PATH
     export PATH=/opt/conda/bin:$PATH
-    export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+    # Include both conda lib and system lib (for OpenMPI)
+    export LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
     
     # Database paths (set via environment variable or bind mount)
     # Default locations (can be overridden)
@@ -43,7 +44,32 @@ From: continuumio/miniconda3:latest
         gzip \
         bzip2 \
         ca-certificates \
+        libopenmpi-dev \
+        openmpi-bin \
+        openmpi-common \
         && rm -rf /var/lib/apt/lists/*
+    
+    # Link OpenMPI libraries to conda lib directory so HMMER can find them
+    echo "Linking OpenMPI libraries for HMMER..."
+    mkdir -p /opt/conda/lib
+    # Find OpenMPI libraries (usually in /usr/lib/x86_64-linux-gnu/)
+    if [ -d /usr/lib/x86_64-linux-gnu ]; then
+        for lib in /usr/lib/x86_64-linux-gnu/libmpi.so*; do
+            if [ -f "$lib" ] || [ -L "$lib" ]; then
+                lib_name=$(basename "$lib")
+                ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
+            fi
+        done
+    fi
+    # Also check /usr/lib
+    if [ -d /usr/lib ]; then
+        for lib in /usr/lib/libmpi.so*; do
+            if [ -f "$lib" ] || [ -L "$lib" ]; then
+                lib_name=$(basename "$lib")
+                ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
+            fi
+        done
+    fi
 
     # Initialize conda
     export PATH=/opt/conda/bin:$PATH
@@ -82,64 +108,9 @@ From: continuumio/miniconda3:latest
     mamba install -c bioconda -c conda-forge fastplong -y || mamba install -c bioconda fastplong -y || true
     mamba install -c bioconda -c conda-forge fastqc -y || true
 
-    # Other tools
+    # Other tools (HMMER needs OpenMPI from system packages, already installed above)
     mamba install -c bioconda -y \
-        checkv bcftools pilon prodigal kaiju
-    
-    # Install OpenMPI libraries first (needed for HMMER)
-    # HMMER was compiled with MPI support and requires libmpi.so.40
-    echo "Installing OpenMPI (required for HMMER)..."
-    mamba install -c conda-forge -c bioconda -y openmpi
-    
-    # Verify OpenMPI libraries are installed
-    OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
-    if [ -z "$OPENMPI_LIB" ]; then
-        echo "Warning: OpenMPI library not found after installation"
-        # Try installing with explicit channel
-        mamba install -c conda-forge openmpi -y
-        OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
-    fi
-    
-    if [ -n "$OPENMPI_LIB" ]; then
-        OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
-        echo "Found OpenMPI library at: $OPENMPI_LIB"
-        echo "Ensuring OpenMPI libraries are accessible in /opt/conda/lib..."
-        mkdir -p /opt/conda/lib
-        # Link all OpenMPI libraries to /opt/conda/lib
-        for lib in "$OPENMPI_LIB_DIR"/*.so*; do
-            if [ -f "$lib" ] || [ -L "$lib" ]; then
-                lib_name=$(basename "$lib")
-                ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
-            fi
-        done
-        echo "OpenMPI libraries linked successfully"
-    else
-        echo "ERROR: OpenMPI libraries not found - HMMER may not work"
-    fi
-    
-    # Install HMMER (after OpenMPI is installed and linked)
-    echo "Installing HMMER..."
-    mamba install -c bioconda -y hmmer
-    
-    # Verify HMMER can find MPI libraries
-    if [ -f /opt/conda/bin/hmmpress ]; then
-        if ldd /opt/conda/bin/hmmpress 2>/dev/null | grep -q "libmpi.so.40 => not found"; then
-            echo "Warning: hmmpress still cannot find MPI libraries"
-            echo "Trying to set up library path..."
-            export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
-            # Try to find and link again
-            OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
-            if [ -n "$OPENMPI_LIB" ]; then
-                OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
-                for lib in "$OPENMPI_LIB_DIR"/*.so*; do
-                    if [ -f "$lib" ] || [ -L "$lib" ]; then
-                        lib_name=$(basename "$lib")
-                        cp -f "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
-                    fi
-                done
-            fi
-        fi
-    fi
+        checkv bcftools pilon hmmer prodigal kaiju
 
     # Fix SPAdes PATH issue
     echo "Creating SPAdes symlink..."
