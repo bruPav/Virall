@@ -49,7 +49,7 @@ From: ubuntu:22.04
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
     
     # Initialize conda for bash
-    source /opt/conda/etc/profile.d/conda.sh
+    . /opt/conda/etc/profile.d/conda.sh
     
     # Create conda environment
     conda create -n virall -y python=3.11
@@ -144,7 +144,7 @@ From: ubuntu:22.04
     # Second post section - install virall package and set up databases
     export PATH=/opt/conda/bin:$PATH
     export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
-    source /opt/conda/etc/profile.d/conda.sh
+    . /opt/conda/etc/profile.d/conda.sh
     conda activate virall
     
     # Install virall package
@@ -238,7 +238,7 @@ except Exception as e:
     # This is executed when container is run
     export PATH=/opt/conda/bin:$PATH
     export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
-    source /opt/conda/etc/profile.d/conda.sh
+    . /opt/conda/etc/profile.d/conda.sh
     conda activate virall
     exec virall "$@"
 
