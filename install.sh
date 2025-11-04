@@ -201,27 +201,33 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
                 
                 # Ensure OpenMPI libraries are accessible in the environment
                 # (SPAdes installs OpenMPI but libraries might not be in $CONDA_PREFIX/lib)
+                # Check conda cache (created during installation) for the library
                 echo "Verifying OpenMPI libraries are accessible..."
                 if [ ! -f "$CONDA_PREFIX/lib/libmpi.so.40" ]; then
-                    # Find where OpenMPI was installed in the environment
-                    OPENMPI_LIB=$(find $CONDA_PREFIX -name "libmpi.so.40" 2>/dev/null | head -1)
+                    # First check in environment
+                    OPENMPI_LIB=$(find $CONDA_PREFIX -type f -name "libmpi.so.40*" 2>/dev/null | grep -E "libmpi\.so\.40$|libmpi\.so\.40\." | head -1)
+                    
+                    # If not found in environment, check conda package cache (created during installation)
+                    if [ -z "$OPENMPI_LIB" ]; then
+                        CONDA_BASE=$(conda info --base)
+                        OPENMPI_LIB=$(find "$CONDA_BASE/pkgs" -type f -name "libmpi.so.40*" 2>/dev/null | grep -E "libmpi\.so\.40$|libmpi\.so\.40\." | head -1)
+                    fi
+                    
                     if [ -n "$OPENMPI_LIB" ]; then
                         OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
                         echo "Found OpenMPI library at: $OPENMPI_LIB"
                         echo "Creating symlink in environment lib directory..."
                         # Ensure lib directory exists
                         mkdir -p "$CONDA_PREFIX/lib"
-                        # Create symlink to environment lib directory
+                        # Create symlink to environment lib directory (link to the versioned library)
                         ln -sf "$OPENMPI_LIB" "$CONDA_PREFIX/lib/libmpi.so.40" 2>/dev/null || true
-                        # Also symlink other MPI libraries if they exist
-                        for mpi_lib in libmpi.so libmpi.so.40.30.6; do
-                            if [ -f "$OPENMPI_LIB_DIR/$mpi_lib" ]; then
-                                ln -sf "$OPENMPI_LIB_DIR/$mpi_lib" "$CONDA_PREFIX/lib/$mpi_lib" 2>/dev/null || true
-                            fi
-                        done
+                        # Also create symlink for libmpi.so (generic name)
+                        if [ -f "$OPENMPI_LIB_DIR/libmpi.so" ]; then
+                            ln -sf "$OPENMPI_LIB_DIR/libmpi.so" "$CONDA_PREFIX/lib/libmpi.so" 2>/dev/null || true
+                        fi
                         echo "OpenMPI libraries linked to environment lib directory"
                     else
-                        echo "Warning: OpenMPI library not found in environment - HMMER may have issues with VOG database setup"
+                        echo "Warning: OpenMPI library not found - HMMER may have issues with VOG database setup"
                     fi
                 else
                     echo "OpenMPI library already in environment lib directory"
