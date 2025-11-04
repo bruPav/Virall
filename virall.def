@@ -89,11 +89,17 @@ From: ubuntu:22.04
         spades=4.2.0 \
         flye=2.9.6
     
-    # QC tools
-    mamba install -c bioconda -c conda-forge -y \
-        fastp \
-        fastplong=0.4.1 \
-        fastqc
+    # QC tools (install together first, then individually if needed)
+    # Use flexible channel priority to resolve dependency conflicts
+    mamba install -c bioconda --channel-priority flexible fastp fastplong=0.4.1 fastqc -y || {
+        echo "Warning: Failed to install QC tools together, trying individually..."
+        mamba install -c bioconda -c conda-forge --channel-priority flexible fastp -y || true
+        mamba install -c bioconda -c conda-forge --channel-priority flexible fastplong=0.4.1 -y || {
+            echo "Warning: fastplong=0.4.1 failed, trying latest version..."
+            mamba install -c bioconda -c conda-forge --channel-priority flexible fastplong -y || true
+        }
+        mamba install -c bioconda -c conda-forge --channel-priority flexible fastqc -y || true
+    }
     
     # Other tools
     mamba install -c bioconda -c conda-forge -y \
