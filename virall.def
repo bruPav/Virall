@@ -84,7 +84,30 @@ From: continuumio/miniconda3:latest
 
     # Other tools
     mamba install -c bioconda -y \
-        checkv bcftools pilon hmmer prodigal kaiju
+        checkv bcftools pilon prodigal kaiju
+    
+    # Install HMMER separately (to ensure MPI compatibility)
+    # HMMER may need MPI libraries, so install OpenMPI first
+    mamba install -c conda-forge -c bioconda -y openmpi
+    mamba install -c bioconda -y hmmer
+    
+    # Verify MPI libraries are accessible
+    if [ -d /opt/conda/lib ]; then
+        export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+        # Find and link OpenMPI libraries if needed
+        OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
+        if [ -n "$OPENMPI_LIB" ]; then
+            OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
+            echo "Found OpenMPI library at: $OPENMPI_LIB"
+            echo "Linking OpenMPI libraries to environment lib directory..."
+            for lib in "$OPENMPI_LIB_DIR"/*.so*; do
+                if [ -f "$lib" ] || [ -L "$lib" ]; then
+                    lib_name=$(basename "$lib")
+                    ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
+                fi
+            done
+        fi
+    fi
 
     # Fix SPAdes PATH issue
     echo "Creating SPAdes symlink..."
