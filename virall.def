@@ -86,26 +86,58 @@ From: continuumio/miniconda3:latest
     mamba install -c bioconda -y \
         checkv bcftools pilon prodigal kaiju
     
-    # Install HMMER separately (to ensure MPI compatibility)
-    # HMMER may need MPI libraries, so install OpenMPI first
+    # Install OpenMPI libraries first (needed for HMMER)
+    # HMMER was compiled with MPI support and requires libmpi.so.40
+    echo "Installing OpenMPI (required for HMMER)..."
     mamba install -c conda-forge -c bioconda -y openmpi
+    
+    # Verify OpenMPI libraries are installed
+    OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
+    if [ -z "$OPENMPI_LIB" ]; then
+        echo "Warning: OpenMPI library not found after installation"
+        # Try installing with explicit channel
+        mamba install -c conda-forge openmpi -y
+        OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
+    fi
+    
+    if [ -n "$OPENMPI_LIB" ]; then
+        OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
+        echo "Found OpenMPI library at: $OPENMPI_LIB"
+        echo "Ensuring OpenMPI libraries are accessible in /opt/conda/lib..."
+        mkdir -p /opt/conda/lib
+        # Link all OpenMPI libraries to /opt/conda/lib
+        for lib in "$OPENMPI_LIB_DIR"/*.so*; do
+            if [ -f "$lib" ] || [ -L "$lib" ]; then
+                lib_name=$(basename "$lib")
+                ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
+            fi
+        done
+        echo "OpenMPI libraries linked successfully"
+    else
+        echo "ERROR: OpenMPI libraries not found - HMMER may not work"
+    fi
+    
+    # Install HMMER (after OpenMPI is installed and linked)
+    echo "Installing HMMER..."
     mamba install -c bioconda -y hmmer
     
-    # Verify MPI libraries are accessible
-    if [ -d /opt/conda/lib ]; then
-        export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
-        # Find and link OpenMPI libraries if needed
-        OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
-        if [ -n "$OPENMPI_LIB" ]; then
-            OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
-            echo "Found OpenMPI library at: $OPENMPI_LIB"
-            echo "Linking OpenMPI libraries to environment lib directory..."
-            for lib in "$OPENMPI_LIB_DIR"/*.so*; do
-                if [ -f "$lib" ] || [ -L "$lib" ]; then
-                    lib_name=$(basename "$lib")
-                    ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
-                fi
-            done
+    # Verify HMMER can find MPI libraries
+    if [ -f /opt/conda/bin/hmmpress ]; then
+        if ldd /opt/conda/bin/hmmpress 2>/dev/null | grep -q "libmpi.so.40 => not found"; then
+            echo "Warning: hmmpress still cannot find MPI libraries"
+            echo "Trying to set up library path..."
+            export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+            # Try to find and link again
+            OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
+            if [ -n "$OPENMPI_LIB" ]; then
+                OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
+                for lib in "$OPENMPI_LIB_DIR"/*.so*; do
+                    if [ -f "$lib" ] || [ -L "$lib" ]; then
+                        lib_name=$(basename "$lib")
+                        cp -f "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
+                    fi
+                done
+            fi
         fi
     fi
 
