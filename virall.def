@@ -49,7 +49,7 @@ From: continuumio/miniconda3:latest
     export PATH=/opt/conda/bin:$PATH
     conda config --add channels conda-forge
     conda config --add channels bioconda
-    conda config --set channel_priority strict
+    conda config --set channel_priority flexible
 
     # Accept conda Terms of Service
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
@@ -77,9 +77,10 @@ From: continuumio/miniconda3:latest
     mamba install -c bioconda -c conda-forge -y \
         spades=4.2.0 flye=2.9.6
 
-    # QC tools
-    mamba install -c bioconda -y \
-        fastp fastplong=0.4.1 fastqc
+    # QC tools (install individually to handle dependencies better)
+    mamba install -c bioconda -c conda-forge fastp -y || true
+    mamba install -c bioconda -c conda-forge fastplong -y || mamba install -c bioconda fastplong -y || true
+    mamba install -c bioconda -c conda-forge fastqc -y || true
 
     # Other tools
     mamba install -c bioconda -y \
