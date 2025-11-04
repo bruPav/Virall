@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: continuumio/miniconda3:py311_24.3.0-0
+From: continuumio/miniconda3:py311
 
 %labels
     Author: Virall Team
