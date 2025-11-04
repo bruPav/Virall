@@ -216,15 +216,18 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
                     if [ -n "$OPENMPI_LIB" ]; then
                         OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
                         echo "Found OpenMPI library at: $OPENMPI_LIB"
-                        echo "Creating symlink in environment lib directory..."
+                        echo "Linking all OpenMPI libraries to environment lib directory..."
                         # Ensure lib directory exists
                         mkdir -p "$CONDA_PREFIX/lib"
-                        # Create symlink to environment lib directory (link to the versioned library)
-                        ln -sf "$OPENMPI_LIB" "$CONDA_PREFIX/lib/libmpi.so.40" 2>/dev/null || true
-                        # Also create symlink for libmpi.so (generic name)
-                        if [ -f "$OPENMPI_LIB_DIR/libmpi.so" ]; then
-                            ln -sf "$OPENMPI_LIB_DIR/libmpi.so" "$CONDA_PREFIX/lib/libmpi.so" 2>/dev/null || true
-                        fi
+                        # Link ALL OpenMPI libraries (not just libmpi.so.40)
+                        # This includes libmpi.so.40, libopen-rte.so.40, libopen-pal.so.40, etc.
+                        for lib in "$OPENMPI_LIB_DIR"/*.so*; do
+                            if [ -f "$lib" ] || [ -L "$lib" ]; then
+                                lib_name=$(basename "$lib")
+                                # Create symlink for each library
+                                ln -sf "$lib" "$CONDA_PREFIX/lib/$lib_name" 2>/dev/null || true
+                            fi
+                        done
                         echo "OpenMPI libraries linked to environment lib directory"
                     else
                         echo "Warning: OpenMPI library not found - HMMER may have issues with VOG database setup"
