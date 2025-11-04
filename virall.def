@@ -73,6 +73,8 @@ From: continuumio/miniconda3:latest
 
     # Initialize conda
     export PATH=/opt/conda/bin:$PATH
+    # Prioritize conda libraries over system libraries to avoid conflicts
+    export LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
     conda config --add channels conda-forge
     conda config --add channels bioconda
     conda config --set channel_priority flexible
@@ -84,6 +86,10 @@ From: continuumio/miniconda3:latest
     # Install mamba for faster package management
     echo "Installing mamba..."
     conda install -c conda-forge mamba -y
+    
+    # Install expat early to fix Python/pip compatibility issues
+    echo "Installing expat library..."
+    conda install -c conda-forge expat -y
 
     # Install Python dependencies
     echo "Installing Python dependencies..."
@@ -136,6 +142,10 @@ From: continuumio/miniconda3:latest
         fi
     fi
 
+    # Upgrade pip and ensure expat compatibility
+    echo "Upgrading pip..."
+    pip install --upgrade pip
+    
     # Install virall package
     echo "Installing virall package..."
     cd /opt/virall
