@@ -32,7 +32,7 @@ From: continuumio/miniconda3:latest
     ./LICENSE /opt/virall/LICENSE
 
 %post
-    # Update system packages
+    # Update system packages (install OpenMPI AFTER conda/Python to avoid conflicts)
     apt-get update && apt-get install -y \
         build-essential \
         gcc \
@@ -44,34 +44,9 @@ From: continuumio/miniconda3:latest
         gzip \
         bzip2 \
         ca-certificates \
-        libopenmpi-dev \
-        openmpi-bin \
-        openmpi-common \
         && rm -rf /var/lib/apt/lists/*
-    
-    # Link OpenMPI libraries to conda lib directory so HMMER can find them
-    echo "Linking OpenMPI libraries for HMMER..."
-    mkdir -p /opt/conda/lib
-    # Find OpenMPI libraries (usually in /usr/lib/x86_64-linux-gnu/)
-    if [ -d /usr/lib/x86_64-linux-gnu ]; then
-        for lib in /usr/lib/x86_64-linux-gnu/libmpi.so*; do
-            if [ -f "$lib" ] || [ -L "$lib" ]; then
-                lib_name=$(basename "$lib")
-                ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
-            fi
-        done
-    fi
-    # Also check /usr/lib
-    if [ -d /usr/lib ]; then
-        for lib in /usr/lib/libmpi.so*; do
-            if [ -f "$lib" ] || [ -L "$lib" ]; then
-                lib_name=$(basename "$lib")
-                ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
-            fi
-        done
-    fi
 
-    # Initialize conda
+    # Initialize conda first (before installing OpenMPI to avoid library conflicts)
     export PATH=/opt/conda/bin:$PATH
     # Prioritize conda libraries over system libraries to avoid conflicts
     export LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
@@ -90,11 +65,14 @@ From: continuumio/miniconda3:latest
     # Install expat early to fix Python/pip compatibility issues
     echo "Installing expat library..."
     conda install -c conda-forge expat -y
+    
+    # Reinstall Python to ensure it uses the correct expat library
+    echo "Reinstalling Python with correct expat..."
+    conda install -c conda-forge python=3.11 --force-reinstall -y
 
     # Install Python dependencies
     echo "Installing Python dependencies..."
     conda install -c conda-forge -y \
-        python=3.11 \
         numpy pandas matplotlib seaborn plotly \
         biopython scikit-learn click tqdm pyyaml loguru psutil
 
@@ -114,7 +92,20 @@ From: continuumio/miniconda3:latest
     mamba install -c bioconda -c conda-forge fastplong -y || mamba install -c bioconda fastplong -y || true
     mamba install -c bioconda -c conda-forge fastqc -y || true
 
-    # Other tools (HMMER needs OpenMPI from system packages, already installed above)
+    # Install OpenMPI from system packages AFTER conda is set up
+    # This avoids library conflicts with Python/expat
+    echo "Installing OpenMPI from system packages (needed for HMMER)..."
+    apt-get update && apt-get install -y \
+        libopenmpi-dev \
+        openmpi-bin \
+        openmpi-common \
+        && rm -rf /var/lib/apt/lists/*
+    
+    # Note: OpenMPI libraries will be found via LD_LIBRARY_PATH
+    # which already includes /usr/lib/x86_64-linux-gnu
+    echo "OpenMPI installed - libraries accessible via LD_LIBRARY_PATH"
+
+    # Other tools (HMMER needs OpenMPI from system packages, now installed above)
     mamba install -c bioconda -y \
         checkv bcftools pilon hmmer prodigal kaiju
 
