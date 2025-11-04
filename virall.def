@@ -4,7 +4,7 @@ From: continuumio/miniconda3:latest
 %labels
     Author: Virall Team
     Version: 1.0
-    Description: Virall - Viral Assembly Pipeline (without databases - databases installed separately)
+    Description: Virall - Viral Assembly Pipeline (with databases included)
     Date: 2024
 
 %environment
@@ -50,25 +50,21 @@ From: continuumio/miniconda3:latest
     export PATH=/opt/conda/bin:$PATH
     # Prioritize conda libraries over system libraries to avoid conflicts
     export LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+    
+    # Use only conda-forge and bioconda to avoid ToS issues
+    conda config --remove channels defaults 2>/dev/null || true
     conda config --add channels conda-forge
     conda config --add channels bioconda
     conda config --set channel_priority flexible
-
-    # Accept conda Terms of Service
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+    conda config --set auto_activate_base false
 
     # Install mamba for faster package management
     echo "Installing mamba..."
     conda install -c conda-forge mamba -y
     
-    # Install expat early to fix Python/pip compatibility issues
+    # Install expat from conda-forge to avoid conflicts
     echo "Installing expat library..."
     conda install -c conda-forge expat -y
-    
-    # Reinstall Python to ensure it uses the correct expat library
-    echo "Reinstalling Python with correct expat..."
-    conda install -c conda-forge python=3.11 --force-reinstall -y
 
     # Install Python dependencies
     echo "Installing Python dependencies..."
@@ -142,14 +138,89 @@ From: continuumio/miniconda3:latest
     cd /opt/virall
     pip install -e .
 
-    # Create database directories (but don't download databases)
-    echo "Creating database directories (databases will be installed separately)..."
+    # Set up databases inside the container
+    echo "Setting up databases inside container..."
     mkdir -p /opt/virall/databases/vog_db
     mkdir -p /opt/virall/databases/kaiju_db
     mkdir -p /opt/virall/databases/checkv_db
+    
+    # Set up VOG database
+    echo "Setting up VOG database (~1GB)..."
+    export VOG_DB_DIR=/opt/virall/databases/vog_db
+    export LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+    python -c "
+import os
+import sys
+from virall.core.vog_annotator import VOGAnnotator
 
-    # Note: Databases are NOT downloaded during build
-    # They should be downloaded separately using the setup_databases.sh script
+os.environ['LD_LIBRARY_PATH'] = '/opt/conda/lib:/usr/lib/x86_64-linux-gnu:' + os.environ.get('LD_LIBRARY_PATH', '')
+
+try:
+    annotator = VOGAnnotator()
+    if annotator.setup_vog_database('/opt/virall/databases/vog_db'):
+        print('VOG database setup completed successfully')
+        sys.exit(0)
+    else:
+        print('VOG database setup failed')
+        sys.exit(1)
+except Exception as e:
+    print(f'VOG database setup error: {e}')
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+" || {
+        echo "Warning: VOG database setup failed, trying manual pressing..."
+        if [ -f /opt/virall/databases/vog_db/vog.hmm ] && [ ! -f /opt/virall/databases/vog_db/vog.hmm.h3m ]; then
+            cd /opt/virall/databases/vog_db
+            LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH hmmpress vog.hmm || \
+            LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH hmmpress vog.hmm || true
+        fi
+    }
+    
+    # Set up Kaiju database
+    echo "Setting up Kaiju database (~1GB)..."
+    export KAIJU_DB_DIR=/opt/virall/databases/kaiju_db
+    cd /opt/virall/databases/kaiju_db
+    kaiju-makedb -s viruses -d /opt/virall/databases/kaiju_db || {
+        echo "Warning: Kaiju database setup failed, trying alternative..."
+        kaiju-makedb -s viruses -d /opt/virall/databases/kaiju_db --force || true
+    }
+    # Clean up temporary files
+    rm -f /opt/virall/databases/kaiju_db/kaiju_db_viruses.bwt /opt/virall/databases/kaiju_db/kaiju_db_viruses.sa 2>/dev/null || true
+    # Verify nodes.dmp exists
+    if [ ! -f /opt/virall/databases/kaiju_db/nodes.dmp ]; then
+        echo "Downloading Kaiju taxonomy files..."
+        kaiju-makedb -d /opt/virall/databases/kaiju_db || {
+            echo "Trying manual download of taxonomy files..."
+            cd /opt/virall/databases/kaiju_db
+            curl -L -o taxdump.tar.gz https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz || \
+            wget -O taxdump.tar.gz https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz || true
+            if [ -f taxdump.tar.gz ]; then
+                tar -xzf taxdump.tar.gz
+                rm -f taxdump.tar.gz
+            fi
+        }
+    fi
+    
+    # Set up CheckV database
+    echo "Setting up CheckV database (~3GB)..."
+    export CHECKV_DB_DIR=/opt/virall/databases/checkv_db
+    checkv download_database /opt/virall/databases/checkv_db || {
+        echo "Warning: CheckV database setup failed, trying alternative..."
+        checkv download_database /opt/virall/databases/checkv_db --force || {
+            echo "Trying manual download of CheckV database..."
+            cd /opt/virall/databases/checkv_db
+            CHECKV_URL="https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz"
+            curl -L -o checkv-db.tar.gz "$CHECKV_URL" || \
+            wget -O checkv-db.tar.gz "$CHECKV_URL" || true
+            if [ -f checkv-db.tar.gz ]; then
+                tar -xzf checkv-db.tar.gz
+                rm -f checkv-db.tar.gz
+            fi
+        }
+    }
+    
+    echo "Database setup completed!"
 
     # Verify critical tools
     echo "Verifying installation..."
@@ -166,31 +237,30 @@ From: continuumio/miniconda3:latest
     python -c "from virall import ViralAssembler; print('Virall installation verified')" || \
         echo "Warning: Virall import test failed"
 
-    echo "Container build completed (without databases)!"
+    echo "Container build completed with databases!"
 
 %runscript
     # Default command - pass arguments to virall
     exec virall "$@"
 
 %help
-    Virall - Viral Assembly Pipeline Container (WITHOUT databases)
+    Virall - Viral Assembly Pipeline Container (WITH databases included)
     
     This container includes:
     - All bioinformatics tools (SPAdes, Flye, BWA, samtools, etc.)
     - All Python dependencies
-    - Total size: ~2-3GB (without databases)
-    
-    Databases are NOT included. They must be installed separately using:
-    - setup_databases.sh script
-    - Or bind mount from host
+    - All databases (VOG, Kaiju, CheckV)
+    - Total size: ~8-10GB (with databases)
     
     Usage:
-        # Basic usage (databases must be set up separately)
+        # Basic usage (databases are already included)
         singularity run virall.sif analyse --short-reads-1 reads.fq -o output/
         
-        # With bind mounts for databases
+        # Override database location if needed
         singularity run \
-            --bind /path/to/databases:/opt/virall/databases \
+            --env VOG_DB_DIR=/path/to/vog_db \
+            --env KAIJU_DB_DIR=/path/to/kaiju_db \
+            --env CHECKV_DB_DIR=/path/to/checkv_db \
             virall.sif analyse --short-reads-1 reads.fq -o output/
     
     For more information, see: https://github.com/bruPav/virall
