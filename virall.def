@@ -1,125 +1,123 @@
 Bootstrap: docker
-From: continuumio/miniconda3:py311
+From: ubuntu:22.04
 
 %labels
-    Author: Virall Team
-    Version: 1.0
-    Description: Virall - Viral Assembly Pipeline (with databases included)
-    Date: 2024
+    Author Virall Team
+    Version 0.1.0
+    Description Virall - Viral Assembly and Analysis Tool with all dependencies and databases
 
 %environment
-    # Set PATH
     export PATH=/opt/conda/bin:$PATH
-    # Include both conda lib and system lib (for OpenMPI)
-    export LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
-    
-    # Database paths (set via environment variable or bind mount)
-    # Default locations (can be overridden)
-    export VOG_DB_DIR=${VOG_DB_DIR:-/opt/virall/databases/vog_db}
-    export KAIJU_DB_DIR=${KAIJU_DB_DIR:-/opt/virall/databases/kaiju_db}
-    export CHECKV_DB_DIR=${CHECKV_DB_DIR:-/opt/virall/databases/checkv_db}
-    
-    # Python path
-    export PYTHONPATH=/opt/virall:$PYTHONPATH
-
-%files
-    # Copy virall package files
-    ./virall /opt/virall/virall/
-    ./setup.py /opt/virall/setup.py
-    ./requirements.txt /opt/virall/requirements.txt
-    ./configs /opt/virall/configs/
-    ./README.md /opt/virall/README.md
-    ./LICENSE /opt/virall/LICENSE
+    export CONDA_PREFIX=/opt/conda
+    export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+    export VIRALL_DB_DIR=/opt/virall/databases
+    export VOG_DB_DIR=/opt/virall/databases/vog_db
+    export KAIJU_DB_DIR=/opt/virall/databases/kaiju_db
+    export CHECKV_DB_DIR=/opt/virall/databases/checkv_db
 
 %post
-    # Update system packages (install OpenMPI AFTER conda/Python to avoid conflicts)
+    # Set to non-interactive mode
+    export DEBIAN_FRONTEND=noninteractive
+    
+    # Install system dependencies
     apt-get update && apt-get install -y \
         build-essential \
-        gcc \
-        g++ \
-        make \
-        curl \
         wget \
-        tar \
-        gzip \
+        curl \
         bzip2 \
         ca-certificates \
+        libssl-dev \
+        libcrypt1 \
+        git \
         && rm -rf /var/lib/apt/lists/*
-
-    # Initialize conda first (before installing OpenMPI to avoid library conflicts)
-    export PATH=/opt/conda/bin:$PATH
-    # Prioritize conda libraries over system libraries to avoid conflicts
-    export LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
     
-    # Use only conda-forge and bioconda to avoid ToS issues
-    conda config --remove channels defaults 2>/dev/null || true
+    # Download and install Miniconda
+    cd /tmp
+    wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+    bash miniconda.sh -b -p /opt/conda
+    rm miniconda.sh
+    
+    # Initialize conda
+    export PATH=/opt/conda/bin:$PATH
+    conda config --set always_yes yes --set changeps1 no
     conda config --add channels conda-forge
     conda config --add channels bioconda
-    conda config --set channel_priority flexible
-    conda config --set auto_activate_base false
-
-    # Install mamba for faster package management
-    echo "Installing mamba..."
+    conda config --set channel_priority strict
+    
+    # Accept conda Terms of Service
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
+    
+    # Initialize conda for bash
+    source /opt/conda/etc/profile.d/conda.sh
+    
+    # Create conda environment
+    conda create -n virall -y python=3.11
+    
+    # Activate environment
+    conda activate virall
+    
+    # Install mamba for faster dependency resolution
     conda install -c conda-forge mamba -y
     
-    # Install expat from conda-forge to avoid conflicts
-    echo "Installing expat library..."
-    conda install -c conda-forge expat -y
-
-    # Install Python dependencies
-    echo "Installing Python dependencies..."
+    # Install Python dependencies with conda
     conda install -c conda-forge -y \
-        numpy pandas matplotlib seaborn plotly \
-        biopython scikit-learn click tqdm pyyaml loguru psutil
-
-    # Install bioinformatics tools
-    echo "Installing bioinformatics tools..."
+        numpy \
+        pandas \
+        matplotlib \
+        seaborn \
+        plotly \
+        biopython \
+        scikit-learn \
+        click \
+        tqdm \
+        pyyaml \
+        loguru \
+        psutil
     
-    # Mapping tools
+    # Install bioinformatics tools using mamba
+    # Group tools for better dependency resolution
+    
+    # Mapping/alignment tools
     mamba install -c bioconda -c conda-forge -y \
-        samtools bwa minimap2
-
+        samtools \
+        bwa \
+        minimap2
+    
     # Assembly tools
     mamba install -c bioconda -c conda-forge -y \
-        spades=4.2.0 flye=2.9.6
-
-    # QC tools (install individually to handle dependencies better)
-    mamba install -c bioconda -c conda-forge fastp -y || true
-    mamba install -c bioconda -c conda-forge fastplong -y || mamba install -c bioconda fastplong -y || true
-    mamba install -c bioconda -c conda-forge fastqc -y || true
-
-    # Install OpenMPI from system packages AFTER conda is set up
-    # This avoids library conflicts with Python/expat
-    echo "Installing OpenMPI from system packages (needed for HMMER)..."
-    apt-get update && apt-get install -y \
-        libopenmpi-dev \
-        openmpi-bin \
-        openmpi-common \
-        && rm -rf /var/lib/apt/lists/*
+        spades=4.2.0 \
+        flye=2.9.6
     
-    # Note: OpenMPI libraries will be found via LD_LIBRARY_PATH
-    # which already includes /usr/lib/x86_64-linux-gnu
-    echo "OpenMPI installed - libraries accessible via LD_LIBRARY_PATH"
-
-    # Other tools (HMMER needs OpenMPI from system packages, now installed above)
-    mamba install -c bioconda -y \
-        checkv bcftools pilon hmmer prodigal kaiju
-
-    # Fix SPAdes PATH issue
-    echo "Creating SPAdes symlink..."
+    # QC tools
+    mamba install -c bioconda -c conda-forge -y \
+        fastp \
+        fastplong=0.4.1 \
+        fastqc
+    
+    # Other tools
+    mamba install -c bioconda -c conda-forge -y \
+        checkv \
+        bcftools \
+        pilon \
+        hmmer \
+        prodigal \
+        kaiju
+    
+    # Fix SPAdes PATH issue (create symlink)
     SPADES_PATH=$(find /opt/conda -name "spades.py" 2>/dev/null | head -1)
     if [ -n "$SPADES_PATH" ]; then
         ln -sf "$SPADES_PATH" /opt/conda/bin/spades
     fi
-
-    # Ensure OpenMPI libraries are accessible (for SPAdes)
-    echo "Setting up OpenMPI libraries..."
+    
+    # Ensure OpenMPI libraries are accessible (for SPAdes/HMMER)
     if [ -d /opt/conda/lib ]; then
         export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
-        # Find and link OpenMPI libraries if needed
-        OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
+        # Find and link OpenMPI libraries if they exist
+        OPENMPI_LIB=$(find /opt/conda -type f -name "libmpi.so.40*" 2>/dev/null | head -1)
         if [ -n "$OPENMPI_LIB" ]; then
             OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
+            mkdir -p /opt/conda/lib
             for lib in "$OPENMPI_LIB_DIR"/*.so*; do
                 if [ -f "$lib" ] || [ -L "$lib" ]; then
                     lib_name=$(basename "$lib")
@@ -128,36 +126,46 @@ From: continuumio/miniconda3:py311
             done
         fi
     fi
+    
+    # Create virall installation directory structure
+    mkdir -p /opt/virall/databases
+    mkdir -p /opt/virall/virall
 
-    # Upgrade pip and ensure expat compatibility
-    echo "Upgrading pip..."
-    pip install --upgrade pip
+%files
+    # Copy virall package into container
+    # Note: Build from the repository root directory so these paths are correct
+    virall /opt/virall/virall
+    setup.py /opt/virall/setup.py
+    requirements.txt /opt/virall/requirements.txt
+    README.md /opt/virall/README.md
+    configs /opt/virall/configs
+
+%post
+    # Second post section - install virall package and set up databases
+    export PATH=/opt/conda/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+    source /opt/conda/etc/profile.d/conda.sh
+    conda activate virall
     
     # Install virall package
     echo "Installing virall package..."
     cd /opt/virall
-    pip install -e .
-
-    # Set up databases inside the container
-    echo "Setting up databases inside container..."
-    mkdir -p /opt/virall/databases/vog_db
-    mkdir -p /opt/virall/databases/kaiju_db
-    mkdir -p /opt/virall/databases/checkv_db
+    pip install -e . || echo "Virall package installation failed"
     
-    # Set up VOG database
-    echo "Setting up VOG database (~1GB)..."
-    export VOG_DB_DIR=/opt/virall/databases/vog_db
-    export LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+    # Set up VOG database using virall package
+    echo "Setting up VOG database using virall package..."
+    export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+    VOG_DB_DIR=/opt/virall/databases/vog_db
+    mkdir -p "$VOG_DB_DIR"
+    
     python -c "
 import os
 import sys
-from virall.core.vog_annotator import VOGAnnotator
-
-os.environ['LD_LIBRARY_PATH'] = '/opt/conda/lib:/usr/lib/x86_64-linux-gnu:' + os.environ.get('LD_LIBRARY_PATH', '')
-
+os.environ['LD_LIBRARY_PATH'] = '/opt/conda/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
 try:
+    from virall.core.vog_annotator import VOGAnnotator
     annotator = VOGAnnotator()
-    if annotator.setup_vog_database('/opt/virall/databases/vog_db'):
+    if annotator.setup_vog_database('$VOG_DB_DIR'):
         print('VOG database setup completed successfully')
         sys.exit(0)
     else:
@@ -165,103 +173,92 @@ try:
         sys.exit(1)
 except Exception as e:
     print(f'VOG database setup error: {e}')
-    import traceback
-    traceback.print_exc()
     sys.exit(1)
-" || {
-        echo "Warning: VOG database setup failed, trying manual pressing..."
-        if [ -f /opt/virall/databases/vog_db/vog.hmm ] && [ ! -f /opt/virall/databases/vog_db/vog.hmm.h3m ]; then
-            cd /opt/virall/databases/vog_db
-            LD_LIBRARY_PATH=/opt/conda/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH hmmpress vog.hmm || \
-            LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH hmmpress vog.hmm || true
+" || echo "VOG database setup failed, can be done later"
+    
+    # Verify and fix VOG database if needed
+    if [ ! -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
+        if [ -f "$VOG_DB_DIR/vog.hmm" ]; then
+            echo "Pressing VOG database manually..."
+            export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+            hmmpress "$VOG_DB_DIR/vog.hmm" || echo "Manual VOG database pressing failed"
         fi
-    }
+    fi
     
     # Set up Kaiju database
-    echo "Setting up Kaiju database (~1GB)..."
-    export KAIJU_DB_DIR=/opt/virall/databases/kaiju_db
-    cd /opt/virall/databases/kaiju_db
-    kaiju-makedb -s viruses -d /opt/virall/databases/kaiju_db || {
-        echo "Warning: Kaiju database setup failed, trying alternative..."
-        kaiju-makedb -s viruses -d /opt/virall/databases/kaiju_db --force || true
-    }
-    # Clean up temporary files
-    rm -f /opt/virall/databases/kaiju_db/kaiju_db_viruses.bwt /opt/virall/databases/kaiju_db/kaiju_db_viruses.sa 2>/dev/null || true
-    # Verify nodes.dmp exists
-    if [ ! -f /opt/virall/databases/kaiju_db/nodes.dmp ]; then
-        echo "Downloading Kaiju taxonomy files..."
-        kaiju-makedb -d /opt/virall/databases/kaiju_db || {
-            echo "Trying manual download of taxonomy files..."
-            cd /opt/virall/databases/kaiju_db
-            curl -L -o taxdump.tar.gz https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz || \
-            wget -O taxdump.tar.gz https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz || true
-            if [ -f taxdump.tar.gz ]; then
-                tar -xzf taxdump.tar.gz
-                rm -f taxdump.tar.gz
-            fi
-        }
+    echo "Setting up Kaiju viral database..."
+    KAIJU_DB_DIR=/opt/virall/databases/kaiju_db
+    mkdir -p "$KAIJU_DB_DIR"
+    
+    cd "$KAIJU_DB_DIR"
+    kaiju-makedb -s viruses -d "$KAIJU_DB_DIR" || echo "Kaiju database setup failed, can be done later"
+    
+    # Clean up Kaiju temporary files
+    rm -f kaiju_db_viruses.bwt kaiju_db_viruses.sa 2>/dev/null || true
+    
+    # Download full taxonomy if nodes.dmp is missing
+    if [ ! -f "$KAIJU_DB_DIR/nodes.dmp" ]; then
+        echo "Downloading full taxonomy database for Kaiju..."
+        kaiju-makedb -d "$KAIJU_DB_DIR" || echo "Full taxonomy download failed"
     fi
     
     # Set up CheckV database
-    echo "Setting up CheckV database (~3GB)..."
-    export CHECKV_DB_DIR=/opt/virall/databases/checkv_db
-    checkv download_database /opt/virall/databases/checkv_db || {
-        echo "Warning: CheckV database setup failed, trying alternative..."
-        checkv download_database /opt/virall/databases/checkv_db --force || {
-            echo "Trying manual download of CheckV database..."
-            cd /opt/virall/databases/checkv_db
-            CHECKV_URL="https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz"
-            curl -L -o checkv-db.tar.gz "$CHECKV_URL" || \
-            wget -O checkv-db.tar.gz "$CHECKV_URL" || true
-            if [ -f checkv-db.tar.gz ]; then
-                tar -xzf checkv-db.tar.gz
-                rm -f checkv-db.tar.gz
-            fi
-        }
-    }
+    echo "Setting up CheckV database..."
+    CHECKV_DB_DIR=/opt/virall/databases/checkv_db
+    mkdir -p "$CHECKV_DB_DIR"
     
-    echo "Database setup completed!"
-
-    # Verify critical tools
-    echo "Verifying installation..."
-    samtools --version >/dev/null 2>&1 || echo "Warning: samtools not working"
-    bwa >/dev/null 2>&1 || echo "Warning: bwa not working"
-    minimap2 --version >/dev/null 2>&1 || echo "Warning: minimap2 not working"
-
-    # Clean up conda cache to reduce image size
-    echo "Cleaning up conda cache..."
+    # Download CheckV database with retry logic
+    MAX_RETRIES=3
+    RETRY_COUNT=0
+    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        if checkv download_database "$CHECKV_DB_DIR"; then
+            echo "CheckV database setup completed successfully"
+            break
+        else
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "CheckV download failed, retrying in 60 seconds..."
+                sleep 60
+            else
+                echo "Trying alternative CheckV download method..."
+                checkv download_database "$CHECKV_DB_DIR" --force || echo "CheckV database setup failed, can be done later"
+            fi
+        fi
+    done
+    
+    # Final cleanup
     conda clean -afy
-    mamba clean -afy
-
-    # Test virall import
-    python -c "from virall import ViralAssembler; print('Virall installation verified')" || \
-        echo "Warning: Virall import test failed"
-
-    echo "Container build completed with databases!"
+    rm -rf /tmp/*
+    
+    # Set permissions
+    chmod -R a+rX /opt/conda
+    chmod -R a+rX /opt/virall
 
 %runscript
-    # Default command - pass arguments to virall
+    # This is executed when container is run
+    export PATH=/opt/conda/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+    source /opt/conda/etc/profile.d/conda.sh
+    conda activate virall
     exec virall "$@"
 
 %help
-    Virall - Viral Assembly Pipeline Container (WITH databases included)
+    Virall - Viral Assembly and Analysis Tool
     
     This container includes:
-    - All bioinformatics tools (SPAdes, Flye, BWA, samtools, etc.)
-    - All Python dependencies
-    - All databases (VOG, Kaiju, CheckV)
-    - Total size: ~8-10GB (with databases)
+    - All bioinformatics tools (SPAdes, Flye, BWA, etc.)
+    - Python dependencies
+    - VOG database (viral gene annotation)
+    - Kaiju database (viral contig classification)
+    - CheckV database (viral contig quality assessment)
     
     Usage:
-        # Basic usage (databases are already included)
-        singularity run virall.sif analyse --short-reads-1 reads.fq -o output/
-        
-        # Override database location if needed
-        singularity run \
-            --env VOG_DB_DIR=/path/to/vog_db \
-            --env KAIJU_DB_DIR=/path/to/kaiju_db \
-            --env CHECKV_DB_DIR=/path/to/checkv_db \
-            virall.sif analyse --short-reads-1 reads.fq -o output/
+        singularity run virall.sif --help
+        singularity run virall.sif assemble -i input.fastq -o output/
+        singularity exec virall.sif virall --version
     
-    For more information, see: https://github.com/bruPav/virall
+    Databases are located at:
+        /opt/virall/databases/vog_db
+        /opt/virall/databases/kaiju_db
+        /opt/virall/databases/checkv_db
 
