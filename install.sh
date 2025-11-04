@@ -198,6 +198,34 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
         for tool in "${ASSEMBLY_TOOLS[@]}"; do
             if [[ "$tool" == "spades=4.2.0" ]]; then
                 mamba install -c conda-forge -c bioconda spades=4.2.0 -y || true
+                
+                # Ensure OpenMPI libraries are accessible in the environment
+                # (SPAdes installs OpenMPI but libraries might not be in $CONDA_PREFIX/lib)
+                echo "Verifying OpenMPI libraries are accessible..."
+                if [ ! -f "$CONDA_PREFIX/lib/libmpi.so.40" ]; then
+                    # Find where OpenMPI was installed in the environment
+                    OPENMPI_LIB=$(find $CONDA_PREFIX -name "libmpi.so.40" 2>/dev/null | head -1)
+                    if [ -n "$OPENMPI_LIB" ]; then
+                        OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
+                        echo "Found OpenMPI library at: $OPENMPI_LIB"
+                        echo "Creating symlink in environment lib directory..."
+                        # Ensure lib directory exists
+                        mkdir -p "$CONDA_PREFIX/lib"
+                        # Create symlink to environment lib directory
+                        ln -sf "$OPENMPI_LIB" "$CONDA_PREFIX/lib/libmpi.so.40" 2>/dev/null || true
+                        # Also symlink other MPI libraries if they exist
+                        for mpi_lib in libmpi.so libmpi.so.40.30.6; do
+                            if [ -f "$OPENMPI_LIB_DIR/$mpi_lib" ]; then
+                                ln -sf "$OPENMPI_LIB_DIR/$mpi_lib" "$CONDA_PREFIX/lib/$mpi_lib" 2>/dev/null || true
+                            fi
+                        done
+                        echo "OpenMPI libraries linked to environment lib directory"
+                    else
+                        echo "Warning: OpenMPI library not found in environment - HMMER may have issues with VOG database setup"
+                    fi
+                else
+                    echo "OpenMPI library already in environment lib directory"
+                fi
             elif [[ "$tool" == "flye=2.9.6" ]]; then
                 mamba install -c bioconda -c conda-forge flye=2.9.6 -y || true
             fi
