@@ -1,0 +1,169 @@
+Bootstrap: docker
+From: continuumio/miniconda3:latest
+
+%labels
+    Author: Virall Team
+    Version: 1.0
+    Description: Virall - Viral Assembly Pipeline (without databases - databases installed separately)
+    Date: 2024
+
+%environment
+    # Set PATH
+    export PATH=/opt/conda/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+    
+    # Database paths (set via environment variable or bind mount)
+    # Default locations (can be overridden)
+    export VOG_DB_DIR=${VOG_DB_DIR:-/opt/virall/databases/vog_db}
+    export KAIJU_DB_DIR=${KAIJU_DB_DIR:-/opt/virall/databases/kaiju_db}
+    export CHECKV_DB_DIR=${CHECKV_DB_DIR:-/opt/virall/databases/checkv_db}
+    
+    # Python path
+    export PYTHONPATH=/opt/virall:$PYTHONPATH
+
+%files
+    # Copy virall package files
+    ./virall /opt/virall/virall/
+    ./setup.py /opt/virall/setup.py
+    ./requirements.txt /opt/virall/requirements.txt
+    ./configs /opt/virall/configs/
+    ./README.md /opt/virall/README.md
+    ./LICENSE /opt/virall/LICENSE
+
+%post
+    # Update system packages
+    apt-get update && apt-get install -y \
+        build-essential \
+        gcc \
+        g++ \
+        make \
+        curl \
+        wget \
+        tar \
+        gzip \
+        bzip2 \
+        ca-certificates \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Initialize conda
+    export PATH=/opt/conda/bin:$PATH
+    conda config --add channels conda-forge
+    conda config --add channels bioconda
+    conda config --set channel_priority strict
+
+    # Accept conda Terms of Service
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
+
+    # Install mamba for faster package management
+    echo "Installing mamba..."
+    conda install -c conda-forge mamba -y
+
+    # Install Python dependencies
+    echo "Installing Python dependencies..."
+    conda install -c conda-forge -y \
+        python=3.11 \
+        numpy pandas matplotlib seaborn plotly \
+        biopython scikit-learn click tqdm pyyaml loguru psutil
+
+    # Install bioinformatics tools
+    echo "Installing bioinformatics tools..."
+    
+    # Mapping tools
+    mamba install -c bioconda -c conda-forge -y \
+        samtools bwa minimap2
+
+    # Assembly tools
+    mamba install -c bioconda -c conda-forge -y \
+        spades=4.2.0 flye=2.9.6
+
+    # QC tools
+    mamba install -c bioconda -y \
+        fastp fastplong=0.4.1 fastqc
+
+    # Other tools
+    mamba install -c bioconda -y \
+        checkv bcftools pilon hmmer prodigal kaiju
+
+    # Fix SPAdes PATH issue
+    echo "Creating SPAdes symlink..."
+    SPADES_PATH=$(find /opt/conda -name "spades.py" 2>/dev/null | head -1)
+    if [ -n "$SPADES_PATH" ]; then
+        ln -sf "$SPADES_PATH" /opt/conda/bin/spades
+    fi
+
+    # Ensure OpenMPI libraries are accessible (for SPAdes)
+    echo "Setting up OpenMPI libraries..."
+    if [ -d /opt/conda/lib ]; then
+        export LD_LIBRARY_PATH=/opt/conda/lib:$LD_LIBRARY_PATH
+        # Find and link OpenMPI libraries if needed
+        OPENMPI_LIB=$(find /opt/conda -name "libmpi.so.40*" 2>/dev/null | head -1)
+        if [ -n "$OPENMPI_LIB" ]; then
+            OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
+            for lib in "$OPENMPI_LIB_DIR"/*.so*; do
+                if [ -f "$lib" ] || [ -L "$lib" ]; then
+                    lib_name=$(basename "$lib")
+                    ln -sf "$lib" /opt/conda/lib/"$lib_name" 2>/dev/null || true
+                fi
+            done
+        fi
+    fi
+
+    # Install virall package
+    echo "Installing virall package..."
+    cd /opt/virall
+    pip install -e .
+
+    # Create database directories (but don't download databases)
+    echo "Creating database directories (databases will be installed separately)..."
+    mkdir -p /opt/virall/databases/vog_db
+    mkdir -p /opt/virall/databases/kaiju_db
+    mkdir -p /opt/virall/databases/checkv_db
+
+    # Note: Databases are NOT downloaded during build
+    # They should be downloaded separately using the setup_databases.sh script
+
+    # Verify critical tools
+    echo "Verifying installation..."
+    samtools --version >/dev/null 2>&1 || echo "Warning: samtools not working"
+    bwa >/dev/null 2>&1 || echo "Warning: bwa not working"
+    minimap2 --version >/dev/null 2>&1 || echo "Warning: minimap2 not working"
+
+    # Clean up conda cache to reduce image size
+    echo "Cleaning up conda cache..."
+    conda clean -afy
+    mamba clean -afy
+
+    # Test virall import
+    python -c "from virall import ViralAssembler; print('Virall installation verified')" || \
+        echo "Warning: Virall import test failed"
+
+    echo "Container build completed (without databases)!"
+
+%runscript
+    # Default command - pass arguments to virall
+    exec virall "$@"
+
+%help
+    Virall - Viral Assembly Pipeline Container (WITHOUT databases)
+    
+    This container includes:
+    - All bioinformatics tools (SPAdes, Flye, BWA, samtools, etc.)
+    - All Python dependencies
+    - Total size: ~2-3GB (without databases)
+    
+    Databases are NOT included. They must be installed separately using:
+    - setup_databases.sh script
+    - Or bind mount from host
+    
+    Usage:
+        # Basic usage (databases must be set up separately)
+        singularity run virall.sif analyse --short-reads-1 reads.fq -o output/
+        
+        # With bind mounts for databases
+        singularity run \
+            --bind /path/to/databases:/opt/virall/databases \
+            virall.sif analyse --short-reads-1 reads.fq -o output/
+    
+    For more information, see: https://github.com/bruPav/virall
+

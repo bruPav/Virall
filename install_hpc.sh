@@ -2,24 +2,69 @@
 # HPC-Optimized Installation script for Virall
 # Designed for HPC clusters with module systems, proxy requirements, and limited sudo access
 
-set -e  # Exit on any error
+# Parse command-line arguments
+NON_INTERACTIVE=false
+FORCE_RECREATE_ENV=false
+SKIP_SPACE_CHECK=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --non-interactive|-y)
+            NON_INTERACTIVE=true
+            shift
+            ;;
+        --force-recreate-env)
+            FORCE_RECREATE_ENV=true
+            shift
+            ;;
+        --skip-space-check)
+            SKIP_SPACE_CHECK=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --non-interactive, -y    Run without prompts (for batch jobs)"
+            echo "  --force-recreate-env     Force recreation of conda environment"
+            echo "  --skip-space-check       Skip disk space check"
+            echo "  --help, -h               Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+# Don't exit on error - handle errors gracefully
+set +e
 
 echo "Virall - HPC Installation Script"
 echo "=================================="
 echo ""
 echo "This script is optimized for HPC cluster environments."
 echo "It will:"
-echo "  - Skip system package installation (no sudo required)"
+echo "  - install all  packages via conda if not available in modules so no sudo is required"
 echo "  - Check for conda via modules"
 echo "  - Use scratch space for large databases (if available)"
 echo "  - Integrate with module systems"
 echo "  - Support proxy configurations"
 echo ""
 
-# Detect HPC environment
+# Detect HPC environment and non-interactive mode
 HPC_MODE=true
 if [ -n "$SLURM_JOB_ID" ] || [ -n "$PBS_JOBID" ] || [ -n "$LSB_JOBID" ]; then
     echo "Detected HPC batch job environment"
+    NON_INTERACTIVE=true  # Auto-detect non-interactive in batch jobs
+fi
+
+# Check if running in non-interactive mode (no TTY)
+if [ ! -t 0 ] || [ -n "$CI" ] || [ "$NON_INTERACTIVE" = true ]; then
+    NON_INTERACTIVE=true
+    echo "Running in non-interactive mode"
 fi
 
 # Helper function to check if a command is available
@@ -167,6 +212,8 @@ fi
 if ! conda --version >/dev/null 2>&1; then
     echo "ERROR: Conda found but not working properly"
     echo "Please check your conda installation"
+    echo "  Try: module load conda  # if conda is via modules"
+    echo "  Or: export PATH=\"\$HOME/miniconda3/bin:\$PATH\""
     exit 1
 fi
 
@@ -219,25 +266,48 @@ activate_conda_env() {
 # Create conda environment for viral assembler
 echo ""
 echo "Creating conda environment 'virall'..."
-if conda env list | grep -q "^virall "; then
+if conda env list 2>/dev/null | grep -q "^virall "; then
     echo "Environment 'virall' already exists"
-    read -p "Do you want to recreate it? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Removing existing environment..."
+    if [ "$FORCE_RECREATE_ENV" = true ]; then
+        echo "Removing existing environment (--force-recreate-env flag set)..."
         conda env remove -n virall -y
-        conda create -n virall -y python=3.11
+        conda create -n virall -y python=3.11 || {
+            echo "ERROR: Failed to create conda environment"
+            exit 1
+        }
+    elif [ "$NON_INTERACTIVE" = true ]; then
+        echo "Using existing environment (non-interactive mode)"
     else
-        echo "Using existing environment"
+        read -p "Do you want to recreate it? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "Removing existing environment..."
+            conda env remove -n virall -y
+            conda create -n virall -y python=3.11 || {
+                echo "ERROR: Failed to create conda environment"
+                exit 1
+            }
+        else
+            echo "Using existing environment"
+        fi
     fi
 else
-    conda create -n virall -y python=3.11
+    conda create -n virall -y python=3.11 || {
+        echo "ERROR: Failed to create conda environment"
+        exit 1
+    }
 fi
 
 # Activate environment
 echo ""
 echo "Activating conda environment..."
-activate_conda_env virall
+if ! activate_conda_env virall; then
+    echo "ERROR: Failed to activate conda environment"
+    echo "  This may be due to conda initialization issues"
+    echo "  Try manually: source \$(conda info --base)/etc/profile.d/conda.sh"
+    echo "  Then: conda activate virall"
+    exit 1
+fi
 
 # Install Python dependencies with conda
 echo ""
@@ -392,12 +462,20 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
     # Install mapping tools
     if [ ${#MAPPING_TOOLS[@]} -gt 0 ]; then
         echo "Installing mapping tools: ${MAPPING_TOOLS[*]}..."
-        mamba install -c bioconda -c conda-forge "${MAPPING_TOOLS[@]}" -y || {
+        if ! mamba install -c bioconda -c conda-forge "${MAPPING_TOOLS[@]}" -y 2>&1; then
             echo "Warning: Failed to install mapping tools together, trying individually..."
+            FAILED_TOOLS=()
             for tool in "${MAPPING_TOOLS[@]}"; do
-                mamba install -c bioconda -c conda-forge "$tool" -y || true
+                if ! mamba install -c bioconda -c conda-forge "$tool" -y 2>&1; then
+                    FAILED_TOOLS+=("$tool")
+                    echo "ERROR: Failed to install $tool"
+                fi
             done
-        }
+            if [ ${#FAILED_TOOLS[@]} -gt 0 ]; then
+                echo "ERROR: Failed to install: ${FAILED_TOOLS[*]}"
+                echo "  You may need to install these manually or contact HPC support"
+            fi
+        fi
     fi
     
     # Install assembly tools
@@ -451,12 +529,20 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
     # Install QC tools
     if [ ${#QC_TOOLS[@]} -gt 0 ]; then
         echo "Installing QC tools: ${QC_TOOLS[*]}..."
-        mamba install -c bioconda "${QC_TOOLS[@]}" -y || {
+        if ! mamba install -c bioconda "${QC_TOOLS[@]}" -y 2>&1; then
             echo "Warning: Failed to install QC tools together, trying individually..."
+            FAILED_TOOLS=()
             for tool in "${QC_TOOLS[@]}"; do
-                mamba install -c bioconda -c conda-forge "$tool" -y || true
+                if ! mamba install -c bioconda -c conda-forge "$tool" -y 2>&1; then
+                    FAILED_TOOLS+=("$tool")
+                    echo "ERROR: Failed to install $tool"
+                fi
             done
-        }
+            if [ ${#FAILED_TOOLS[@]} -gt 0 ]; then
+                echo "ERROR: Failed to install: ${FAILED_TOOLS[*]}"
+                echo "  You may need to install these manually or contact HPC support"
+            fi
+        fi
     fi
     
     # Install other tools
@@ -465,12 +551,20 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
         if [ -d "$CONDA_PREFIX/lib" ]; then
             export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
         fi
-        mamba install -c bioconda "${OTHER_TOOLS[@]}" -y || {
+        if ! mamba install -c bioconda "${OTHER_TOOLS[@]}" -y 2>&1; then
             echo "Warning: Failed to install other tools together, trying individually..."
+            FAILED_TOOLS=()
             for tool in "${OTHER_TOOLS[@]}"; do
-                mamba install -c bioconda "$tool" -y || true
+                if ! mamba install -c bioconda "$tool" -y 2>&1; then
+                    FAILED_TOOLS+=("$tool")
+                    echo "ERROR: Failed to install $tool"
+                fi
             done
-        }
+            if [ ${#FAILED_TOOLS[@]} -gt 0 ]; then
+                echo "ERROR: Failed to install: ${FAILED_TOOLS[*]}"
+                echo "  You may need to install these manually or contact HPC support"
+            fi
+        fi
     fi
     
     # Note about kaiju
@@ -563,22 +657,45 @@ else
     echo "  (Consider using scratch space if available: export VIRALL_DB_DIR=\$SCRATCH/virall_databases)"
 fi
 
-# Check available disk space
-if command -v df >/dev/null 2>&1; then
+# Check available disk space and quota
+if [ "$SKIP_SPACE_CHECK" != true ] && command -v df >/dev/null 2>&1; then
+    echo "Checking disk space and quota..."
+    
+    # Try to get available space (df reports in KB)
     AVAILABLE_SPACE=$(df "$DB_BASE_DIR" 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
     REQUIRED_SPACE=5368709120  # 5GB in KB
-    if [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
+    
+    # Try to check quota if available (method varies by cluster)
+    QUOTA_CHECK_FAILED=false
+    if command -v quota >/dev/null 2>&1; then
+        # Some clusters have quota command
+        QUOTA_INFO=$(quota -s 2>/dev/null | tail -1 || echo "")
+        if [ -n "$QUOTA_INFO" ]; then
+            echo "Quota information: $QUOTA_INFO"
+        fi
+    fi
+    
+    # Check if we can determine actual available space
+    if [ "$AVAILABLE_SPACE" != "0" ] && [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
         echo "Warning: Insufficient disk space"
         echo "  Available: $((AVAILABLE_SPACE/1024/1024))GB, Required: ~5GB"
         echo "  Installation may fail during database downloads"
-        read -p "Continue anyway? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Installation cancelled"
-            exit 1
+        
+        if [ "$NON_INTERACTIVE" = true ]; then
+            echo "  Continuing anyway (non-interactive mode)..."
+        else
+            read -p "Continue anyway? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                echo "Installation cancelled"
+                exit 1
+            fi
         fi
-    else
+    elif [ "$AVAILABLE_SPACE" != "0" ]; then
         echo "Disk space check passed: $((AVAILABLE_SPACE/1024/1024))GB available"
+    else
+        echo "Warning: Could not determine available disk space"
+        echo "  Proceeding with installation..."
     fi
 fi
 
@@ -845,9 +962,10 @@ if [ "$DB_BASE_DIR" != "$SOFTWARE_DIR/databases" ]; then
     echo "You may need to set database paths in your config file or environment."
 fi
 echo ""
-if [ "$CONDA_FOUND_VIA" = *"module"* ]; then
+if [[ "$CONDA_FOUND_VIA" == *"module"* ]]; then
+    CONDA_MODULE=$(echo "$CONDA_FOUND_VIA" | cut -d: -f2)
     echo "IMPORTANT: Remember to load the conda module before using virall:"
-    echo "  module load $(echo $CONDA_FOUND_VIA | cut -d: -f2)"
+    echo "  module load $CONDA_MODULE"
 fi
 echo ""
 echo "For help, run: virall --help"
