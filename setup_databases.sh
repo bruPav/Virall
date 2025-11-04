@@ -3,7 +3,8 @@
 # This script downloads and sets up all databases for Virall
 # Can be run on HPC after container is deployed
 
-set -e
+# Don't exit on error - continue with other databases if one fails
+set +e
 
 echo "Virall Database Setup Script"
 echo "============================"
@@ -17,11 +18,14 @@ CHECKV_DB_DIR="$DB_BASE_DIR/checkv_db"
 
 # Check if container is available
 CONTAINER="${VIRALL_CONTAINER:-virall.sif}"
+# Convert to absolute path to avoid issues when changing directories
 if [ ! -f "$CONTAINER" ]; then
     echo "ERROR: Container not found: $CONTAINER"
     echo "Please set VIRALL_CONTAINER environment variable or place virall.sif in current directory"
     exit 1
 fi
+# Convert to absolute path
+CONTAINER=$(cd "$(dirname "$CONTAINER")" && pwd)/$(basename "$CONTAINER")
 
 echo "Using container: $CONTAINER"
 echo "Database location: $DB_BASE_DIR"
@@ -56,13 +60,14 @@ else
     singularity exec \
         --bind "$DB_BASE_DIR:/databases" \
         --env VOG_DB_DIR=/databases/vog_db \
+        --env LD_LIBRARY_PATH=/opt/conda/lib \
         "$CONTAINER" \
         python -c "
 import os
 import sys
 from virall.core.vog_annotator import VOGAnnotator
 
-# Set LD_LIBRARY_PATH for subprocess calls
+# Set LD_LIBRARY_PATH for subprocess calls (ensure it's set)
 os.environ['LD_LIBRARY_PATH'] = '/opt/conda/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
 
 try:
@@ -78,6 +83,17 @@ except Exception as e:
     sys.exit(1)
 " || {
         echo "Warning: VOG database setup failed"
+        echo "Trying manual pressing of VOG database..."
+        # Try manual hmmpress with LD_LIBRARY_PATH
+        if [ -f "$VOG_DB_DIR/vog.hmm" ] && [ ! -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
+            singularity exec \
+                --bind "$DB_BASE_DIR:/databases" \
+                --env LD_LIBRARY_PATH=/opt/conda/lib \
+                "$CONTAINER" \
+                bash -c "cd /databases/vog_db && LD_LIBRARY_PATH=/opt/conda/lib hmmpress vog.hmm" || {
+                echo "Manual pressing also failed. You can try later."
+            }
+        fi
         echo "You can try manually later"
     }
 fi
@@ -102,10 +118,9 @@ else
         }
     }
     
-    # Clean up temporary files
+    # Clean up temporary files (use absolute path to avoid directory issues)
     if [ -d "$KAIJU_DB_DIR" ]; then
-        cd "$KAIJU_DB_DIR"
-        rm -f kaiju_db_viruses.bwt kaiju_db_viruses.sa 2>/dev/null || true
+        rm -f "$KAIJU_DB_DIR/kaiju_db_viruses.bwt" "$KAIJU_DB_DIR/kaiju_db_viruses.sa" 2>/dev/null || true
     fi
     
     # Verify nodes.dmp exists
@@ -116,7 +131,8 @@ else
             "$CONTAINER" \
             bash -c "cd /databases/kaiju_db && kaiju-makedb -d /databases/kaiju_db" || {
             echo "Trying manual download of taxonomy files..."
-            cd "$KAIJU_DB_DIR"
+            # Use absolute path, don't change directory
+            cd "$KAIJU_DB_DIR" || true
             curl -L -o taxdump.tar.gz https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz || \
             wget -O taxdump.tar.gz https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz || true
             if [ -f taxdump.tar.gz ]; then
@@ -139,6 +155,7 @@ else
     
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         echo "Attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES..."
+        # Use absolute path for container (CONTAINER is already absolute from earlier)
         if singularity exec \
             --bind "$DB_BASE_DIR:/databases" \
             "$CONTAINER" \
@@ -162,6 +179,9 @@ else
                     echo "Trying manual download..."
                     CHECKV_URL="https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz"
                     CHECKV_TAR="$CHECKV_DB_DIR/checkv-db.tar.gz"
+                    
+                    # Use absolute path for container
+                    CONTAINER_ABS="$CONTAINER"
                     
                     curl -L -o "$CHECKV_TAR" "$CHECKV_URL" || \
                     wget -O "$CHECKV_TAR" "$CHECKV_URL" || true
