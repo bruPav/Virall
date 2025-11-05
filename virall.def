@@ -55,6 +55,8 @@ From: ubuntu:22.04
     # Activate environment and install mamba
     . /opt/miniconda3/etc/profile.d/conda.sh
     conda activate virall
+    # Export LD_LIBRARY_PATH to use conda's libstdc++ instead of system version
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
     conda install -c conda-forge mamba -y
     
     # Install Python dependencies with conda
@@ -90,8 +92,8 @@ From: ubuntu:22.04
         fastplong=0.4.1 \
         fastqc
     
-    # Other tools
-    LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH" mamba install -c bioconda -y \
+    # Other tools (using exported LD_LIBRARY_PATH)
+    mamba install -c bioconda -y \
         checkv \
         bcftools \
         pilon \
@@ -149,6 +151,8 @@ From: ubuntu:22.04
     cd /opt/virall
     . /opt/miniconda3/etc/profile.d/conda.sh
     conda activate virall
+    # Export LD_LIBRARY_PATH to use conda's libraries
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
     pip install -e .
     
     # Set up VOG database (after virall is installed)
