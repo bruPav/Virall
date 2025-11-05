@@ -134,8 +134,8 @@ From: ubuntu:22.04
     conda clean -afy
     # Note: mamba clean removed - conda clean is sufficient and avoids libstdc++ issues
     
-    # Clean up temporary files
-    rm -rf /tmp/*
+    # Clean up temporary files (ignore errors for system directories that can't be removed)
+    rm -rf /tmp/* 2>/dev/null || true
 
 %files
     # Copy virall source code
