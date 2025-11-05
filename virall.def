@@ -86,14 +86,20 @@ From: ubuntu:22.04
         spades=4.2.0 \
         flye=2.9.6
     
-    # QC tools
+    # Install other tools BEFORE fastqc (to avoid libstdc++ upgrade issue with mamba)
+    mamba install -c bioconda -y \
+        checkv \
+        bcftools \
+        pilon \
+        hmmer \
+        prodigal \
+        kaiju
+    
+    # QC tools (install after other tools to avoid mamba/libstdc++ conflicts)
     mamba install -c bioconda -c conda-forge -y \
         fastp \
         fastplong=0.4.1 \
         fastqc
-    
-    # Other tools (ensure mamba uses conda's libstdc++ by explicitly setting LD_LIBRARY_PATH)
-    bash -c "export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\" && mamba install -c bioconda -y checkv bcftools pilon hmmer prodigal kaiju"
     
     # Fix SPAdes PATH issue (create symlink)
     SPADES_PATH=$(find $CONDA_PREFIX -name "spades.py" 2>/dev/null | head -1)
