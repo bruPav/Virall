@@ -91,7 +91,7 @@ From: ubuntu:22.04
         fastqc
     
     # Other tools
-    mamba install -c bioconda -y \
+    LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH" mamba install -c bioconda -y \
         checkv \
         bcftools \
         pilon \
