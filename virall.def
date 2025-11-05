@@ -53,7 +53,7 @@ From: ubuntu:22.04
     conda create -n virall -y python=3.11
     
     # Activate environment and install mamba
-    ./opt/miniconda3/etc/profile.d/conda.sh
+    . /opt/miniconda3/etc/profile.d/conda.sh
     conda activate virall
     conda install -c conda-forge mamba -y
     
@@ -147,7 +147,7 @@ From: ubuntu:22.04
 %post
     # Install virall package in development mode
     cd /opt/virall
-    ./opt/miniconda3/etc/profile.d/conda.sh
+    . /opt/miniconda3/etc/profile.d/conda.sh
     conda activate virall
     pip install -e .
     
