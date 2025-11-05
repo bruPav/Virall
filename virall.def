@@ -92,14 +92,8 @@ From: ubuntu:22.04
         fastplong=0.4.1 \
         fastqc
     
-    # Other tools (using exported LD_LIBRARY_PATH)
-    mamba install -c bioconda -y \
-        checkv \
-        bcftools \
-        pilon \
-        hmmer \
-        prodigal \
-        kaiju
+    # Other tools (ensure mamba uses conda's libstdc++ by explicitly setting LD_LIBRARY_PATH)
+    bash -c "export LD_LIBRARY_PATH=\"\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH\" && mamba install -c bioconda -y checkv bcftools pilon hmmer prodigal kaiju"
     
     # Fix SPAdes PATH issue (create symlink)
     SPADES_PATH=$(find $CONDA_PREFIX -name "spades.py" 2>/dev/null | head -1)
