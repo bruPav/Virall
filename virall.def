@@ -148,6 +148,8 @@ From: ubuntu:22.04
 
 %post
     # Install virall package in development mode
+    # Ensure directory exists (files should be copied from %files section)
+    mkdir -p /opt/virall
     cd /opt/virall
     . /opt/miniconda3/etc/profile.d/conda.sh
     conda activate virall
