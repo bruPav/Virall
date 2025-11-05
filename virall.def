@@ -132,7 +132,7 @@ From: ubuntu:22.04
     
     # Clean up conda cache to reduce image size
     conda clean -afy
-    mamba clean -afy
+    # Note: mamba clean removed - conda clean is sufficient and avoids libstdc++ issues
     
     # Clean up temporary files
     rm -rf /tmp/*
