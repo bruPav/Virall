@@ -1,66 +1,75 @@
 Bootstrap: docker
 From: ubuntu:22.04
 
+%files
+    # Copy virall source code into container
+    # Paths are relative to where you run: singularity build virall.sif virall.def
+    # Run from the virall source directory (where setup.py is located)
+    virall /opt/virall/src/virall
+    setup.py /opt/virall/src/setup.py
+    requirements.txt /opt/virall/src/requirements.txt
+    README.md /opt/virall/src/README.md
+    configs /opt/virall/src/configs
+    LICENSE /opt/virall/src/LICENSE
+
 %environment
     export DEBIAN_FRONTEND=noninteractive
+    export PATH=/opt/conda/bin:/opt/conda/envs/virall/bin:$PATH
+    export CONDA_PREFIX=/opt/conda/envs/virall
+    export LD_LIBRARY_PATH=/opt/conda/envs/virall/lib:$LD_LIBRARY_PATH
     export LC_ALL=C
-    export PATH=/opt/miniconda3/bin:$PATH
-    export CONDA_PREFIX=/opt/miniconda3/envs/virall
-    export PATH=/opt/miniconda3/envs/virall/bin:$PATH
-    export LD_LIBRARY_PATH=/opt/miniconda3/envs/virall/lib:$LD_LIBRARY_PATH
-    
-    # Virall paths
-    export VIRALL_HOME=/opt/virall
-    export VOG_DB_DIR=/opt/virall/databases/vog_db
-    export KAIJU_DB_DIR=/opt/virall/databases/kaiju_db
-    export CHECKV_DB_DIR=/opt/virall/databases/checkv_db
+    export LANG=C.UTF-8
 
 %post
+    # Set environment variables
     export DEBIAN_FRONTEND=noninteractive
+    export PATH=/opt/conda/bin:$PATH
     export LC_ALL=C
-    
-    # Install system dependencies
+    export LANG=C.UTF-8
+
+    # Check initial disk space
+    echo "=== Initial disk space check ==="
+    df -h
+
+    # Update system and install basic dependencies
     apt-get update && apt-get install -y \
-        build-essential \
         wget \
         curl \
         bzip2 \
         ca-certificates \
-        libglib2.0-0 \
-        libxext6 \
-        libsm6 \
-        libxrender1 \
-        git \
         libcrypt1 \
+        build-essential \
+        gcc \
+        g++ \
+        make \
+        git \
         && rm -rf /var/lib/apt/lists/*
-    
+
     # Install Miniconda
     cd /tmp
     wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-    bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/miniconda3
+    bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda
     rm Miniconda3-latest-Linux-x86_64.sh
-    
+
     # Initialize conda
-    /opt/miniconda3/bin/conda init bash
-    export PATH=/opt/miniconda3/bin:$PATH
-    
+    /opt/conda/bin/conda init bash
+    /opt/conda/bin/conda config --set auto_update_conda false
+    /opt/conda/bin/conda config --set channel_priority flexible
+
     # Accept conda Terms of Service
-    conda config --set auto_activate_base false
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
-    
-    # Create conda environment
-    conda create -n virall -y python=3.11
-    
-    # Activate environment and install mamba
-    . /opt/miniconda3/etc/profile.d/conda.sh
-    conda activate virall
-    # Export LD_LIBRARY_PATH to use conda's libstdc++ instead of system version
-    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
-    conda install -c conda-forge mamba -y
-    
+    /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
+    /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
+
+    # Create conda environment with Python 3.11
+    /opt/conda/bin/conda create -n virall -y python=3.11
+
+    # Set up conda environment variables
+    export CONDA_PREFIX=/opt/conda/envs/virall
+    export PATH=/opt/conda/bin:$CONDA_PREFIX/bin:$PATH
+
+    # Use bash to activate conda environment and install packages
     # Install Python dependencies with conda
-    conda install -c conda-forge -y \
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c conda-forge -y \
         numpy \
         pandas \
         matplotlib \
@@ -72,47 +81,137 @@ From: ubuntu:22.04
         tqdm \
         pyyaml \
         loguru \
-        psutil
-    
-    # Install bioinformatics tools using mamba
-    # Mapping/alignment tools
-    mamba install -c bioconda -c conda-forge -y \
-        samtools \
-        bwa \
-        minimap2
-    
-    # Assembly tools
-    mamba install -c conda-forge -c bioconda -y \
-        spades=4.2.0 \
-        flye=2.9.6
-    
-    # Install other tools BEFORE fastqc (to avoid libstdc++ upgrade issue with mamba)
-    mamba install -c bioconda -y \
-        checkv \
-        bcftools \
-        pilon \
-        hmmer \
-        prodigal \
-        kaiju
-    
-    # QC tools (install after other tools to avoid mamba/libstdc++ conflicts)
-    mamba install -c bioconda -c conda-forge -y \
-        fastp \
-        fastplong=0.4.1 \
-        fastqc
-    
-    # Fix SPAdes PATH issue (create symlink)
-    SPADES_PATH=$(find $CONDA_PREFIX -name "spades.py" 2>/dev/null | head -1)
-    if [ -n "$SPADES_PATH" ]; then
-        ln -sf "$SPADES_PATH" "$CONDA_PREFIX/bin/spades"
+        psutil"
+
+    # Install mamba for faster dependency solving
+    echo "=== Checking disk space before installing mamba ==="
+    df -h
+    if [ -d "/opt/conda/pkgs" ]; then
+        echo "Conda cache size:"
+        du -sh /opt/conda/pkgs 2>/dev/null || true
     fi
     
-    # Ensure OpenMPI libraries are accessible (SPAdes dependency)
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c conda-forge mamba -y"
+    
+    echo "=== Checking disk space after installing mamba ==="
+    df -h
+    if [ -d "/opt/conda/pkgs" ]; then
+        echo "Conda cache size:"
+        du -sh /opt/conda/pkgs 2>/dev/null || true
+    fi
+
+    # Install bioinformatics tools using mamba
+    # Install tools individually and clean cache frequently to avoid running out of space
+    # This approach is more resilient to network issues and package extraction failures
+    
+    # Mapping/alignment tools - install individually
+    echo "Installing samtools..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && mamba install -c bioconda -c conda-forge -y samtools" || echo "Warning: samtools installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing bwa..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && mamba install -c bioconda -c conda-forge -y bwa" || echo "Warning: bwa installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing minimap2..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && mamba install -c bioconda -c conda-forge -y minimap2" || echo "Warning: minimap2 installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "=== Checking disk space after mapping tools ==="
+    df -h
+    if [ -d "/opt/conda/pkgs" ]; then
+        echo "Conda cache size:"
+        du -sh /opt/conda/pkgs 2>/dev/null || true
+    fi
+
+    # Assembly tools - install individually (these are large packages)
+    echo "Installing SPAdes..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && mamba install -c conda-forge -c bioconda -y spades=4.2.0" || echo "Warning: SPAdes installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing Flye..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && mamba install -c conda-forge -c bioconda -y flye=2.9.6" || echo "Warning: Flye installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "=== Checking disk space after assembly tools ==="
+    df -h
+    if [ -d "/opt/conda/pkgs" ]; then
+        echo "Conda cache size:"
+        du -sh /opt/conda/pkgs 2>/dev/null || true
+    fi
+
+    # QC tools - install individually
+    # Use conda for fastp to avoid mamba hangs (mamba has GLIBCXX compatibility issues after libstdcxx upgrade)
+    echo "Installing fastp..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y fastp" || echo "Warning: fastp installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    # Use conda for fastplong to avoid mamba segmentation faults (mamba crashes after libstdcxx upgrade)
+    echo "Installing fastplong..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y fastplong=0.4.1" || echo "Warning: fastplong installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing fastqc..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && mamba install -c bioconda -c conda-forge -y fastqc" || echo "Warning: fastqc installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "=== Checking disk space after QC tools ==="
+    df -h
+    if [ -d "/opt/conda/pkgs" ]; then
+        echo "Conda cache size:"
+        du -sh /opt/conda/pkgs 2>/dev/null || true
+    fi
+
+    # Other bioinformatics tools - install individually using conda instead of mamba
+    # (mamba has GLIBCXX compatibility issues after libstdcxx upgrade)
+    echo "Installing bcftools..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y bcftools" || echo "Warning: bcftools installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing hmmer..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y hmmer" || echo "Warning: hmmer installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing prodigal..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y prodigal" || echo "Warning: prodigal installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing pilon..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y pilon" || echo "Warning: pilon installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing checkv..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y checkv" || echo "Warning: checkv installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing kaiju..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y kaiju" || echo "Warning: kaiju installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    # Try to install minimap2 and fastqc with conda (they failed with mamba)
+    echo "Retrying minimap2 with conda..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y minimap2" || echo "Warning: minimap2 installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Retrying fastqc with conda..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y fastqc" || echo "Warning: fastqc installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "=== Checking disk space after all tool installations ==="
+    df -h
+    if [ -d "/opt/conda/pkgs" ]; then
+        echo "Conda cache size:"
+        du -sh /opt/conda/pkgs 2>/dev/null || true
+    fi
+
+    # Fix OpenMPI libraries for SPAdes (needed for HMMER)
     if [ -d "$CONDA_PREFIX/lib" ]; then
-        # Find and link OpenMPI libraries
+        # Find OpenMPI libraries installed with SPAdes
         OPENMPI_LIB=$(find $CONDA_PREFIX -type f -name "libmpi.so.40*" 2>/dev/null | grep -E "libmpi\.so\.40$|libmpi\.so\.40\." | head -1)
+        
         if [ -n "$OPENMPI_LIB" ]; then
             OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
+            # Link all OpenMPI libraries to environment lib directory
             mkdir -p "$CONDA_PREFIX/lib"
             for lib in "$OPENMPI_LIB_DIR"/*.so*; do
                 if [ -f "$lib" ] || [ -L "$lib" ]; then
@@ -121,134 +220,131 @@ From: ubuntu:22.04
                 fi
             done
         fi
-        export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
     fi
-    
-    # Create virall directory structure
-    mkdir -p /opt/virall
+
+    # Create SPAdes symlink
+    SPADES_PATH=$(find $CONDA_PREFIX -name "spades.py" 2>/dev/null | head -1)
+    if [ -n "$SPADES_PATH" ]; then
+        ln -sf "$SPADES_PATH" "$CONDA_PREFIX/bin/spades"
+    fi
+
+    # Create directories for databases (to be populated at runtime or via bind mounts)
     mkdir -p /opt/virall/databases/vog_db
     mkdir -p /opt/virall/databases/kaiju_db
     mkdir -p /opt/virall/databases/checkv_db
     
-    # Clean up conda cache to reduce image size
-    conda clean -afy
-    # Note: mamba clean removed - conda clean is sufficient and avoids libstdc++ issues
+    # Create directory for virall source code
+    # The source code should be copied into the container during build
+    # using: singularity build --fakeroot virall.sif virall.def
+    # with the source code in the same directory as the .def file
+    mkdir -p /opt/virall/src
+
+    # Final cleanup of conda cache (already cleaned after each tool, but do one more pass)
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
-    # Clean up temporary files (ignore errors for system directories that can't be removed)
-    rm -rf /tmp/* 2>/dev/null || true
-
-%files
-    # Copy virall source code
-    virall /opt/virall/virall
-    setup.py /opt/virall/setup.py
-    requirements.txt /opt/virall/requirements.txt
-    configs /opt/virall/configs
-    README.md /opt/virall/README.md
-    LICENSE /opt/virall/LICENSE
-
-%post
-    # Install virall package in development mode
-    # Directory should already exist from %files section, but ensure it exists
-    /bin/mkdir -p /opt/virall || true
-    cd /opt/virall
-    . /opt/miniconda3/etc/profile.d/conda.sh
-    conda activate virall
-    # Export LD_LIBRARY_PATH to use conda's libraries
-    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
-    pip install -e .
-    
-    # Set up VOG database (after virall is installed)
-    echo "Setting up VOG database..."
-    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
-    python -c "
-import os
-import sys
-from virall.core.vog_annotator import VOGAnnotator
-
-# Set LD_LIBRARY_PATH for subprocess calls
-conda_prefix = os.environ.get('CONDA_PREFIX', '')
-if conda_prefix:
-    lib_path = os.path.join(conda_prefix, 'lib')
-    if os.path.isdir(lib_path):
-        current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
-        new_ld_path = f'{lib_path}:{current_ld_path}' if current_ld_path else lib_path
-        os.environ['LD_LIBRARY_PATH'] = new_ld_path
-
-try:
-    annotator = VOGAnnotator()
-    if annotator.setup_vog_database('/opt/virall/databases/vog_db'):
-        print('VOG database setup completed successfully')
-        sys.exit(0)
-    else:
-        print('VOG database setup failed')
-        sys.exit(1)
-except Exception as e:
-    print(f'VOG database setup error: {e}')
-    sys.exit(1)
-" || echo "Warning: VOG database setup failed, can be set up later"
-    
-    # Set up Kaiju database
-    echo "Setting up Kaiju database..."
-    if command -v kaiju-makedb >/dev/null 2>&1; then
-        kaiju-makedb -s viruses -d /opt/virall/databases/kaiju_db || echo "Warning: Kaiju database setup failed, can be set up later"
-        
-        # Clean up temporary files
-        cd /opt/virall/databases/kaiju_db
-        rm -f kaiju_db_viruses.bwt kaiju_db_viruses.sa 2>/dev/null || true
-        
-        # Download taxonomy files if needed
-        if [ ! -f "/opt/virall/databases/kaiju_db/nodes.dmp" ]; then
-            cd /opt/virall/databases/kaiju_db
-            curl -L -o taxdump.tar.gz https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz || echo "Warning: Taxonomy download failed"
-            if [ -f taxdump.tar.gz ]; then
-                tar -xzf taxdump.tar.gz && rm -f taxdump.tar.gz
-            fi
-        fi
-    else
-        echo "Warning: kaiju-makedb not found, skipping Kaiju database setup"
+    echo "=== Final disk space check after cleanup ==="
+    df -h
+    if [ -d "/opt/conda/pkgs" ]; then
+        echo "Conda cache size:"
+        du -sh /opt/conda/pkgs 2>/dev/null || true
     fi
-    
-    # Set up CheckV database
-    echo "Setting up CheckV database..."
-    if command -v checkv >/dev/null 2>&1; then
-        checkv download_database /opt/virall/databases/checkv_db || {
-            echo "Warning: CheckV database download failed, trying manual download..."
-            cd /opt/virall/databases/checkv_db
-            curl -fL -o checkv-db.tar.gz https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz || echo "Warning: Manual CheckV download failed"
-            if [ -f checkv-db.tar.gz ]; then
-                tar -xzf checkv-db.tar.gz && rm -f checkv-db.tar.gz
-            fi
-        }
+
+    # Install virall package (if source code is available)
+    # This assumes the virall source code is in the build context
+    # Copy source code if it exists in the build directory
+    if [ -d "/opt/virall/src" ] && [ -f "/opt/virall/src/setup.py" ]; then
+        cd /opt/virall/src
+        bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install -e ."
     else
-        echo "Warning: checkv not found, skipping CheckV database setup"
+        echo "Note: Virall source code not found during build."
+        echo "Install it at runtime with: pip install -e /path/to/virall/source"
     fi
+
+    # Clean up apt cache
+    apt-get clean || true
+    # Only remove files we can actually remove (skip busy filesystems)
+    rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+    # Try to clean tmp directories, but ignore errors for busy filesystems
+    # IMPORTANT: Don't remove build-temp-* or bundle-temp-* directories - Singularity/Apptainer needs them!
+    find /tmp -mindepth 1 -maxdepth 1 ! -name 'build-temp-*' ! -name 'bundle-temp-*' -exec rm -rf {} + 2>/dev/null || true
+    find /var/tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
 
 %runscript
-    # Default command: run virall
-    exec /opt/miniconda3/envs/virall/bin/virall "$@"
+    # Activate conda environment and run virall
+    # Runscript uses bash by default, so source works here
+    export PATH=/opt/conda/bin:/opt/conda/envs/virall/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/conda/envs/virall/lib:$LD_LIBRARY_PATH
+    export CONDA_PREFIX=/opt/conda/envs/virall
+    
+    # If virall is installed, run it; otherwise show help
+    if command -v virall >/dev/null 2>&1; then
+        exec virall "$@"
+    else
+        echo "Virall container is ready!"
+        echo "To install virall package, mount the source code and run:"
+        echo "  /opt/conda/bin/conda run -n virall pip install -e /path/to/virall/source"
+        echo ""
+        echo "Available tools:"
+        echo "  - samtools, bwa, minimap2 (mapping)"
+        echo "  - spades, flye (assembly)"
+        echo "  - fastp, fastplong, fastqc (QC)"
+        echo "  - checkv, bcftools, pilon, hmmer, prodigal, kaiju"
+        exec "$@"
+    fi
 
 %labels
-    Author "Virall Team"
-    Version "0.1.0"
-    Description "Virall - A comprehensive tool for viral genome analysis including assembly, classification, gene prediction, and annotation"
-    Maintainer "bruno.pavletic@gmail.com, britaniadiazf@gmail.com"
+    Author Virall Team
+    Version 0.1.0
+    Description Virall - A comprehensive tool for viral genome analysis
+    Maintainer bruno.pavletic@gmail.com, britaniadiazf@gmail.com
 
 %help
-    Virall Container - Viral Genome Assembly and Analysis
+    Virall Singularity Container
+    ============================
     
-    This container includes:
-    - All bioinformatics tools (SPAdes, Flye, BWA, minimap2, etc.)
-    - Python dependencies (numpy, pandas, biopython, etc.)
-    - Pre-installed databases (VOG, Kaiju, CheckV)
-    - Virall package ready to use
+    This container includes all bioinformatics tools and dependencies needed
+    for the Virall viral genome analysis pipeline.
+    
+    Installed Tools:
+    - Mapping: samtools, bwa, minimap2
+    - Assembly: SPAdes 4.2.0, Flye 2.9.6
+    - QC: fastp, fastplong 0.4.1, fastqc
+    - Other: checkv, bcftools, pilon, hmmer, prodigal, kaiju
+    
+    Python Packages:
+    - numpy, pandas, matplotlib, seaborn, plotly
+    - biopython, scikit-learn, click, tqdm, pyyaml, loguru, psutil
     
     Usage:
-        singularity run virall.sif --help
-        singularity exec virall.sif virall --input reads.fastq --output results/
-        singularity shell virall.sif
+    ------
+    1. Build the container (from the virall source directory):
+       # Option A: Build with source code included (recommended)
+       # First, edit the %files section in virall.def to include source files
+       singularity build --fakeroot virall.sif virall.def
+       
+       # Option B: Build without source, install at runtime
+       singularity build virall.sif virall.def
+       # Then install virall package:
+       singularity exec virall.sif bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install -e /path/to/virall/source"
     
-    Database locations:
-        VOG: /opt/virall/databases/vog_db
-        Kaiju: /opt/virall/databases/kaiju_db
-        CheckV: /opt/virall/databases/checkv_db
+    2. Set up databases (at runtime or via bind mounts):
+       - VOG database: /opt/virall/databases/vog_db
+       - Kaiju database: /opt/virall/databases/kaiju_db
+       - CheckV database: /opt/virall/databases/checkv_db
+       
+       # Mount existing databases from host:
+       singularity exec -B /path/to/host/databases:/opt/virall/databases virall.sif virall ...
+       
+       # Or download databases inside container:
+       singularity exec virall.sif bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate virall && python -c 'from virall.core.vog_annotator import VOGAnnotator; VOGAnnotator().setup_vog_database(\"/opt/virall/databases/vog_db\")'"
+    
+    3. Run virall:
+       singularity exec virall.sif virall --help
+       # Or with database bind mount:
+       singularity exec -B /path/to/databases:/opt/virall/databases virall.sif virall --help
+    
+    Note: Databases are not included in the container image due to size (~4GB total).
+    They should be downloaded at runtime or mounted from the host system.
+    
+    To include source code during build, uncomment and adjust paths in the %files section.
 
