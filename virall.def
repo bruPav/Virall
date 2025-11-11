@@ -14,7 +14,7 @@ From: ubuntu:22.04
 
 %environment
     export DEBIAN_FRONTEND=noninteractive
-    export PATH=/opt/conda/bin:/opt/conda/envs/virall/bin:$PATH
+    export PATH=/opt/conda/envs/virall/bin:/opt/conda/bin:$PATH
     export CONDA_PREFIX=/opt/conda/envs/virall
     export LD_LIBRARY_PATH=/opt/conda/envs/virall/lib:$LD_LIBRARY_PATH
     export LC_ALL=C
@@ -100,6 +100,19 @@ From: ubuntu:22.04
         du -sh /opt/conda/pkgs 2>/dev/null || true
     fi
 
+    # Upgrade libstdcxx-ng early to ensure all tools use the newer version with GLIBCXX_3.4.32
+    # This is critical for tools like fastp that require GLIBCXX_3.4.32
+    # Upgrading early ensures the symlink libstdc++.so.6 is created properly before any tools are installed
+    echo "Upgrading libstdcxx-ng to ensure compatibility with all tools..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c conda-forge -y libstdcxx-ng" || echo "Warning: libstdcxx-ng upgrade failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    # Verify the symlink was created
+    if [ ! -L "/opt/conda/envs/virall/lib/libstdc++.so.6" ] && [ -f "/opt/conda/envs/virall/lib/libstdc++.so.6.0.34" ]; then
+        echo "Creating libstdc++.so.6 symlink..."
+        ln -sf /opt/conda/envs/virall/lib/libstdc++.so.6.0.34 /opt/conda/envs/virall/lib/libstdc++.so.6 || true
+    fi
+
     # Install bioinformatics tools using mamba
     # Install tools individually and clean cache frequently to avoid running out of space
     # This approach is more resilient to network issues and package extraction failures
@@ -146,6 +159,57 @@ From: ubuntu:22.04
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y fastp" || echo "Warning: fastp installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
+    # Fix isa-l library for fastp (fastp needs libisal.so.2)
+    # Find isa-l library and ensure it's accessible
+    echo "Fixing isa-l library for fastp..."
+    if [ -d "$CONDA_PREFIX/lib" ]; then
+        # Find the actual isa-l library file (not symlinks)
+        ISAL_LIB=$(find $CONDA_PREFIX -type f -name "libisal.so.2.*" 2>/dev/null | head -1)
+        if [ -n "$ISAL_LIB" ]; then
+            echo "Found isa-l library: $ISAL_LIB"
+            ISAL_LIB_DIR=$(dirname "$ISAL_LIB")
+            ISAL_LIB_FILE=$(basename "$ISAL_LIB")
+            
+            # Create symlinks pointing to the actual library file
+            mkdir -p "$CONDA_PREFIX/lib"
+            
+            # Create libisal.so.2 -> libisal.so.2.0.31 (use full path for absolute symlink)
+            if [ ! -L "$CONDA_PREFIX/lib/libisal.so.2" ]; then
+                echo "Creating symlink: $CONDA_PREFIX/lib/libisal.so.2 -> $ISAL_LIB"
+                if ln -sf "$ISAL_LIB" "$CONDA_PREFIX/lib/libisal.so.2"; then
+                    echo "✓ Successfully created libisal.so.2 symlink"
+                else
+                    echo "✗ ERROR: Failed to create libisal.so.2 symlink"
+                    exit 1
+                fi
+            else
+                echo "Symlink libisal.so.2 already exists, checking if it's correct..."
+                if [ "$(readlink -f "$CONDA_PREFIX/lib/libisal.so.2")" != "$ISAL_LIB" ]; then
+                    echo "Warning: Existing symlink points to wrong location, recreating..."
+                    rm -f "$CONDA_PREFIX/lib/libisal.so.2"
+                    ln -sf "$ISAL_LIB" "$CONDA_PREFIX/lib/libisal.so.2" || exit 1
+                fi
+            fi
+            
+            # Verify the symlink was created correctly
+            if [ -L "$CONDA_PREFIX/lib/libisal.so.2" ]; then
+                echo "✓ Verified: libisal.so.2 symlink exists"
+                ls -la "$CONDA_PREFIX/lib/libisal.so.2"
+            else
+                echo "✗ ERROR: libisal.so.2 symlink verification failed"
+                exit 1
+            fi
+            
+            # Create libisal.so -> libisal.so.2 (if needed)
+            if [ ! -L "$CONDA_PREFIX/lib/libisal.so" ]; then
+                echo "Creating symlink: $CONDA_PREFIX/lib/libisal.so -> libisal.so.2"
+                ln -sf "libisal.so.2" "$CONDA_PREFIX/lib/libisal.so" || echo "Warning: Failed to create libisal.so symlink (non-critical)"
+            fi
+        else
+            echo "Warning: isa-l library (libisal.so.2.*) not found. fastp may not work correctly."
+        fi
+    fi
+    
     # Use conda for fastplong to avoid mamba segmentation faults (mamba crashes after libstdcxx upgrade)
     echo "Installing fastplong..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y fastplong=0.4.1" || echo "Warning: fastplong installation failed, continuing..."
@@ -185,7 +249,8 @@ From: ubuntu:22.04
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     echo "Installing kaiju..."
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y kaiju" || echo "Warning: kaiju installation failed, continuing..."
+    # Install Kaiju 1.10.1 (includes kaiju-makedb) instead of default 1.4.4
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y 'kaiju=1.10.1'" || echo "Warning: kaiju installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     # Try to install minimap2 and fastqc with conda (they failed with mamba)
@@ -212,13 +277,40 @@ From: ubuntu:22.04
         if [ -n "$OPENMPI_LIB" ]; then
             OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
             # Link all OpenMPI libraries to environment lib directory
+            # IMPORTANT: Only link actual files, not symlinks, and exclude libisal.so.2 which is handled separately
             mkdir -p "$CONDA_PREFIX/lib"
             for lib in "$OPENMPI_LIB_DIR"/*.so*; do
-                if [ -f "$lib" ] || [ -L "$lib" ]; then
+                if [ -f "$lib" ] && [ ! -L "$lib" ]; then
                     lib_name=$(basename "$lib")
-                    ln -sf "$lib" "$CONDA_PREFIX/lib/$lib_name" 2>/dev/null || true
+                    # Skip libisal.so.2 - it's handled separately for fastp
+                    if [ "$lib_name" != "libisal.so.2" ] && [ "$lib_name" != "libisal.so" ]; then
+                        # Only create symlink if it doesn't already exist or is incorrect
+                        if [ ! -L "$CONDA_PREFIX/lib/$lib_name" ] || [ "$(readlink -f "$CONDA_PREFIX/lib/$lib_name")" != "$lib" ]; then
+                            ln -sf "$lib" "$CONDA_PREFIX/lib/$lib_name" 2>/dev/null || true
+                        fi
+                    fi
                 fi
             done
+        fi
+    fi
+    
+    # Fix OpenBLAS libraries for numpy (numpy needs libopenblas.so.0)
+    if [ -d "$CONDA_PREFIX/lib" ]; then
+        # Find the actual OpenBLAS library file (not symlinks)
+        OPENBLAS_LIB=$(find $CONDA_PREFIX -type f -name "libopenblas.so.0.*" 2>/dev/null | head -1)
+        if [ -n "$OPENBLAS_LIB" ]; then
+            OPENBLAS_LIB_DIR=$(dirname "$OPENBLAS_LIB")
+            OPENBLAS_LIB_FILE=$(basename "$OPENBLAS_LIB")
+            # Create symlinks pointing to the actual library file
+            mkdir -p "$CONDA_PREFIX/lib"
+            # Create libopenblas.so.0 -> libopenblas.so.0.x.x
+            if [ ! -L "$CONDA_PREFIX/lib/libopenblas.so.0" ]; then
+                ln -sf "$OPENBLAS_LIB_FILE" "$CONDA_PREFIX/lib/libopenblas.so.0" 2>/dev/null || true
+            fi
+            # Create libopenblas.so -> libopenblas.so.0 (if needed)
+            if [ ! -L "$CONDA_PREFIX/lib/libopenblas.so" ]; then
+                ln -sf "libopenblas.so.0" "$CONDA_PREFIX/lib/libopenblas.so" 2>/dev/null || true
+            fi
         fi
     fi
 
@@ -253,12 +345,135 @@ From: ubuntu:22.04
     # This assumes the virall source code is in the build context
     # Copy source code if it exists in the build directory
     if [ -d "/opt/virall/src" ] && [ -f "/opt/virall/src/setup.py" ]; then
-        cd /opt/virall/src
-        bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install -e ."
+        # Install virall in editable mode
+        cd /tmp
+        bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install -e /opt/virall/src"
     else
         echo "Note: Virall source code not found during build."
         echo "Install it at runtime with: pip install -e /path/to/virall/source"
     fi
+
+    # ========================================================================
+    # Database Setup (Optional - will increase container size by ~21GB)
+    # ========================================================================
+    # Uncomment the sections below to include databases in the container
+    # Note: This will significantly increase build time and container size
+    # Alternative: Mount databases at runtime using bind mounts
+    # ========================================================================
+    
+    # Set up VOG database for viral gene annotation
+    # Uncomment to include VOG database (~1GB) in container
+    # echo "Setting up VOG (Viral Orthologous Groups) database..."
+    # VOG_DB_DIR="/opt/virall/databases/vog_db"
+    # mkdir -p "$VOG_DB_DIR"
+    # if [ ! -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
+    #     echo "Downloading and setting up VOG database (this may take 5-10 minutes)..."
+    #     # Set LD_LIBRARY_PATH for HMMER (needs OpenMPI libraries)
+    #     export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+    #     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && python -c \"
+    # import os
+    # import sys
+    # from virall.core.vog_annotator import VOGAnnotator
+    # 
+    # # Set LD_LIBRARY_PATH for subprocess calls (hmmpress needs MPI libraries)
+    # conda_prefix = os.environ.get('CONDA_PREFIX', '')
+    # if conda_prefix:
+    #     lib_path = os.path.join(conda_prefix, 'lib')
+    #     if os.path.isdir(lib_path):
+    #         current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
+    #         new_ld_path = f'{lib_path}:{current_ld_path}' if current_ld_path else lib_path
+    #         os.environ['LD_LIBRARY_PATH'] = new_ld_path
+    # 
+    # try:
+    #     annotator = VOGAnnotator()
+    #     if annotator.setup_vog_database('$VOG_DB_DIR'):
+    #         print('VOG database setup completed successfully')
+    #         sys.exit(0)
+    #     else:
+    #         print('VOG database setup failed')
+    #         sys.exit(1)
+    # except Exception as e:
+    #     print(f'VOG database setup error: {e}')
+    #     sys.exit(1)
+    # \"" || echo "Warning: VOG database setup failed - can be done at runtime"
+    #     # Try manual pressing if database file exists but not pressed
+    #     if [ -f "$VOG_DB_DIR/vog.hmm" ] && [ ! -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
+    #         echo "Pressing VOG database manually..."
+    #         LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH" hmmpress "$VOG_DB_DIR/vog.hmm" 2>/dev/null || echo "Warning: Manual pressing failed"
+    #     fi
+    # else
+    #     echo "VOG database already exists"
+    # fi
+    
+    # Set up Kaiju database for viral contig classification
+    # Uncomment to include Kaiju database (~several GB) in container
+    # echo "Setting up Kaiju viral database..."
+    # KAIJU_DB_DIR="/opt/virall/databases/kaiju_db"
+    # mkdir -p "$KAIJU_DB_DIR"
+    # if [ ! -f "$KAIJU_DB_DIR/kaiju_db_viruses.fmi" ]; then
+    #     echo "Downloading Kaiju viral database (this may take 10-30 minutes)..."
+    #     echo "Note: This will download the full NCBI taxonomy database first, then create viral subset"
+    #     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && kaiju-makedb -s viruses -d $KAIJU_DB_DIR" || echo "Warning: Kaiju database setup failed - can be done at runtime"
+    #     # Clean up temporary files
+    #     if [ -d "$KAIJU_DB_DIR" ]; then
+    #         cd "$KAIJU_DB_DIR"
+    #         rm -f kaiju_db_viruses.bwt kaiju_db_viruses.sa 2>/dev/null || true
+    #         # Verify nodes.dmp exists (required for Kaiju)
+    #         if [ ! -f "$KAIJU_DB_DIR/nodes.dmp" ]; then
+    #             echo "Downloading full taxonomy database for Kaiju..."
+    #             bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && kaiju-makedb -d $KAIJU_DB_DIR" || echo "Warning: Full taxonomy download failed"
+    #         fi
+    #     fi
+    # else
+    #     echo "Kaiju database already exists"
+    # fi
+    
+    # Set up CheckV database for viral contig quality assessment
+    # Uncomment to include CheckV database (~3GB) in container
+    # echo "Setting up CheckV database for viral contig quality assessment..."
+    # CHECKV_DB_DIR="/opt/virall/databases/checkv_db"
+    # mkdir -p "$CHECKV_DB_DIR"
+    # if [ ! -d "$CHECKV_DB_DIR" ] || [ -z "$(ls -A $CHECKV_DB_DIR 2>/dev/null)" ]; then
+    #     echo "Downloading CheckV database (this may take 10-30 minutes)..."
+    #     MAX_RETRIES=3
+    #     RETRY_COUNT=0
+    #     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    #         echo "Attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES..."
+    #         bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && checkv download_database $CHECKV_DB_DIR" && break
+    #         RETRY_COUNT=$((RETRY_COUNT + 1))
+    #         if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+    #             echo "Retrying in 60 seconds..."
+    #             sleep 60
+    #         fi
+    #     done
+    #     # Fallback to manual download if checkv command fails
+    #     if [ ! -d "$CHECKV_DB_DIR" ] || [ -z "$(ls -A $CHECKV_DB_DIR 2>/dev/null)" ]; then
+    #         echo "Trying manual CheckV database download..."
+    #         CHECKV_URL="https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz"
+    #         CHECKV_TAR="$CHECKV_DB_DIR/checkv-db.tar.gz"
+    #         if curl -fL -o "$CHECKV_TAR" "$CHECKV_URL"; then
+    #             if [ -s "$CHECKV_TAR" ] && tar -tzf "$CHECKV_TAR" >/dev/null 2>&1; then
+    #                 echo "Extracting CheckV database..."
+    #                 cd "$CHECKV_DB_DIR"
+    #                 tar -xzf checkv-db.tar.gz && rm -f checkv-db.tar.gz
+    #                 echo "CheckV database downloaded and extracted successfully"
+    #             else
+    #                 echo "Warning: Downloaded file is invalid"
+    #                 rm -f "$CHECKV_TAR"
+    #             fi
+    #         else
+    #             echo "Warning: CheckV database download failed - can be done at runtime"
+    #         fi
+    #     fi
+    # else
+    #     echo "CheckV database already exists"
+    # fi
+    
+    echo "Database directories created at:"
+    echo "  - VOG: /opt/virall/databases/vog_db"
+    echo "  - Kaiju: /opt/virall/databases/kaiju_db"
+    echo "  - CheckV: /opt/virall/databases/checkv_db"
+    echo "Note: Databases can be downloaded at runtime or mounted via bind mounts"
 
     # Clean up apt cache
     apt-get clean || true
@@ -272,7 +487,7 @@ From: ubuntu:22.04
 %runscript
     # Activate conda environment and run virall
     # Runscript uses bash by default, so source works here
-    export PATH=/opt/conda/bin:/opt/conda/envs/virall/bin:$PATH
+    export PATH=/opt/conda/envs/virall/bin:/opt/conda/bin:$PATH
     export LD_LIBRARY_PATH=/opt/conda/envs/virall/lib:$LD_LIBRARY_PATH
     export CONDA_PREFIX=/opt/conda/envs/virall
     
@@ -327,15 +542,20 @@ From: ubuntu:22.04
        # Then install virall package:
        singularity exec virall.sif bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install -e /path/to/virall/source"
     
-    2. Set up databases (at runtime or via bind mounts):
-       - VOG database: /opt/virall/databases/vog_db
-       - Kaiju database: /opt/virall/databases/kaiju_db
-       - CheckV database: /opt/virall/databases/checkv_db
+    2. Set up databases (at runtime, via bind mounts, or during build):
+       - VOG database: /opt/virall/databases/vog_db (~1GB)
+       - Kaiju database: /opt/virall/databases/kaiju_db (~several GB)
+       - CheckV database: /opt/virall/databases/checkv_db (~3GB)
        
-       # Mount existing databases from host:
+       Option A: Include databases during build (uncomment database sections in virall.def)
+       - This will increase container size by ~21GB
+       - Databases will be included in the container image
+       - No need to download or mount at runtime
+       
+       Option B: Mount existing databases from host:
        singularity exec -B /path/to/host/databases:/opt/virall/databases virall.sif virall ...
        
-       # Or download databases inside container:
+       Option C: Download databases inside container at runtime:
        singularity exec virall.sif bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate virall && python -c 'from virall.core.vog_annotator import VOGAnnotator; VOGAnnotator().setup_vog_database(\"/opt/virall/databases/vog_db\")'"
     
     3. Run virall:
@@ -343,8 +563,9 @@ From: ubuntu:22.04
        # Or with database bind mount:
        singularity exec -B /path/to/databases:/opt/virall/databases virall.sif virall --help
     
-    Note: Databases are not included in the container image due to size (~4GB total).
-    They should be downloaded at runtime or mounted from the host system.
+    Note: By default, databases are not included in the container image due to size (~21GB total).
+    To include databases during build, uncomment the database setup sections in the %post section.
+    Alternatively, databases can be downloaded at runtime or mounted from the host system.
     
     To include source code during build, uncomment and adjust paths in the %files section.
 

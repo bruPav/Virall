@@ -17,6 +17,7 @@ from .core.assembler import ViralAssembler
 from .core.preprocessor import Preprocessor
 from .core.viral_identifier import ViralIdentifier
 from .core.validator import AssemblyValidator
+from .core.database_setup import DatabaseSetup
 
 
 def setup_logging(output_dir: Optional[str] = None, log_file: Optional[str] = None, verbose: bool = False):
@@ -78,7 +79,7 @@ def setup_logging(output_dir: Optional[str] = None, log_file: Optional[str] = No
 @click.option('--log-file', help='Log file path (overrides automatic log creation)')
 @click.pass_context
 def main(ctx: click.Context, verbose: bool, log_file: Optional[str]):
-    """Virall - Comprehensive viral genome analysis including assembly, classification, gene prediction, and annotation. Available commands: assemble, analyse, classify, preprocess, quantify, validate, annotate. Under development: train-model (machine learning model training)"""
+    """Virall - Comprehensive viral genome analysis including assembly, classification, gene prediction, and annotation. Available commands: assemble, analyse, classify, preprocess, quantify, validate, annotate, setup-db. Under development: train-model (machine learning model training)"""
     
     # Store verbose and log_file in context for use by subcommands
     ctx.ensure_object(dict)
@@ -1390,6 +1391,127 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
     except Exception as e:
         logger.error(f"Preprocessing failed: {e}")
         click.echo(f"Error: Preprocessing failed - {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.option('--vog', is_flag=True, help='Set up VOG database (~1GB)')
+@click.option('--kaiju', is_flag=True, help='Set up Kaiju database (~several GB)')
+@click.option('--checkv', is_flag=True, help='Set up CheckV database (~3GB)')
+@click.option('--all', 'all_dbs', is_flag=True, help='Set up all databases')
+@click.option('--vog-db', help='Custom path for VOG database directory')
+@click.option('--kaiju-db', help='Custom path for Kaiju database directory')
+@click.option('--checkv-db', help='Custom path for CheckV database directory')
+@click.option('--base-dir', help='Base directory for all databases (default: ./databases or installation directory)')
+def setup_db(vog: bool, kaiju: bool, checkv: bool, all_dbs: bool, 
+             vog_db: Optional[str], kaiju_db: Optional[str], checkv_db: Optional[str],
+             base_dir: Optional[str]):
+    """Set up and format databases for viral genome analysis.
+    
+    This command downloads and formats the required databases:
+    - VOG: Downloads and presses HMM database for viral gene annotation
+    - Kaiju: Downloads viral taxonomy database and cleans up temporary files
+    - CheckV: Downloads viral genome database for quality assessment
+    
+    Databases can be set up individually or all at once. Works in both
+    regular installations and containers (with bind mounts).
+    """
+    # Set up logging
+    from click import get_current_context
+    ctx = get_current_context()
+    verbose = ctx.obj.get('verbose', False) if ctx.obj else False
+    log_file = ctx.obj.get('log_file', None) if ctx.obj else None
+    setup_logging(log_file=log_file, verbose=verbose)
+    
+    # Initialize database setup with progress callback
+    def progress_msg(msg: str):
+        click.echo(f"  → {msg}")
+    
+    db_setup = DatabaseSetup(base_dir=base_dir, progress_callback=progress_msg)
+    
+    # If --all is specified, set all flags
+    if all_dbs:
+        vog = kaiju = checkv = True
+    
+    # If no database is specified, set up all
+    if not (vog or kaiju or checkv):
+        vog = kaiju = checkv = True
+        click.echo("No specific database selected. Setting up all databases...")
+    
+    success_count = 0
+    total_count = sum([vog, kaiju, checkv])
+    results = {}
+    
+    # Set up VOG database
+    if vog:
+        click.echo("\n" + "="*60)
+        click.echo("Setting up VOG database")
+        click.echo("="*60)
+        click.echo(f"VOG database directory: {vog_db or db_setup.base_dir / 'vog_db'}")
+        click.echo("This will download ~1GB and may take 5-10 minutes...")
+        
+        success, message = db_setup.setup_vog_database(vog_db)
+        results['vog'] = (success, message)
+        
+        if success:
+            click.echo("✓ " + message)
+            click.echo("  - Downloaded and extracted VOG HMM database")
+            click.echo("  - Pressed database for HMMER searches")
+            success_count += 1
+        else:
+            click.echo("✗ " + message, err=True)
+    
+    # Set up Kaiju database
+    if kaiju:
+        click.echo("\n" + "="*60)
+        click.echo("Setting up Kaiju database")
+        click.echo("="*60)
+        click.echo(f"Kaiju database directory: {kaiju_db or db_setup.base_dir / 'kaiju_db'}")
+        click.echo("This will download several GB and may take 10-30 minutes...")
+        click.echo("Note: This downloads the full NCBI taxonomy database first, then creates viral subset")
+        
+        success, message = db_setup.setup_kaiju_database(kaiju_db)
+        results['kaiju'] = (success, message)
+        
+        if success:
+            click.echo("✓ " + message)
+            click.echo("  - Downloaded viral taxonomy database")
+            click.echo("  - Cleaned up temporary files")
+            success_count += 1
+        else:
+            click.echo("✗ " + message, err=True)
+    
+    # Set up CheckV database
+    if checkv:
+        click.echo("\n" + "="*60)
+        click.echo("Setting up CheckV database")
+        click.echo("="*60)
+        click.echo(f"CheckV database directory: {checkv_db or db_setup.base_dir / 'checkv_db'}")
+        click.echo("This will download ~3GB and may take 10-30 minutes...")
+        
+        success, message = db_setup.setup_checkv_database(checkv_db)
+        results['checkv'] = (success, message)
+        
+        if success:
+            click.echo("✓ " + message)
+            click.echo("  - Downloaded viral genome database")
+            click.echo("  - Ready for viral contig quality assessment")
+            success_count += 1
+        else:
+            click.echo("✗ " + message, err=True)
+    
+    # Summary
+    click.echo("\n" + "="*60)
+    click.echo("Database Setup Summary")
+    click.echo("="*60)
+    click.echo(f"Successfully set up: {success_count} of {total_count} database(s)")
+    
+    if success_count == total_count:
+        click.echo("✓ All databases are ready to use!")
+    elif success_count > 0:
+        click.echo("⚠ Some databases failed to set up. Check the error messages above.")
+    else:
+        click.echo("✗ Database setup failed. Please check the error messages above.")
         sys.exit(1)
 
 
