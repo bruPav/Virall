@@ -1519,10 +1519,22 @@ class ViralIdentifier:
                 'error': f"Could not create Kaiju output directory: {e}"
             }
         
+        # Find the .fmi file (can be in root or viruses/ subdirectory)
+        db_file = kaiju_db / "kaiju_db_viruses.fmi"
+        viruses_dir = kaiju_db / "viruses"
+        if not db_file.exists() and viruses_dir.exists():
+            db_file = viruses_dir / "kaiju_db_viruses.fmi"
+        
+        if not db_file.exists():
+            return {
+                'status': 'failed',
+                'error': f'Kaiju database file not found: kaiju_db_viruses.fmi (checked {kaiju_db} and {viruses_dir})'
+            }
+        
         cmd = [
             "kaiju",
             "-t", str(kaiju_db / "nodes.dmp"),
-            "-f", str(kaiju_db / "kaiju_db_viruses.fmi"),
+            "-f", str(db_file),
             "-i", contigs_file,
             "-o", str(results_file),
             "-z", str(self.threads)
@@ -1619,14 +1631,24 @@ class ViralIdentifier:
         if config_path:
             kaiju_db_path = Path(config_path)
         else:
-            # Try current working directory first, then fall back to installation directory
-            cwd_db_path = Path.cwd() / "databases" / "kaiju_db"
-            if cwd_db_path.exists():
-                kaiju_db_path = cwd_db_path
+            # Check common container database locations first (where virall setup-db creates them)
+            container_paths = [
+                Path("/opt/virall/databases/kaiju_db"),
+                Path("/opt/virall/src/databases/kaiju_db")
+            ]
+            for container_path in container_paths:
+                if container_path.exists():
+                    kaiju_db_path = container_path
+                    break
             else:
-                # Use the same installation directory detection as assembler
-                software_dir = self._find_installation_directory()
-                kaiju_db_path = software_dir / "databases" / "kaiju_db"
+                # Try current working directory first, then fall back to installation directory
+                cwd_db_path = Path.cwd() / "databases" / "kaiju_db"
+                if cwd_db_path.exists():
+                    kaiju_db_path = cwd_db_path
+                else:
+                    # Use the same installation directory detection as assembler
+                    software_dir = self._find_installation_directory()
+                    kaiju_db_path = software_dir / "databases" / "kaiju_db"
         
         logger.debug(f"Looking for Kaiju database at: {kaiju_db_path}")
         
@@ -1639,12 +1661,18 @@ class ViralIdentifier:
         if not (kaiju_db_path / "nodes.dmp").exists():
             logger.warning("Kaiju database file not found: nodes.dmp")
             logger.warning("This is required for Kaiju to work properly")
-            logger.warning("Please run: kaiju-makedb -d $KAIJU_DB_DIR to download full taxonomy database")
+            logger.warning("Please run: kaiju-makedb -s viruses to download full taxonomy database")
             return None
         
-        # kaiju_db_viruses.fmi is in the main kaiju database directory
-        if not (kaiju_db_path / "kaiju_db_viruses.fmi").exists():
-            logger.warning("Kaiju database file not found: kaiju_db_viruses.fmi")
+        # kaiju_db_viruses.fmi can be in the main directory or in a viruses/ subdirectory
+        # (kaiju-makedb creates files in a viruses/ subdirectory)
+        db_file = kaiju_db_path / "kaiju_db_viruses.fmi"
+        viruses_dir = kaiju_db_path / "viruses"
+        if not db_file.exists() and viruses_dir.exists():
+            db_file = viruses_dir / "kaiju_db_viruses.fmi"
+        
+        if not db_file.exists():
+            logger.warning(f"Kaiju database file not found: kaiju_db_viruses.fmi (checked {kaiju_db_path} and {viruses_dir})")
             return None
         
         logger.info(f"Kaiju viral database found at {kaiju_db_path}")

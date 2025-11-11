@@ -71,14 +71,26 @@ class AssemblyValidator:
         if config_path:
             checkv_db_path = Path(config_path)
         else:
-            # Try current working directory first, then fall back to installation directory
-            cwd_db_path = Path.cwd() / "databases" / "checkv_db"
-            if cwd_db_path.exists():
-                checkv_db_path = cwd_db_path
-            else:
-                # Use the same installation directory detection as assembler
-                software_dir = self._find_installation_directory()
-                checkv_db_path = software_dir / "databases" / "checkv_db"
+            # Check common container database locations first (where virall setup-db creates them)
+            container_paths = [
+                Path("/opt/virall/databases/checkv_db"),
+                Path("/opt/virall/src/databases/checkv_db")
+            ]
+            checkv_db_path = None
+            for container_path in container_paths:
+                if container_path.exists():
+                    checkv_db_path = container_path
+                    break
+            
+            if not checkv_db_path:
+                # Try current working directory first, then fall back to installation directory
+                cwd_db_path = Path.cwd() / "databases" / "checkv_db"
+                if cwd_db_path.exists():
+                    checkv_db_path = cwd_db_path
+                else:
+                    # Use the same installation directory detection as assembler
+                    software_dir = self._find_installation_directory()
+                    checkv_db_path = software_dir / "databases" / "checkv_db"
             
             if not checkv_db_path.exists():
                 # Fallback to home directory
