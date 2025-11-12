@@ -345,12 +345,13 @@ From: ubuntu:22.04
     # This assumes the virall source code is in the build context
     # Copy source code if it exists in the build directory
     if [ -d "/opt/virall/src" ] && [ -f "/opt/virall/src/setup.py" ]; then
-        # Install virall in editable mode
+        # Install virall in non-editable mode to ensure container uses its own code
+        # This prevents conflicts with host's editable installs
         cd /tmp
-        bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install -e /opt/virall/src"
+        bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install /opt/virall/src"
     else
         echo "Note: Virall source code not found during build."
-        echo "Install it at runtime with: pip install -e /path/to/virall/source"
+        echo "Install it at runtime with: pip install /path/to/virall/source"
     fi
 
     # ========================================================================
