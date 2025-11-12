@@ -78,9 +78,34 @@ class AssemblyValidator:
             ]
             checkv_db_path = None
             for container_path in container_paths:
+                # Check if directory exists
                 if container_path.exists():
                     checkv_db_path = container_path
+                    logger.debug(f"Found CheckV database directory at: {container_path}")
                     break
+                # Also check if database files/subdirectories exist even if directory check failed (for bind mounts)
+                # CheckV database has checkv-db-v* subdirectories or files like genome_db, proteins, etc.
+                try:
+                    # Check for checkv-db-v* subdirectories
+                    if container_path.parent.exists():
+                        checkv_db_dir = container_path.parent / "checkv_db"
+                        if checkv_db_dir.exists():
+                            for item in checkv_db_dir.iterdir():
+                                if item.is_dir() and item.name.startswith("checkv-db-"):
+                                    checkv_db_path = container_path
+                                    logger.debug(f"Found CheckV database files at: {container_path}")
+                                    break
+                            if checkv_db_path:
+                                break
+                    # Check for direct database files
+                    checkv_files = ["genome_db", "proteins", "taxonomy", "completeness"]
+                    has_checkv_files = any((container_path / file).exists() for file in checkv_files)
+                    if has_checkv_files:
+                        checkv_db_path = container_path
+                        logger.debug(f"Found CheckV database files at: {container_path}")
+                        break
+                except (PermissionError, OSError, FileNotFoundError):
+                    pass
             
             if not checkv_db_path:
                 # Try current working directory first, then fall back to installation directory
