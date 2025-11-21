@@ -6,7 +6,7 @@
 
 A comprehensive tool for viral genome analysis including assembly, classification, gene prediction, and annotation.
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bioinformatics](https://img.shields.io/badge/bioinformatics-viral%20genomics-green.svg)](https://github.com/bruPav/virall)
 
@@ -320,7 +320,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ### v0.1.0
 - Initial release
-- Support for short and long reads
+- Support for short, long and Single Cell Seq reads
 - Reference-guided assembly
-- Viral classification and annotation
+- Viral assembly, classification, annotation, validation and quantification
 - Memory-efficient mode
