@@ -5,6 +5,16 @@ including assembly, classification, gene prediction, and annotation.
 """
 
 from setuptools import setup, find_packages
+import re
+
+# Read version from virall/__init__.py (single source of truth)
+def get_version():
+    with open("virall/__init__.py", "r", encoding="utf-8") as f:
+        content = f.read()
+        match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
+        if match:
+            return match.group(1)
+        raise RuntimeError("Unable to find version string")
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -14,7 +24,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="virall",
-    version="0.1.0",
+    version=get_version(),
     author="Virall Team",
     author_email="bruno.pavletic@gmail.com, britaniadiazf@gmail.com",
     description="A comprehensive tool for viral genome analysis including assembly, classification, gene prediction, and annotation",
