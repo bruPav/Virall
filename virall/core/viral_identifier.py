@@ -60,6 +60,39 @@ class ViralIdentifier:
         
         logger.info("ViralIdentifier initialized")
     
+    def _run_command(self, cmd: Union[List[str], str], log_file: Optional[Path] = None, **kwargs) -> subprocess.CompletedProcess:
+        """
+        Run a command and stream output to a log file or logger to avoid memory issues.
+        
+        Args:
+            cmd: Command to run (list or string)
+            log_file: Path to log file (optional)
+            **kwargs: Additional arguments for subprocess.run
+            
+        Returns:
+            CompletedProcess object
+        """
+        cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+        logger.info(f"Running command: {cmd_str}")
+        
+        if log_file:
+            # Ensure parent directory exists
+            if isinstance(log_file, str):
+                log_file = Path(log_file)
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(log_file, "w") as f:
+                # Stream stdout and stderr to the file
+                # Remove capture_output if present in kwargs to avoid conflict
+                kwargs.pop('capture_output', None)
+                kwargs.pop('stdout', None)
+                kwargs.pop('stderr', None)
+                kwargs.pop('text', None)
+                
+                return subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True, **kwargs)
+        else:
+            return subprocess.run(cmd, **kwargs)
+    
     def _get_memory_value(self) -> str:
         """Convert memory from '16G' format to just number for SPAdes."""
         return self.memory.replace('G', '').replace('g', '')
@@ -503,9 +536,10 @@ class ViralIdentifier:
             "-q"  # Quiet mode
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        log_file = output_file.parent / "prodigal.log"
+        result = self._run_command(cmd, log_file=log_file)
         if result.returncode != 0:
-            logger.error(f"Prodigal failed: {result.stderr}")
+            logger.error(f"Prodigal failed. See log at {log_file}")
             raise RuntimeError("Protein prediction failed")
         
         logger.info(f"Predicted proteins written to {output_file}")
@@ -1037,10 +1071,11 @@ class ViralIdentifier:
         index_file = output_dir / "viral_contigs"
         index_cmd = ["bwa", "index", "-p", str(index_file), contigs_file]
         
-        result = subprocess.run(" ".join(index_cmd), capture_output=True, text=True, shell=True)
+        log_file = output_dir / "bwa_index.log"
+        result = self._run_command(index_cmd, log_file=log_file)
         if result.returncode != 0:
-            logger.error(f"BWA indexing failed: {result.stderr}")
-            return {"status": "failed", "error": f"BWA indexing failed: {result.stderr}"}
+            logger.error(f"BWA indexing failed. See log at {log_file}")
+            return {"status": "failed", "error": f"BWA indexing failed. See log at {log_file}"}
         
         # Map reads to contigs
         sam_file = output_dir / "mapped_reads.sam"
@@ -1055,11 +1090,12 @@ class ViralIdentifier:
         ]
         
         # Run mapping
-        with open(sam_file, 'w') as f:
-            result = subprocess.run(" ".join(map_cmd), stdout=f, stderr=subprocess.PIPE, text=True, shell=True)
+        log_file_mem = output_dir / "bwa_mem.log"
+        with open(sam_file, 'w') as f, open(log_file_mem, 'w') as log:
+            result = subprocess.run(map_cmd, stdout=f, stderr=log, text=True)
             if result.returncode != 0:
-                logger.error(f"BWA mapping failed: {result.stderr}")
-                return {"status": "failed", "error": f"BWA mapping failed: {result.stderr}"}
+                logger.error(f"BWA mapping failed. See log at {log_file_mem}")
+                return {"status": "failed", "error": f"BWA mapping failed. See log at {log_file_mem}"}
         
         # Process BAM file
         return self._process_mapping_results(sam_file, bam_file, contigs_file, output_dir, "bwa_paired", classification_data)
@@ -1098,10 +1134,11 @@ class ViralIdentifier:
         index_file = output_dir / "viral_contigs"
         index_cmd = ["bwa", "index", "-p", str(index_file), contigs_file]
         
-        result = subprocess.run(" ".join(index_cmd), capture_output=True, text=True, shell=True)
+        log_file = output_dir / "bwa_index.log"
+        result = self._run_command(index_cmd, log_file=log_file)
         if result.returncode != 0:
-            logger.error(f"BWA indexing failed: {result.stderr}")
-            return {"status": "failed", "error": f"BWA indexing failed: {result.stderr}"}
+            logger.error(f"BWA indexing failed. See log at {log_file}")
+            return {"status": "failed", "error": f"BWA indexing failed. See log at {log_file}"}
         
         # Map reads to contigs
         sam_file = output_dir / "mapped_reads.sam"
@@ -1116,11 +1153,12 @@ class ViralIdentifier:
         ]
         
         # Run mapping
-        with open(sam_file, 'w') as f:
-            result = subprocess.run(" ".join(map_cmd), stdout=f, stderr=subprocess.PIPE, text=True, shell=True)
+        log_file_mem = output_dir / "bwa_mem.log"
+        with open(sam_file, 'w') as f, open(log_file_mem, 'w') as log:
+            result = subprocess.run(map_cmd, stdout=f, stderr=log, text=True)
             if result.returncode != 0:
-                logger.error(f"BWA mapping failed: {result.stderr}")
-                return {"status": "failed", "error": f"BWA mapping failed: {result.stderr}"}
+                logger.error(f"BWA mapping failed. See log at {log_file_mem}")
+                return {"status": "failed", "error": f"BWA mapping failed. See log at {log_file_mem}"}
         
         # Process BAM file
         return self._process_mapping_results(sam_file, bam_file, contigs_file, output_dir, "bwa_single", classification_data)
@@ -1166,11 +1204,12 @@ class ViralIdentifier:
         ]
         
         # Run mapping
-        with open(sam_file, 'w') as f:
-            result = subprocess.run(" ".join(map_cmd), stdout=f, stderr=subprocess.PIPE, text=True, shell=True)
+        log_file_map = output_dir / "minimap2.log"
+        with open(sam_file, 'w') as f, open(log_file_map, 'w') as log:
+            result = subprocess.run(map_cmd, stdout=f, stderr=log, text=True)
             if result.returncode != 0:
-                logger.error(f"minimap2 mapping failed: {result.stderr}")
-                return {"status": "failed", "error": f"minimap2 mapping failed: {result.stderr}"}
+                logger.error(f"minimap2 mapping failed. See log at {log_file_map}")
+                return {"status": "failed", "error": f"minimap2 mapping failed. See log at {log_file_map}"}
         
         # Process BAM file
         return self._process_mapping_results(sam_file, bam_file, contigs_file, output_dir, "minimap2", classification_data)
@@ -1189,9 +1228,10 @@ class ViralIdentifier:
         # Try to convert SAM to BAM and sort
         logger.info("Processing mapping results")
         sort_cmd = ["samtools", "sort", "-o", str(bam_file), str(sam_file)]
-        result = subprocess.run(" ".join(sort_cmd), capture_output=True, text=True, shell=True)
+        log_file_sort = output_dir / "samtools_sort.log"
+        result = self._run_command(sort_cmd, log_file=log_file_sort)
         if result.returncode != 0:
-            logger.warning(f"SAMtools sort failed (likely library dependency issue): {result.stderr}")
+            logger.warning(f"SAMtools sort failed (likely library dependency issue). See log at {log_file_sort}")
             logger.warning("Falling back to SAM file processing (may be slower but works without BAM conversion)")
             # Fall back to processing SAM directly
             quantification_results = self._calculate_contig_abundance_from_sam(
@@ -1208,9 +1248,10 @@ class ViralIdentifier:
         
         # Index BAM file
         index_cmd = ["samtools", "index", str(bam_file)]
-        result = subprocess.run(" ".join(index_cmd), capture_output=True, text=True, shell=True)
+        log_file_index = output_dir / "samtools_index.log"
+        result = self._run_command(index_cmd, log_file=log_file_index)
         if result.returncode != 0:
-            logger.warning(f"SAMtools index failed: {result.stderr}")
+            logger.warning(f"SAMtools index failed. See log at {log_file_index}")
             logger.warning("Falling back to SAM file processing")
             # Fall back to processing SAM directly
             quantification_results = self._calculate_contig_abundance_from_sam(
@@ -1407,10 +1448,11 @@ class ViralIdentifier:
         depth_file = output_dir / "contig_depth.txt"
         depth_cmd = ["samtools", "depth", str(bam_file)]
         
-        with open(depth_file, 'w') as f:
-            result = subprocess.run(" ".join(depth_cmd), stdout=f, stderr=subprocess.PIPE, text=True, shell=True)
+        log_file_depth = output_dir / "samtools_depth.log"
+        with open(depth_file, 'w') as f, open(log_file_depth, 'w') as log:
+            result = subprocess.run(depth_cmd, stdout=f, stderr=log, text=True)
             if result.returncode != 0:
-                logger.error(f"SAMtools depth failed: {result.stderr}")
+                logger.error(f"SAMtools depth failed. See log at {log_file_depth}")
                 return {}
         
         # Parse depth data - convert to per-position coverage lists
@@ -1542,12 +1584,13 @@ class ViralIdentifier:
         
         logger.info(f"Kaiju command: {' '.join(cmd)}")
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        log_file = output_dir / "kaiju.log"
+        result = self._run_command(cmd, log_file=log_file)
         if result.returncode != 0:
-            logger.warning(f"Kaiju failed: {result.stderr}")
+            logger.warning(f"Kaiju failed. See log at {log_file}")
             return {
                 'status': 'failed',
-                'error': f"Kaiju classification failed: {result.stderr}"
+                'error': f"Kaiju classification failed. See log at {log_file}"
             }
         
         logger.info("Kaiju classification completed successfully")
@@ -1565,10 +1608,11 @@ class ViralIdentifier:
         ]
         
         logger.info(f"Kaiju addTaxonNames command: {' '.join(add_names_cmd)}")
-        add_names_result = subprocess.run(add_names_cmd, capture_output=True, text=True)
+        log_file_names = output_dir / "kaiju_names.log"
+        add_names_result = self._run_command(add_names_cmd, log_file=log_file_names)
         
         if add_names_result.returncode != 0:
-            logger.warning(f"Failed to add taxon names: {add_names_result.stderr}")
+            logger.warning(f"Failed to add taxon names. See log at {log_file_names}")
             # Continue with original results if name resolution fails
             return {
                 'status': 'completed',

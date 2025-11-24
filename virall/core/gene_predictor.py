@@ -28,6 +28,39 @@ class ViralGenePredictor:
         self.vog_annotator = VOGAnnotator(vog_db_path=vog_db_path, config=config, threads=threads)
         logger.info("ViralGenePredictor initialized")
     
+    def _run_command(self, cmd: List[str], log_file: Optional[Path] = None, **kwargs) -> subprocess.CompletedProcess:
+        """
+        Run a command and stream output to a log file or logger to avoid memory issues.
+        
+        Args:
+            cmd: Command to run
+            log_file: Path to log file (optional)
+            **kwargs: Additional arguments for subprocess.run
+            
+        Returns:
+            CompletedProcess object
+        """
+        cmd_str = " ".join(cmd)
+        logger.info(f"Running command: {cmd_str}")
+        
+        if log_file:
+            # Ensure parent directory exists
+            if isinstance(log_file, str):
+                log_file = Path(log_file)
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(log_file, "w") as f:
+                # Stream stdout and stderr to the file
+                # Remove capture_output if present in kwargs to avoid conflict
+                kwargs.pop('capture_output', None)
+                kwargs.pop('stdout', None)
+                kwargs.pop('stderr', None)
+                kwargs.pop('text', None)
+                
+                return subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True, **kwargs)
+        else:
+            return subprocess.run(cmd, **kwargs)
+    
     def predict_genes_comprehensive(
         self,
         contigs_file: str,
@@ -335,9 +368,10 @@ class ViralGenePredictor:
         ]
         
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            log_file = prodigal_output / "prodigal.log"
+            result = self._run_command(cmd, log_file=log_file)
             if result.returncode != 0:
-                logger.error(f"Prodigal failed: {result.stderr}")
+                logger.error(f"Prodigal failed. See log at {log_file}")
                 return {}
             
             # Parse the GFF file to extract gene information
@@ -541,13 +575,14 @@ class ViralGenePredictor:
         ]
         
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            log_file = output_dir / "prodigal.log"
+            result = self._run_command(cmd, log_file=log_file)
             if result.returncode == 0:
                 genes = self._parse_gff_file(gff_file, "")
                 logger.info(f"Prodigal predicted {len(genes)} genes")
                 return genes
             else:
-                logger.warning(f"Prodigal failed: {result.stderr}")
+                logger.warning(f"Prodigal failed. See log at {log_file}")
                 return []
         except FileNotFoundError:
             logger.warning("Prodigal not found, skipping gene prediction")

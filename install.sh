@@ -71,7 +71,7 @@ conda activate virall
 
 # Install Python dependencies with conda (avoids GCC compilation issues)
 echo "Installing Python dependencies with conda..."
-conda install -c conda-forge -y numpy pandas matplotlib seaborn plotly biopython scikit-learn click tqdm pyyaml loguru psutil
+conda install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0
 
 # Ensure mamba is available before using it
 echo "Checking for mamba (faster dependency solver)..."
@@ -99,20 +99,20 @@ fi
 # Define all required bioinformatics tools
 declare -A TOOLS_TO_INSTALL
 TOOLS_TO_INSTALL=(
-    ["samtools"]="samtools"
-    ["bwa"]="bwa"
-    ["minimap2"]="minimap2"
+    ["samtools"]="samtools=1.22.1"
+    ["bwa"]="bwa=0.7.19"
+    ["minimap2"]="minimap2=2.30"
     ["spades"]="spades=4.2.0"
     ["flye"]="flye=2.9.6"
-    ["fastp"]="fastp"
+    ["fastp"]="fastp=1.0.1"
     ["fastplong"]="fastplong=0.4.1"
-    ["fastqc"]="fastqc"
-    ["checkv"]="checkv"
-    ["bcftools"]="bcftools"
-    ["pilon"]="pilon"
-    ["hmmer"]="hmmer"
-    ["prodigal"]="prodigal"
-    ["kaiju"]="kaiju"
+    ["fastqc"]="fastqc=0.12.1"
+    ["checkv"]="checkv=1.0.3"
+    ["bcftools"]="bcftools=1.22"
+    ["pilon"]="pilon=1.24"
+    ["hmmer"]="hmmer=3.4"
+    ["prodigal"]="prodigal=2.6.3"
+    ["kaiju"]="kaiju=1.10.1"
 )
 
 # Check which tools are already available
@@ -471,7 +471,7 @@ if check_command kaiju; then
     echo "Kaiju already installed, skipping installation"
 else
     echo "Installing Kaiju using mamba..."
-    if mamba install -c bioconda kaiju -y; then
+    if mamba install -c bioconda kaiju=1.10.1 -y; then
         echo "Kaiju installed successfully"
     else
         echo "Warning: Kaiju installation failed"

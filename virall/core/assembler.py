@@ -92,6 +92,44 @@ class ViralAssembler:
         
         logger.info(f"ViralAssembler initialized with {threads} threads, {memory} memory")
     
+    def _run_command(self, cmd: Union[List[str], str], log_file: Optional[Path] = None, **kwargs) -> subprocess.CompletedProcess:
+        """
+        Run a command and stream output to a log file or logger to avoid memory issues.
+        
+        Args:
+            cmd: Command to run (list or string)
+            log_file: Path to log file (optional)
+            **kwargs: Additional arguments for subprocess.run
+            
+        Returns:
+            CompletedProcess object
+        """
+        cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+        logger.info(f"Running command: {cmd_str}")
+        
+        if log_file:
+            # Ensure parent directory exists
+            if isinstance(log_file, str):
+                log_file = Path(log_file)
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(log_file, "w") as f:
+                # Stream stdout and stderr to the file
+                # Remove capture_output if present in kwargs to avoid conflict
+                kwargs.pop('capture_output', None)
+                kwargs.pop('stdout', None)
+                kwargs.pop('stderr', None)
+                kwargs.pop('text', None) # text mode is implied by file writing usually, but subprocess.run needs text=True for file handles? No, file handles take bytes or str depending on mode.
+                # If file is opened in 'w' (text), subprocess needs text=True? 
+                # Actually, subprocess.run with stdout=file works fine.
+                # If file is text mode, we should probably use text=True.
+                
+                return subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True, **kwargs)
+        else:
+            # If no log file, run normally. 
+            # If capture_output was requested, warn about memory usage?
+            return subprocess.run(cmd, **kwargs)
+    
     def _find_installation_directory(self) -> Path:
         """Find the actual installation directory where databases are located."""
         # Start from the current file location
@@ -647,9 +685,11 @@ class ViralAssembler:
             cmd.extend(["-s", reads["single"]])
         
         # Run SPAdes
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Run SPAdes
+        log_file = output_dir / "spades_hybrid.log"
+        result = self._run_command(cmd, log_file=log_file)
         if result.returncode != 0:
-            raise RuntimeError(f"SPAdes failed: {result.stderr}")
+            raise RuntimeError(f"SPAdes failed. See log at {log_file}")
         
         # In RNA mode, prefer transcripts; if missing, prefer top-level contigs/scaffolds, then fallback
         if self.rna_mode:
@@ -729,11 +769,11 @@ class ViralAssembler:
         # Debug: Log the command being run
         logger.info(f"Running SPAdes command: {' '.join(cmd)}")
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        log_file = output_dir / "spades_short.log"
+        result = self._run_command(cmd, log_file=log_file)
         if result.returncode != 0:
-            logger.error(f"SPAdes stderr: {result.stderr}")
-            logger.error(f"SPAdes stdout: {result.stdout}")
-            raise RuntimeError(f"SPAdes failed: {result.stderr}")
+            logger.error(f"SPAdes failed. See log at {log_file}")
+            raise RuntimeError(f"SPAdes failed. See log at {log_file}")
         
         # Log what files SPAdes actually produced (for debugging)
         logger.debug(f"SPAdes completed. Checking output directory: {output_dir}")
@@ -863,9 +903,10 @@ class ViralAssembler:
                 raise RuntimeError(f"FASTQ file validation failed. File may be corrupted: {input_file}")
         
         logger.info(f"Flye command: {' '.join(flye_cmd)}")
-        result = subprocess.run(flye_cmd, capture_output=True, text=True)
+        log_file = flye_dir / "flye.log"
+        result = self._run_command(flye_cmd, log_file=log_file)
         if result.returncode != 0:
-            logger.error(f"Flye failed: {result.stderr}")
+            logger.error(f"Flye failed. See log at {log_file}")
             if "Sequence and quality captions differ" in result.stderr or "Sequence and quality captions differ" in result.stdout:
                 logger.error("FASTQ format error detected. The input file may be corrupted or malformed.")
                 logger.error("This often happens when preprocessing tools produce invalid FASTQ format.")
@@ -875,11 +916,12 @@ class ViralAssembler:
                 if original_file and original_file != input_file:
                     logger.info("Attempting to use original (unprocessed) file with Flye...")
                     flye_cmd[2] = original_file
-                    result = subprocess.run(flye_cmd, capture_output=True, text=True)
+                    log_file_fallback = flye_dir / "flye_fallback.log"
+                    result = self._run_command(flye_cmd, log_file=log_file_fallback)
                     if result.returncode == 0:
                         logger.info("Flye succeeded with original file")
                     else:
-                        logger.error(f"Flye also failed with original file: {result.stderr}")
+                        logger.error(f"Flye also failed with original file. See log at {log_file_fallback}")
                         return self._long_read_assembly_simple_fallback(reads, output_dir)
                 else:
                     # Fallback to simple longest-reads selection if Flye fails
@@ -1475,9 +1517,10 @@ class ViralAssembler:
         
         logger.info(f"Flye command: {' '.join(flye_cmd)}")
         
-        result = subprocess.run(flye_cmd, capture_output=True, text=True)
+        log_file = flye_output_dir / "flye.log"
+        result = self._run_command(flye_cmd, log_file=log_file)
         if result.returncode != 0:
-            logger.warning(f"Flye assembly failed: {result.stderr}")
+            logger.warning(f"Flye assembly failed. See log at {log_file}")
             return None
         
         # Check if assembly produced output
@@ -1694,9 +1737,10 @@ class ViralAssembler:
         
         logger.info(f"SPAdes command: {' '.join(cmd)}")
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        log_file = output_dir / "spades_ref_guided.log"
+        result = self._run_command(cmd, log_file=log_file)
         if result.returncode != 0:
-            logger.warning(f"SPAdes reference-guided assembly failed: {result.stderr}")
+            logger.warning(f"SPAdes reference-guided assembly failed. See log at {log_file}")
             return None
         
         # Check if assembly produced output (handle RNA mode)
@@ -1782,14 +1826,17 @@ class ViralAssembler:
 
             logger.info(f"Running minimap2: {' '.join(minimap2_cmd)} | {' '.join(sort_cmd)}")
             p1 = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE, text=False)
-            p2 = subprocess.run(sort_cmd, stdin=p1.stdout, capture_output=True)
+            log_file_sort = output_dir / "samtools_sort.log"
+            p2 = self._run_command(sort_cmd, stdin=p1.stdout, log_file=log_file_sort)
             p1.stdout.close()  # type: ignore
             if p1.wait() != 0 or p2.returncode != 0:
                 logger.error(f"Alignment failed: {p2.stderr.decode('utf-8', 'ignore')}")
                 return None
 
             # Index BAM
-            result = subprocess.run(["samtools", "index", str(aligned_bam)], capture_output=True, text=True)
+            # Index BAM
+            log_file_index = output_dir / "samtools_index.log"
+            result = self._run_command(["samtools", "index", str(aligned_bam)], log_file=log_file_index)
             if result.returncode != 0:
                 logger.error(f"samtools index failed: {result.stderr}")
                 return None
@@ -1800,7 +1847,8 @@ class ViralAssembler:
             call_cmd = ["bcftools", "call", "-mv", "-Oz", "-o", str(vcf_gz)]
             logger.info(f"Calling variants: {' '.join(mpileup_cmd)} | {' '.join(call_cmd)}")
             p3 = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE, text=False)
-            p4 = subprocess.run(call_cmd, stdin=p3.stdout, capture_output=True)
+            log_file_call = output_dir / "bcftools_call.log"
+            p4 = self._run_command(call_cmd, stdin=p3.stdout, log_file=log_file_call)
             p3.stdout.close()  # type: ignore
             if p3.wait() != 0 or p4.returncode != 0:
                 logger.error(f"bcftools call failed: {p4.stderr.decode('utf-8', 'ignore')}")
@@ -1811,8 +1859,9 @@ class ViralAssembler:
             consensus_fa = output_dir / "consensus.fa"
             consensus_cmd = ["bcftools", "consensus", "-f", str(reference), str(vcf_gz)]
             logger.info(f"Building consensus: {' '.join(consensus_cmd)} > {consensus_fa}")
-            with open(consensus_fa, "w") as fh:
-                result = subprocess.run(consensus_cmd, stdout=fh, capture_output=True, text=True)
+            log_file_consensus = output_dir / "bcftools_consensus.log"
+            with open(consensus_fa, "w") as fh, open(log_file_consensus, "w") as log:
+                result = subprocess.run(consensus_cmd, stdout=fh, stderr=log, text=True)
             if result.returncode != 0 or not consensus_fa.exists():
                 logger.error(f"bcftools consensus failed: {result.stderr}")
                 return None
@@ -1859,7 +1908,8 @@ class ViralAssembler:
             logger.info(f"Running minimap2 for long reads: {' '.join(minimap2_cmd)} | {' '.join(samtools_sort_cmd)}")
             # Pipe minimap2 -> samtools sort
             minimap_proc = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE, text=False)
-            sort_proc = subprocess.run(samtools_sort_cmd, stdin=minimap_proc.stdout, capture_output=True)
+            log_file_sort = output_dir / "samtools_sort_long.log"
+            sort_proc = self._run_command(samtools_sort_cmd, stdin=minimap_proc.stdout, log_file=log_file_sort)
             minimap_proc.stdout.close()  # type: ignore
             ret1 = minimap_proc.wait()
             if ret1 != 0 or sort_proc.returncode != 0:
@@ -1867,7 +1917,9 @@ class ViralAssembler:
                 return None
 
             # Index BAM
-            result = subprocess.run(["samtools", "index", str(long_bam)], capture_output=True, text=True)
+            # Index BAM
+            log_file_index = output_dir / "samtools_index_long.log"
+            result = self._run_command(["samtools", "index", str(long_bam)], log_file=log_file_index)
             if result.returncode != 0:
                 logger.error(f"samtools index failed: {result.stderr}")
                 return None
@@ -1881,7 +1933,8 @@ class ViralAssembler:
             call_cmd = ["bcftools", "call", "-mv", "-Ob", "-o", str(variants_bcf)]
             logger.info(f"Calling variants: {' '.join(mpileup_cmd)} | {' '.join(call_cmd)}")
             mpileup_proc = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE, text=False)
-            call_proc = subprocess.run(call_cmd, stdin=mpileup_proc.stdout, capture_output=True)
+            log_file_call = output_dir / "bcftools_call.log"
+            call_proc = self._run_command(call_cmd, stdin=mpileup_proc.stdout, log_file=log_file_call)
             mpileup_proc.stdout.close()  # type: ignore
             ret2 = mpileup_proc.wait()
             if ret2 != 0 or call_proc.returncode != 0:
@@ -1890,7 +1943,8 @@ class ViralAssembler:
 
             norm_cmd = ["bcftools", "norm", "-f", str(reference), "-Ob", "-o", str(variants_norm_bcf), str(variants_bcf)]
             logger.info(f"Normalizing variants: {' '.join(norm_cmd)}")
-            result = subprocess.run(norm_cmd, capture_output=True, text=True)
+            log_file_norm = output_dir / "bcftools_norm.log"
+            result = self._run_command(norm_cmd, log_file=log_file_norm)
             if result.returncode != 0:
                 logger.warning(f"bcftools norm failed, proceeding with raw variants: {result.stderr}")
                 variants_for_consensus = variants_bcf
@@ -1902,8 +1956,9 @@ class ViralAssembler:
 
             consensus_cmd = ["bcftools", "consensus", "-f", str(reference), str(variants_for_consensus)]
             logger.info(f"Building draft consensus: {' '.join(consensus_cmd)} > {draft_fa}")
-            with open(draft_fa, "w") as dfh:
-                result = subprocess.run(consensus_cmd, stdout=dfh, capture_output=True, text=True)
+            log_file_consensus = output_dir / "bcftools_consensus.log"
+            with open(draft_fa, "w") as dfh, open(log_file_consensus, "w") as log:
+                result = subprocess.run(consensus_cmd, stdout=dfh, stderr=log, text=True)
             if result.returncode != 0 or not draft_fa.exists():
                 logger.error(f"bcftools consensus failed: {result.stderr}")
                 return None
@@ -1926,7 +1981,8 @@ class ViralAssembler:
 
             logger.info(f"Aligning short reads to draft: {' '.join(bwa_cmd)} | samtools sort -o {short_bam}")
             bwa_proc = subprocess.Popen(bwa_cmd, stdout=subprocess.PIPE, text=False)
-            sort2_proc = subprocess.run(["samtools", "sort", "-o", str(short_bam)], stdin=bwa_proc.stdout, capture_output=True)
+            log_file_sort2 = output_dir / "samtools_sort_short.log"
+            sort2_proc = self._run_command(["samtools", "sort", "-o", str(short_bam)], stdin=bwa_proc.stdout, log_file=log_file_sort2)
             bwa_proc.stdout.close()  # type: ignore
             ret3 = bwa_proc.wait()
             if ret3 != 0 or sort2_proc.returncode != 0:
@@ -1943,7 +1999,8 @@ class ViralAssembler:
                 "--outdir", str(output_dir),
             ]
             logger.info(f"Running Pilon: {' '.join(pilon_cmd)}")
-            result = subprocess.run(pilon_cmd, capture_output=True, text=True)
+            log_file_pilon = output_dir / "pilon.log"
+            result = self._run_command(pilon_cmd, log_file=log_file_pilon)
             if result.returncode != 0:
                 logger.error(f"Pilon failed: {result.stderr}")
                 return None
@@ -1998,9 +2055,10 @@ class ViralAssembler:
                     str(reference)
                 ]
                 
-                result = subprocess.run(index_cmd, capture_output=True, text=True)
+                log_file = Path(temp_dir) / "minimap2_index.log"
+                result = self._run_command(index_cmd, log_file=log_file)
                 if result.returncode != 0:
-                    logger.warning(f"Failed to build Minimap2 index: {result.stderr}")
+                    logger.warning(f"Failed to build Minimap2 index. See log at {log_file}")
                     return {
                         'has_hits': False,
                         'num_hits': 0,
@@ -2019,9 +2077,10 @@ class ViralAssembler:
                     str(contigs_file)
                 ]
                 
-                result = subprocess.run(align_cmd, capture_output=True, text=True)
+                paf_file = Path(temp_dir) / "alignment.paf"
+                result = self._run_command(align_cmd, log_file=paf_file)
                 if result.returncode != 0:
-                    logger.warning(f"Minimap2 alignment failed: {result.stderr}")
+                    logger.warning(f"Minimap2 alignment failed. See log at {paf_file}")
                     return {
                         'has_hits': False,
                         'num_hits': 0,
@@ -2033,38 +2092,40 @@ class ViralAssembler:
                 matching_contigs = []
                 alignment_results = []
                 
-                for line in result.stdout.strip().split('\n'):
-                    if line.strip():
-                        parts = line.strip().split('\t')
-                        if len(parts) >= 12:
-                            contig_id = parts[0]
-                            contig_length = int(parts[1])
-                            alignment_start = int(parts[2])
-                            alignment_end = int(parts[3])
-                            strand = parts[4]
-                            ref_name = parts[5]
-                            ref_length = int(parts[6])
-                            ref_start = int(parts[7])
-                            ref_end = int(parts[8])
-                            matches = int(parts[9])
-                            alignment_length = int(parts[10])
-                            quality = int(parts[11])
-                            
-                            # Calculate identity and coverage
-                            identity = matches / alignment_length if alignment_length > 0 else 0
-                            coverage = alignment_length / contig_length if contig_length > 0 else 0
-                            
-                            # Filter for significant hits: >80% identity and >50% coverage
-                            if identity > 0.8 and coverage > 0.5:
-                                matching_contigs.append(contig_id)
-                                alignment_results.append({
-                                    'contig_id': contig_id,
-                                    'identity': identity,
-                                    'coverage': coverage,
-                                    'alignment_length': alignment_length,
-                                    'matches': matches,
-                                    'contig_length': contig_length
-                                })
+                if paf_file.exists():
+                    with open(paf_file, 'r') as f:
+                        for line in f:
+                            if line.strip():
+                                parts = line.strip().split('\t')
+                                if len(parts) >= 12:
+                                    contig_id = parts[0]
+                                    contig_length = int(parts[1])
+                                    alignment_start = int(parts[2])
+                                    alignment_end = int(parts[3])
+                                    strand = parts[4]
+                                    ref_name = parts[5]
+                                    ref_length = int(parts[6])
+                                    ref_start = int(parts[7])
+                                    ref_end = int(parts[8])
+                                    matches = int(parts[9])
+                                    alignment_length = int(parts[10])
+                                    quality = int(parts[11])
+                                    
+                                    # Calculate identity and coverage
+                                    identity = matches / alignment_length if alignment_length > 0 else 0
+                                    coverage = alignment_length / contig_length if contig_length > 0 else 0
+                                    
+                                    # Filter for significant hits: >80% identity and >50% coverage
+                                    if identity > 0.8 and coverage > 0.5:
+                                        matching_contigs.append(contig_id)
+                                        alignment_results.append({
+                                            'contig_id': contig_id,
+                                            'identity': identity,
+                                            'coverage': coverage,
+                                            'alignment_length': alignment_length,
+                                            'matches': matches,
+                                            'contig_length': contig_length
+                                        })
                 
                 logger.info(f"Found {len(matching_contigs)} contigs with significant alignment to reference")
                 
