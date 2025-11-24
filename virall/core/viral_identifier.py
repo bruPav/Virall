@@ -1082,12 +1082,19 @@ class ViralIdentifier:
         bam_file = output_dir / "mapped_reads.bam"
         
         logger.info("Mapping paired-end reads to viral contigs with BWA")
+        # Determine appropriate BWA parameters based on read length (use first read file)
+        bwa_params = self._get_bwa_params_for_read_length(reads_1)
+        
         map_cmd = [
             "bwa", "mem",
-            "-t", str(self.threads),
+            "-t", str(self.threads)
+        ]
+        # Add read-length-specific parameters if determined
+        map_cmd.extend(bwa_params)
+        map_cmd.extend([
             str(index_file),
             reads_1, reads_2
-        ]
+        ])
         
         # Run mapping
         log_file_mem = output_dir / "bwa_mem.log"
@@ -1100,6 +1107,69 @@ class ViralIdentifier:
         # Process BAM file
         return self._process_mapping_results(sam_file, bam_file, contigs_file, output_dir, "bwa_paired", classification_data)
 
+    def _get_bwa_params_for_read_length(self, read_file: str) -> List[str]:
+        """
+        Determine appropriate BWA mem parameters based on read length.
+        
+        Args:
+            read_file: Path to FASTQ file (can be gzipped)
+            
+        Returns:
+            List of BWA mem parameter strings (e.g., ["-k", "10", "-w", "50"])
+        """
+        try:
+            import gzip
+            
+            # Sample first 100 reads to estimate average read length
+            read_lengths = []
+            is_gzipped = read_file.endswith('.gz')
+            
+            if is_gzipped:
+                f = gzip.open(read_file, 'rt')
+            else:
+                f = open(read_file, 'r')
+            
+            with f:
+                read_count = 0
+                for i, line in enumerate(f):
+                    # Sequence line is every 4th line (1-indexed: 1, 5, 9, ...)
+                    if (i + 1) % 4 == 2:  # Sequence line
+                        read_lengths.append(len(line.strip()))
+                        read_count += 1
+                        if read_count >= 100:
+                            break
+            
+            if not read_lengths:
+                # Fallback to default if we can't determine length
+                return []
+            
+            avg_length = sum(read_lengths) / len(read_lengths)
+            
+            # Adjust BWA parameters based on read length
+            # For very short reads (<75bp): use lenient parameters
+            # For short reads (75-100bp): use moderate parameters  
+            # For longer reads (>=100bp): use default parameters
+            if avg_length < 75:
+                # Very short reads: reduce seed length and bandwidth significantly
+                k = max(10, int(avg_length * 0.2))  # 20% of read length, min 10
+                w = max(50, int(avg_length * 1.0))  # Equal to read length, min 50
+                logger.info(f"Detected short reads (avg length: {avg_length:.0f}bp), using lenient BWA parameters: -k {k} -w {w}")
+                return ["-k", str(k), "-w", str(w)]
+            elif avg_length < 100:
+                # Short reads: moderate reduction
+                k = max(15, int(avg_length * 0.15))  # 15% of read length, min 15
+                w = max(75, int(avg_length * 0.75))  # 75% of read length, min 75
+                logger.info(f"Detected moderate-length reads (avg length: {avg_length:.0f}bp), using adjusted BWA parameters: -k {k} -w {w}")
+                return ["-k", str(k), "-w", str(w)]
+            else:
+                # Longer reads: use BWA defaults (no extra parameters)
+                logger.info(f"Detected longer reads (avg length: {avg_length:.0f}bp), using default BWA parameters")
+                return []
+                
+        except Exception as e:
+            logger.warning(f"Could not determine read length from {read_file}: {e}. Using default BWA parameters.")
+            return []
+    
     def _quantify_with_bwa_single(
         self, 
         contigs_file: str, 
@@ -1145,12 +1215,19 @@ class ViralIdentifier:
         bam_file = output_dir / "mapped_reads.bam"
         
         logger.info("Mapping single-end reads to viral contigs with BWA")
+        # Determine appropriate BWA parameters based on read length
+        bwa_params = self._get_bwa_params_for_read_length(single_reads)
+        
         map_cmd = [
             "bwa", "mem",
-            "-t", str(self.threads),
+            "-t", str(self.threads)
+        ]
+        # Add read-length-specific parameters if determined
+        map_cmd.extend(bwa_params)
+        map_cmd.extend([
             str(index_file),
             single_reads
-        ]
+        ])
         
         # Run mapping
         log_file_mem = output_dir / "bwa_mem.log"

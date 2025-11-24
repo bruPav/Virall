@@ -509,7 +509,7 @@ From: ubuntu:22.04
 
 %labels
     Author Virall Team
-    Version 0.1.0
+    Version 0.1.1
     Description Virall - A comprehensive tool for viral genome analysis
     Maintainer bruno.pavletic@gmail.com, britaniadiazf@gmail.com
 

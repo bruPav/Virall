@@ -3,9 +3,9 @@ Viral Genome Assembler - A comprehensive tool for viral genome assembly
 from short and long sequencing reads with high accuracy.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __author__ = "Viral Assembly Team"
-__email__ = "team@viralassembler.com"
+__email__ = "bruno.pavletic@gmail.com"
 
 from .core.assembler import ViralAssembler
 from .core.preprocessor import Preprocessor

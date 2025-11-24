@@ -612,6 +612,13 @@ def analyse(
         click.echo("Virall - Complete Viral Genome Analysis Pipeline")
         click.echo("="*60)
         
+        # Show initial progress message
+        click.echo("\nStarting analysis pipeline...")
+        if reference:
+            click.echo(f"  Reference-guided assembly mode: {reference}")
+        click.echo("  Progress will be shown below. Detailed logs: " + str(Path(output_dir) / "logs"))
+        click.echo("")
+        
         # Run complete analysis pipeline (progress messages are handled in assembler.assemble())
         long_reads_path = nanopore or pacbio
         results = assembler.assemble(

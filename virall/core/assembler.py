@@ -1310,6 +1310,8 @@ class ViralAssembler:
             Dictionary containing reference-guided assembly results
         """
         logger.info("Starting reference-guided assembly")
+        click.echo("\nReference-guided assembly mode enabled")
+        click.echo(f"  Reference genome: {reference}")
         
         # Validate reference file
         if not os.path.exists(str(reference)):
@@ -1317,9 +1319,11 @@ class ViralAssembler:
         
         # Step 1: Preprocess reads
         logger.info("Step 1: Preprocessing reads for reference-guided assembly")
+        click.echo("\nStep 1/5: Preprocessing reads...")
         preprocessed_reads = self._preprocess_reads(
             short_reads_1, short_reads_2, long_reads, single_reads
         )
+        click.echo("  Preprocessing completed")
         
         # Step 2: Choose appropriate assembly strategy based on input data
         has_short_reads = "short_1" in preprocessed_reads or "single" in preprocessed_reads
@@ -1328,21 +1332,27 @@ class ViralAssembler:
         if has_short_reads and has_long_reads:
             # Both short and long reads - build long-read consensus against reference and polish with short reads
             logger.info("Step 2: Running reference-guided long-read assembly + short-read polishing (minimap2 + bcftools + pilon)")
+            click.echo("\nStep 2/5: Running reference-guided assembly (long reads + short-read polishing)...")
             guided_assembly_results = self._run_reference_guided_long_then_polish(
                 preprocessed_reads, reference
             )
+            click.echo("  Assembly completed")
         elif has_short_reads and not has_long_reads:
             # Only short reads - use SPAdes reference-guided assembly
             logger.info("Step 2: Running reference-guided assembly with SPAdes (short reads only)")
+            click.echo("\nStep 2/5: Running reference-guided assembly with SPAdes...")
             guided_assembly_results = self._run_reference_guided_spades(
                 preprocessed_reads, reference
             )
+            click.echo("  Assembly completed")
         elif has_long_reads and not has_short_reads:
             # Only long reads - build consensus against reference (no short-read polishing)
             logger.info("Step 2: Running reference-guided long-read consensus (minimap2 + bcftools)")
+            click.echo("\nStep 2/5: Running reference-guided consensus (long reads only)...")
             guided_assembly_results = self._run_reference_guided_long_only_consensus(
                 preprocessed_reads, reference
             )
+            click.echo("  Assembly completed")
         else:
             logger.warning("No suitable reads found for reference-guided assembly")
             guided_assembly_results = None
@@ -1365,15 +1375,19 @@ class ViralAssembler:
         
         # Step 3: Evaluate reference-guided assembly
         logger.info("Step 3: Evaluating reference-guided assembly")
+        click.echo("\nStep 3/5: Evaluating reference-guided assembly...")
         evaluation_results = self._evaluate_reference_assembly(
             guided_assembly_results, reference
         )
+        click.echo("  Evaluation completed")
         
         # Step 4: Run complete pipeline on filtered contigs
         logger.info("Step 4: Running complete pipeline on reference-matching contigs")
+        click.echo("\nStep 4/5: Running complete pipeline on reference-matching contigs...")
         pipeline_results = self._run_complete_pipeline_on_filtered_contigs(
             guided_assembly_results, preprocessed_reads
         )
+        click.echo("  Pipeline completed")
         
         # Merge evaluation and pipeline results
         if pipeline_results:
@@ -1743,10 +1757,31 @@ class ViralAssembler:
             logger.warning(f"SPAdes reference-guided assembly failed. See log at {log_file}")
             return None
         
-        # Check if assembly produced output (handle RNA mode)
+        # Check if assembly produced output (handle RNA mode with fallback)
         if self.rna_mode:
             contigs_file = output_dir / "transcripts.fasta"
+            if not contigs_file.exists():
+                # Prefer standard SPAdes top-level contigs.fasta if present
+                top_contigs = output_dir / "contigs.fasta"
+                if top_contigs.exists():
+                    logger.info("transcripts.fasta not found, using top-level contigs.fasta")
+                    contigs_file = top_contigs
+                else:
+                    # Fallback to highest-K final_contigs.fasta
+                    k_dirs = [d for d in output_dir.iterdir() if d.is_dir() and d.name.startswith('K')]
+                    if k_dirs:
+                        k_dirs.sort(key=lambda x: int(x.name[1:]) if x.name[1:].isdigit() else 0)
+                        highest_k_dir = k_dirs[-1]
+                        fallback_contigs = highest_k_dir / "final_contigs.fasta"
+                        if fallback_contigs.exists():
+                            logger.info(f"transcripts.fasta not found, using {fallback_contigs} as fallback")
+                            contigs_file = fallback_contigs
+            # Choose scaffolds file preference in RNA mode
             scaffolds_file = output_dir / "hard_filtered_transcripts.fasta"
+            if not scaffolds_file.exists():
+                std_scaffolds = output_dir / "scaffolds.fasta"
+                if std_scaffolds.exists():
+                    scaffolds_file = std_scaffolds
         else:
             contigs_file = output_dir / "contigs.fasta"
             scaffolds_file = output_dir / "scaffolds.fasta"
