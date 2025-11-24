@@ -318,9 +318,9 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Changelog
 
-### v0.1.0
-- Initial release
+### v0.1.1
 - Support for short, long and Single Cell Seq reads
 - Reference-guided assembly
 - Viral assembly, classification, annotation, validation and quantification
 - Memory-efficient mode
+- Very short reads (<75 bp) also processed but only with reference-guided assembly
