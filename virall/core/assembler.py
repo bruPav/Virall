@@ -155,12 +155,17 @@ class ViralAssembler:
         if (installation_dir / "README.md").exists() or (installation_dir / "requirements.txt").exists():
             return installation_dir
         
-        # Method 4: Fall back to current working directory if databases exist there
+        # Method 4: Check for standard Singularity/Docker container path
+        # This is the path defined in virall.def
+        if Path("/opt/virall/databases").exists():
+            return Path("/opt/virall")
+
+        # Method 5: Fall back to current working directory if databases exist there
         cwd = Path.cwd()
         if (cwd / "databases").exists():
             return cwd
         
-        # Method 5: Fall back to package directory (original behavior)
+        # Method 6: Fall back to package directory (original behavior)
         logger.warning("Could not find installation directory, falling back to package directory")
         return installation_dir
     

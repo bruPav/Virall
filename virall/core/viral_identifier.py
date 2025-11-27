@@ -1747,36 +1747,44 @@ class ViralIdentifier:
     
     def _setup_kaiju_database(self) -> Optional[Path]:
         """Setup Kaiju viral database."""
-        # Get database path from config
-        config_path = self.config.get('databases', {}).get('kaiju_db_path')
-        if config_path:
-            kaiju_db_path = Path(config_path)
-        else:
-            # Check common container database locations first (where virall setup-db creates them)
-            # IMPORTANT: Check /opt/virall/databases/ FIRST before falling back to installation directory
-            container_paths = [
-                Path("/opt/virall/databases/kaiju_db"),
-                Path("/opt/virall/src/databases/kaiju_db")
-            ]
-            kaiju_db_path = None
-            for container_path in container_paths:
-                # Check if directory exists
-                if container_path.exists():
-                    kaiju_db_path = container_path
-                    logger.debug(f"Found Kaiju database directory at: {container_path}")
-                    break
-                # Also check if database files exist even if directory check failed (for bind mounts)
-                # This handles cases where the directory exists but .exists() check fails
-                viruses_dir = container_path / "viruses"
-                if (container_path / "nodes.dmp").exists() or \
-                   (viruses_dir / "kaiju_db_viruses.fmi").exists():
-                    kaiju_db_path = container_path
-                    logger.debug(f"Found Kaiju database files at: {container_path}")
-                    break
+        # ALWAYS check container bind mount paths first, even if config has a path
+        # This ensures bind mounts work correctly in Singularity containers
+        container_paths = [
+            Path("/opt/virall/databases/kaiju_db"),
+            Path("/opt/virall/src/databases/kaiju_db")
+        ]
+        kaiju_db_path = None
+        
+        for container_path in container_paths:
+            # Check if directory exists
+            if container_path.exists():
+                kaiju_db_path = container_path
+                logger.debug(f"Found Kaiju database directory at: {container_path}")
+                break
+            # Also check if database files exist even if directory check failed (for bind mounts)
+            # This handles cases where the directory exists but .exists() check fails
+            viruses_dir = container_path / "viruses"
+            if (container_path / "nodes.dmp").exists() or \
+               (viruses_dir / "kaiju_db_viruses.fmi").exists():
+                kaiju_db_path = container_path
+                logger.debug(f"Found Kaiju database files at: {container_path}")
+                break
+        
+        # Only fall back to config or other locations if container paths don't exist
+        if kaiju_db_path is None:
+            # Get database path from config
+            config_path = self.config.get('databases', {}).get('kaiju_db_path')
+            if config_path:
+                config_kaiju_path = Path(config_path)
+                # Only use config path if it actually exists
+                if config_kaiju_path.exists() or (config_kaiju_path / "nodes.dmp").exists():
+                    kaiju_db_path = config_kaiju_path
+                    logger.debug(f"Using Kaiju database path from config: {kaiju_db_path}")
+                else:
+                    logger.debug(f"Config path {config_kaiju_path} does not exist, trying other locations")
             
-            # Only fall back to other locations if container paths don't exist
+            # If still not found, try current working directory
             if kaiju_db_path is None:
-                # Try current working directory first
                 cwd_db_path = Path.cwd() / "databases" / "kaiju_db"
                 if cwd_db_path.exists():
                     kaiju_db_path = cwd_db_path

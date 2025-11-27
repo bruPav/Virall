@@ -55,6 +55,9 @@ From: ubuntu:22.04
     /opt/conda/bin/conda init bash
     /opt/conda/bin/conda config --set auto_update_conda false
     /opt/conda/bin/conda config --set channel_priority flexible
+    /opt/conda/bin/conda config --set remote_read_timeout_secs 120
+    /opt/conda/bin/conda config --set remote_connect_timeout_secs 30
+    /opt/conda/bin/conda config --set remote_max_retries 10
 
     # Accept conda Terms of Service
     /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
@@ -229,28 +232,28 @@ From: ubuntu:22.04
     # Other bioinformatics tools - install individually using conda instead of mamba
     # (mamba has GLIBCXX compatibility issues after libstdcxx upgrade)
     echo "Installing bcftools..."
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y bcftools" || echo "Warning: bcftools installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y bcftools" || echo "Warning: bcftools installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     echo "Installing hmmer..."
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y hmmer" || echo "Warning: hmmer installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y hmmer" || echo "Warning: hmmer installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     echo "Installing prodigal..."
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y prodigal" || echo "Warning: prodigal installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y prodigal" || echo "Warning: prodigal installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     echo "Installing pilon..."
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y pilon" || echo "Warning: pilon installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y pilon" || echo "Warning: pilon installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     echo "Installing checkv..."
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y checkv" || echo "Warning: checkv installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y checkv" || echo "Warning: checkv installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     echo "Installing kaiju..."
     # Install Kaiju 1.10.1 (includes kaiju-makedb) instead of default 1.4.4
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -y 'kaiju=1.10.1'" || echo "Warning: kaiju installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y 'kaiju=1.10.1'" || echo "Warning: kaiju installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     # Try to install minimap2 and fastqc with conda (they failed with mamba)

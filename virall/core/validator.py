@@ -66,49 +66,59 @@ class AssemblyValidator:
     
     def _setup_checkv_database(self) -> Optional[str]:
         """Setup CheckV database for viral contig quality assessment."""
-        # Check config first
-        config_path = self.config.get('databases', {}).get('checkv_db_path')
-        if config_path:
-            checkv_db_path = Path(config_path)
-        else:
-            # Check common container database locations first (where virall setup-db creates them)
-            container_paths = [
-                Path("/opt/virall/databases/checkv_db"),
-                Path("/opt/virall/src/databases/checkv_db")
-            ]
-            checkv_db_path = None
-            for container_path in container_paths:
-                # Check if directory exists
-                if container_path.exists():
-                    checkv_db_path = container_path
-                    logger.debug(f"Found CheckV database directory at: {container_path}")
-                    break
-                # Also check if database files/subdirectories exist even if directory check failed (for bind mounts)
-                # CheckV database has checkv-db-v* subdirectories or files like genome_db, proteins, etc.
-                try:
-                    # Check for checkv-db-v* subdirectories
-                    if container_path.parent.exists():
-                        checkv_db_dir = container_path.parent / "checkv_db"
-                        if checkv_db_dir.exists():
-                            for item in checkv_db_dir.iterdir():
-                                if item.is_dir() and item.name.startswith("checkv-db-"):
-                                    checkv_db_path = container_path
-                                    logger.debug(f"Found CheckV database files at: {container_path}")
-                                    break
-                            if checkv_db_path:
+        # ALWAYS check container bind mount paths first, even if config has a path
+        # This ensures bind mounts work correctly in Singularity containers
+        container_paths = [
+            Path("/opt/virall/databases/checkv_db"),
+            Path("/opt/virall/src/databases/checkv_db")
+        ]
+        checkv_db_path = None
+        
+        for container_path in container_paths:
+            # Check if directory exists
+            if container_path.exists():
+                checkv_db_path = container_path
+                logger.debug(f"Found CheckV database directory at: {container_path}")
+                break
+            # Also check if database files/subdirectories exist even if directory check failed (for bind mounts)
+            # CheckV database has checkv-db-v* subdirectories or files like genome_db, proteins, etc.
+            try:
+                # Check for checkv-db-v* subdirectories
+                if container_path.parent.exists():
+                    checkv_db_dir = container_path.parent / "checkv_db"
+                    if checkv_db_dir.exists():
+                        for item in checkv_db_dir.iterdir():
+                            if item.is_dir() and item.name.startswith("checkv-db-"):
+                                checkv_db_path = container_path
+                                logger.debug(f"Found CheckV database files at: {container_path}")
                                 break
-                    # Check for direct database files
-                    checkv_files = ["genome_db", "proteins", "taxonomy", "completeness"]
-                    has_checkv_files = any((container_path / file).exists() for file in checkv_files)
-                    if has_checkv_files:
-                        checkv_db_path = container_path
-                        logger.debug(f"Found CheckV database files at: {container_path}")
-                        break
-                except (PermissionError, OSError, FileNotFoundError):
-                    pass
+                        if checkv_db_path:
+                            break
+                # Check for direct database files
+                checkv_files = ["genome_db", "proteins", "taxonomy", "completeness"]
+                has_checkv_files = any((container_path / file).exists() for file in checkv_files)
+                if has_checkv_files:
+                    checkv_db_path = container_path
+                    logger.debug(f"Found CheckV database files at: {container_path}")
+                    break
+            except (PermissionError, OSError, FileNotFoundError):
+                pass
+        
+        # Only fall back to config or other locations if container paths don't exist
+        if checkv_db_path is None:
+            # Get database path from config
+            config_path = self.config.get('databases', {}).get('checkv_db_path')
+            if config_path:
+                config_checkv_path = Path(config_path)
+                # Only use config path if it actually exists
+                if config_checkv_path.exists():
+                    checkv_db_path = config_checkv_path
+                    logger.debug(f"Using CheckV database path from config: {checkv_db_path}")
+                else:
+                    logger.debug(f"Config path {config_checkv_path} does not exist, trying other locations")
             
-            if not checkv_db_path:
-                # Try current working directory first, then fall back to installation directory
+            # If still not found, try current working directory first, then fall back to installation directory
+            if checkv_db_path is None:
                 cwd_db_path = Path.cwd() / "databases" / "checkv_db"
                 if cwd_db_path.exists():
                     checkv_db_path = cwd_db_path
@@ -117,7 +127,7 @@ class AssemblyValidator:
                     software_dir = self._find_installation_directory()
                     checkv_db_path = software_dir / "databases" / "checkv_db"
             
-            if not checkv_db_path.exists():
+            if checkv_db_path and not checkv_db_path.exists():
                 # Fallback to home directory
                 checkv_db_path = Path.home() / "checkv_db"
         

@@ -34,12 +34,34 @@ class VOGAnnotator:
         if vog_db_path:
             self.vog_db_path = Path(os.path.expanduser(vog_db_path))
         else:
-            # Try to get from config first, then fall back to finding database
-            config_path = self.config.get('databases', {}).get('vog_db_path')
-            if config_path:
-                self.vog_db_path = Path(config_path)
+            # ALWAYS check container bind mount paths first, even if config has a path
+            # This ensures bind mounts work correctly in Singularity containers
+            container_paths = [
+                Path("/opt/virall/databases/vog_db"),
+                Path("/opt/virall/src/databases/vog_db")
+            ]
+            found_path = None
+            for container_path in container_paths:
+                if container_path.exists() and (container_path / "vog.hmm").exists():
+                    found_path = container_path
+                    logger.debug(f"Found VOG database at container path: {container_path}")
+                    break
+            
+            if found_path:
+                self.vog_db_path = found_path
             else:
-                self.vog_db_path = self._find_vog_database()
+                # Try to get from config, but only if it exists
+                config_path = self.config.get('databases', {}).get('vog_db_path')
+                if config_path:
+                    config_vog_path = Path(config_path)
+                    if config_vog_path.exists() and (config_vog_path / "vog.hmm").exists():
+                        self.vog_db_path = config_vog_path
+                        logger.debug(f"Using VOG database path from config: {self.vog_db_path}")
+                    else:
+                        logger.debug(f"Config path {config_vog_path} does not exist, using _find_vog_database()")
+                        self.vog_db_path = self._find_vog_database()
+                else:
+                    self.vog_db_path = self._find_vog_database()
         self.vog_fasta = None
         self.vog_annotations = None
         self.vog_hmm = None
