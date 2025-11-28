@@ -1681,7 +1681,8 @@ class ViralIdentifier:
             "-t", str(kaiju_db / "nodes.dmp"),
             "-n", str(kaiju_db / "names.dmp"),
             "-i", str(results_file),
-            "-o", str(results_with_names)
+            "-o", str(results_with_names),
+            "-r", "superkingdom,phylum,class,order,family,genus,species"
         ]
         
         logger.info(f"Kaiju addTaxonNames command: {' '.join(add_names_cmd)}")
@@ -1845,14 +1846,22 @@ class ViralIdentifier:
                             taxon_id = parts[2]
                             # Kaiju output format with names: C	contig_id	taxon_id	species_name
                             if len(parts) >= 4:
-                                taxon_name = parts[3]  # Actual species name
+                                lineage_str = parts[3]  # Full lineage string
+                                # Extract the last non-empty part as the name
+                                lineage_parts = [p.strip() for p in lineage_str.split(';') if p.strip()]
+                                if lineage_parts:
+                                    taxon_name = lineage_parts[-1]
+                                else:
+                                    taxon_name = f"Taxon_{taxon_id}"
                             else:
-                                taxon_name = f"Taxon_{taxon_id}"  # Fallback to ID if no name
+                                taxon_name = f"Taxon_{taxon_id}"
+                                lineage_str = taxon_name
                             
                             classifications[contig_id] = {
                                 'taxon_id': taxon_id,
                                 'taxon_name': taxon_name,
-                                'classification': taxon_name
+                                'classification': taxon_name,
+                                'lineage': lineage_str
                             }
                     elif line.startswith('U'):  # Unclassified reads
                         parts = line.strip().split('\t')
@@ -1877,13 +1886,14 @@ class ViralIdentifier:
             output_file.parent.mkdir(parents=True, exist_ok=True)
             with open(output_file, 'w') as f:
                 # Header
-                f.write("contig_id\ttaxon_id\ttaxon_name\tclassification\n")
+                f.write("contig_id\ttaxon_id\ttaxon_name\tclassification\tlineage\n")
                 
                 # Rows
                 for contig_id, data in classifications.items():
                     f.write(
                         f"{contig_id}\t{data.get('taxon_id', '')}\t"
-                        f"{data.get('taxon_name', '')}\t{data.get('classification', '')}\n"
+                        f"{data.get('taxon_name', '')}\t{data.get('classification', '')}\t"
+                        f"{data.get('lineage', '')}\n"
                     )
             
             logger.info(f"Wrote Kaiju classification summary to {output_file}")

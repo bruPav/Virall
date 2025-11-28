@@ -20,6 +20,7 @@ from .preprocessor import Preprocessor
 from .viral_identifier import ViralIdentifier
 from .validator import AssemblyValidator
 from .gene_predictor import ViralGenePredictor
+from .plotter import ViralPlotter
 
 
 class ViralAssembler:
@@ -89,6 +90,7 @@ class ViralAssembler:
             config=self.config,
             vog_db_path=self.config.get('databases', {}).get('vog_db_path')
         )
+        self.plotter = ViralPlotter(output_dir=output_dir)
         
         logger.info(f"ViralAssembler initialized with {threads} threads, {memory} memory")
     
@@ -351,6 +353,60 @@ class ViralAssembler:
             "statistics": self._generate_statistics(validation_results),
             "total_viral_contigs": total_viral_contigs
         }
+        
+        # Step 6: Generate plots
+        logger.info("Step 6: Generating analysis plots")
+        click.echo("\nStep 6/6: Generating plots...")
+        
+        # Find abundance file
+        abundance_file = None
+        # Check in quantification results
+        for assembly_type, info in viral_contig_results.get("viral_contig_info", {}).items():
+            if "quantification" in info:
+                quant_res = info["quantification"]
+                if quant_res.get("status") == "completed":
+                    # Try to find the abundance file path from the result or construct it
+                    # The result usually contains 'abundance_file' or we can guess
+                    if "abundance_file" in quant_res:
+                        abundance_file = quant_res["abundance_file"]
+                        break
+                    else:
+                        # Construct path based on convention
+                        # output_dir/06_quantification/assembly_type/contig_abundance.tsv
+                        candidate = self.output_dir / "06_quantification" / assembly_type / "contig_abundance.tsv"
+                        if candidate.exists():
+                            abundance_file = str(candidate)
+                            break
+        
+        if abundance_file:
+            logger.info(f"Generating plots from {abundance_file}")
+            self.plotter.plot_abundance(abundance_file)
+            self.plotter.plot_contig_lengths(abundance_file)
+            
+            # Also try to find Kaiju summary for sunburst plot
+            # Usually in 03_classifications/kaiju_contigs/kaiju_summary.tsv
+            # Or we can check viral_contig_results structure
+            kaiju_summary = None
+            for assembly_type, info in viral_contig_results.get("viral_contig_info", {}).items():
+                if "kaiju_classification" in info:
+                    k_res = info["kaiju_classification"]
+                    if k_res.get("status") == "completed" and "summary_file" in k_res:
+                        kaiju_summary = k_res["summary_file"]
+                        break
+            
+            if not kaiju_summary:
+                # Fallback path
+                candidate = self.output_dir / "03_classifications" / "kaiju_contigs" / "kaiju_summary.tsv"
+                if candidate.exists():
+                    kaiju_summary = str(candidate)
+            
+            if kaiju_summary:
+                self.plotter.plot_taxonomy_sunburst(kaiju_summary)
+            
+            click.echo("  Plots generated in 07_plots directory")
+        else:
+            logger.warning("No abundance file found, skipping plot generation")
+            click.echo("  Skipping plots (no abundance data found)")
         
         # Clean up temporary files
         self.cleanup_temp_files()
