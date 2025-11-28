@@ -8,6 +8,8 @@ from typing import Dict, List, Optional, Union
 from loguru import logger
 
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # Set backend to non-interactive to avoid Qt warnings
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
@@ -69,7 +71,7 @@ class ViralPlotter:
             
             # Create plot
             plt.figure(figsize=(10, 8))
-            sns.barplot(x=top_species.values, y=top_species.index, palette="viridis")
+            sns.barplot(x=top_species.values, y=top_species.index, hue=top_species.index, legend=False, palette="viridis")
             
             plt.title("Top 20 Most Abundant Viral Species", fontsize=16)
             plt.xlabel("Relative Abundance", fontsize=12)
@@ -228,10 +230,14 @@ class ViralPlotter:
             if not valid_cols:
                 return None
                 
+            # Use the second level (usually Phylum or Class) for color if available, else root
+            color_col = valid_cols[1] if len(valid_cols) > 1 else valid_cols[0]
+                
             fig = px.sunburst(
                 df_lineage, 
                 path=valid_cols, 
                 values='count',
+                color=color_col,
                 title="Viral Taxonomy Sunburst",
                 width=800,
                 height=800
