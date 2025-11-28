@@ -230,8 +230,18 @@ class ViralPlotter:
             if not valid_cols:
                 return None
                 
-            # Use the second level (usually Phylum or Class) for color if available, else root
-            color_col = valid_cols[1] if len(valid_cols) > 1 else valid_cols[0]
+            # Find the best column for color (first one with >1 unique values)
+            color_col = valid_cols[0]  # Default to root
+            
+            # Skip the first column (usually 'Viruses' or 'NA') if possible
+            start_idx = 1 if len(valid_cols) > 1 else 0
+            
+            for col in valid_cols[start_idx:]:
+                # Check number of unique values (excluding None/NaN)
+                n_unique = df_lineage[col].nunique()
+                if n_unique > 1:
+                    color_col = col
+                    break
                 
             fig = px.sunburst(
                 df_lineage, 
