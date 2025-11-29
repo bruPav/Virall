@@ -272,3 +272,96 @@ class ViralPlotter:
         except Exception as e:
             logger.error(f"Failed to generate sunburst plot: {e}")
             return None
+
+    def plot_genome_quality(self, quality_file: Union[str, Path]) -> List[str]:
+        """
+        Generate genome quality plots from CheckV results.
+        
+        Args:
+            quality_file: Path to quality_summary.tsv
+            
+        Returns:
+            List of paths to generated plot files
+        """
+        generated_plots = []
+        
+        if not os.path.exists(quality_file):
+            logger.warning(f"Quality summary file not found: {quality_file}")
+            return generated_plots
+            
+        try:
+            df = pd.read_csv(quality_file, sep='\t')
+            
+            if df.empty:
+                logger.warning("Quality summary file is empty")
+                return generated_plots
+                
+            # Check for required columns
+            required_cols = ['completeness', 'contamination', 'checkv_quality']
+            if not all(col in df.columns for col in required_cols):
+                logger.warning(f"Quality file missing required columns: {required_cols}")
+                return generated_plots
+                
+            # 1. Scatter Plot: Completeness vs Contamination
+            plt.figure(figsize=(10, 8))
+            
+            # Create scatter plot
+            sns.scatterplot(
+                data=df,
+                x='completeness',
+                y='contamination',
+                hue='checkv_quality',
+                style='checkv_quality',
+                s=100,
+                alpha=0.7,
+                palette='viridis'
+            )
+            
+            plt.title("Viral Genome Quality: Completeness vs. Contamination", fontsize=16)
+            plt.xlabel("Completeness (%)", fontsize=12)
+            plt.ylabel("Contamination (%)", fontsize=12)
+            plt.grid(True, linestyle='--', alpha=0.3)
+            plt.xlim(0, 105)  # Completeness is 0-100
+            plt.ylim(-5, 105) # Contamination is 0-100
+            
+            # Add quality zones
+            plt.axvline(x=90, color='green', linestyle=':', alpha=0.5, label='High Quality (>90%)')
+            plt.axvline(x=50, color='orange', linestyle=':', alpha=0.5, label='Medium Quality (>50%)')
+            
+            output_scatter = self.plots_dir / "genome_quality_scatter.png"
+            plt.savefig(output_scatter, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            generated_plots.append(str(output_scatter))
+            logger.info(f"Generated quality scatter plot: {output_scatter}")
+            
+            # 2. Bar Chart: Quality Tier Distribution
+            plt.figure(figsize=(10, 6))
+            
+            quality_counts = df['checkv_quality'].value_counts()
+            
+            sns.barplot(
+                x=quality_counts.index, 
+                y=quality_counts.values,
+                hue=quality_counts.index,
+                legend=False,
+                palette='viridis'
+            )
+            
+            plt.title("Distribution of Viral Genome Quality", fontsize=16)
+            plt.xlabel("Quality Tier", fontsize=12)
+            plt.ylabel("Number of Genomes", fontsize=12)
+            plt.xticks(rotation=45)
+            
+            output_bar = self.plots_dir / "genome_quality_distribution.png"
+            plt.savefig(output_bar, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            generated_plots.append(str(output_bar))
+            logger.info(f"Generated quality distribution plot: {output_bar}")
+            
+            return generated_plots
+            
+        except Exception as e:
+            logger.error(f"Failed to generate quality plots: {e}")
+            return generated_plots

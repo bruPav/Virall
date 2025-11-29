@@ -403,6 +403,25 @@ class ViralAssembler:
             if kaiju_summary:
                 self.plotter.plot_taxonomy_sunburst(kaiju_summary)
             
+            # Try to find CheckV quality summary
+            # Usually in 04_quality_assessment/checkv_results/viral_contigs/quality_summary.tsv
+            quality_summary = None
+            
+            # Check results structure first
+            if "validation_results" in results:
+                val_res = results["validation_results"]
+                if isinstance(val_res, dict) and "quality_summary" in val_res:
+                     quality_summary = val_res["quality_summary"]
+            
+            if not quality_summary:
+                # Fallback path
+                candidate = self.output_dir / "04_quality_assessment" / "checkv_results" / "viral_contigs" / "quality_summary.tsv"
+                if candidate.exists():
+                    quality_summary = str(candidate)
+            
+            if quality_summary:
+                self.plotter.plot_genome_quality(quality_summary)
+            
             click.echo("  Plots generated in 07_plots directory")
         else:
             logger.warning("No abundance file found, skipping plot generation")
