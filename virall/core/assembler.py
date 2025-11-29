@@ -422,6 +422,34 @@ class ViralAssembler:
             if quality_summary:
                 self.plotter.plot_genome_quality(quality_summary)
             
+            # Try to find Gene Prediction results
+            # Usually in 05_gene_predictions/protein_annotations.tsv
+            annotations_file = None
+            gene_summary_file = None
+            
+            # Check results structure first
+            if "gene_predictions" in results:
+                gp_res = results["gene_predictions"]
+                if isinstance(gp_res, dict):
+                    if "annotations" in gp_res:
+                        annotations_file = gp_res["annotations"]
+                    if "summary" in gp_res:
+                        gene_summary_file = gp_res["summary"]
+            
+            # Fallback path
+            if not annotations_file:
+                candidate = self.output_dir / "05_gene_predictions" / "protein_annotations.tsv"
+                if candidate.exists():
+                    annotations_file = str(candidate)
+            
+            if not gene_summary_file:
+                candidate = self.output_dir / "05_gene_predictions" / "gene_prediction_summary.tsv"
+                if candidate.exists():
+                    gene_summary_file = str(candidate)
+            
+            if annotations_file:
+                self.plotter.plot_gene_predictions(annotations_file, gene_summary_file)
+            
             click.echo("  Plots generated in 07_plots directory")
         else:
             logger.warning("No abundance file found, skipping plot generation")

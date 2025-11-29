@@ -365,3 +365,100 @@ class ViralPlotter:
         except Exception as e:
             logger.error(f"Failed to generate quality plots: {e}")
             return generated_plots
+
+    def plot_gene_predictions(self, annotations_file: Union[str, Path], summary_file: Union[str, Path] = None) -> List[str]:
+        """
+        Generate plots from gene prediction results.
+        
+        Args:
+            annotations_file: Path to protein_annotations.tsv
+            summary_file: Path to gene_prediction_summary.tsv (optional)
+            
+        Returns:
+            List of paths to generated plot files
+        """
+        generated_plots = []
+        
+        # 1. Proteome Scatter Plot (MW vs pI) & Gene Lengths
+        if os.path.exists(annotations_file):
+            try:
+                df_ann = pd.read_csv(annotations_file, sep='\t')
+                
+                if not df_ann.empty and 'molecular_weight' in df_ann.columns and 'isoelectric_point' in df_ann.columns:
+                    plt.figure(figsize=(10, 8))
+                    
+                    # Scatter plot
+                    sns.scatterplot(
+                        data=df_ann,
+                        x='isoelectric_point',
+                        y='molecular_weight',
+                        alpha=0.6,
+                        edgecolor=None,
+                        s=30,
+                        color='#2c3e50'
+                    )
+                    
+                    plt.title("Viral Proteome Properties: MW vs. pI", fontsize=16)
+                    plt.xlabel("Isoelectric Point (pI)", fontsize=12)
+                    plt.ylabel("Molecular Weight (Da)", fontsize=12)
+                    plt.grid(True, linestyle='--', alpha=0.3)
+                    
+                    # Add density contours if enough data
+                    if len(df_ann) > 50:
+                        sns.kdeplot(
+                            data=df_ann,
+                            x='isoelectric_point',
+                            y='molecular_weight',
+                            levels=5,
+                            color="#e74c3c",
+                            linewidths=1,
+                            alpha=0.5
+                        )
+                    
+                    output_proteome = self.plots_dir / "viral_proteome_scatter.png"
+                    plt.savefig(output_proteome, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                    generated_plots.append(str(output_proteome))
+                    logger.info(f"Generated proteome scatter plot: {output_proteome}")
+                
+                if not df_ann.empty and 'length' in df_ann.columns:
+                    plt.figure(figsize=(10, 6))
+                    sns.histplot(data=df_ann, x='length', bins=30, color='#3498db', kde=True)
+                    plt.title("Distribution of Viral Gene Lengths", fontsize=16)
+                    plt.xlabel("Gene Length (aa)", fontsize=12)
+                    plt.ylabel("Count", fontsize=12)
+                    
+                    output_lengths = self.plots_dir / "gene_length_distribution.png"
+                    plt.savefig(output_lengths, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                    generated_plots.append(str(output_lengths))
+                    logger.info(f"Generated gene length plot: {output_lengths}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to process annotations file: {e}")
+        
+        # 2. Genes per Contig
+        if summary_file and os.path.exists(summary_file):
+            try:
+                df_sum = pd.read_csv(summary_file, sep='\t')
+                
+                if not df_sum.empty and 'total_genes' in df_sum.columns:
+                    plt.figure(figsize=(10, 6))
+                    sns.histplot(data=df_sum, x='total_genes', bins=20, color='#9b59b6', discrete=True)
+                    plt.title("Distribution of Genes per Viral Contig", fontsize=16)
+                    plt.xlabel("Number of Genes", fontsize=12)
+                    plt.ylabel("Count of Contigs", fontsize=12)
+                    
+                    output_genes = self.plots_dir / "genes_per_contig_distribution.png"
+                    plt.savefig(output_genes, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                    generated_plots.append(str(output_genes))
+                    logger.info(f"Generated genes per contig plot: {output_genes}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to process summary file: {e}")
+                
+        return generated_plots
