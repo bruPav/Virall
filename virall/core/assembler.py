@@ -257,7 +257,7 @@ class ViralAssembler:
         
         # Step 1: Preprocessing
         logger.info("Step 1: Preprocessing reads")
-        click.echo("\nStep 1/5: Preprocessing reads...")
+        click.echo("\nStep 1/6: Preprocessing reads...")
         preprocessed_reads = self._preprocess_reads(
             short_reads_1, short_reads_2, long_reads, single_reads
         )
@@ -278,13 +278,13 @@ class ViralAssembler:
         
         # Step 2: Single assembly of all reads
         logger.info("Step 2: Performing initial assembly of all reads")
-        click.echo("\nStep 2/5: Assembling sequences...")
+        click.echo("\nStep 2/6: Assembling sequences...")
         assembly_results = self._perform_assembly(preprocessed_reads, reference)
         click.echo("  Assembly completed")
         
         # Step 3: Efficient viral identification from contigs
         logger.info("Step 3: Identifying viral contigs from assembly")
-        click.echo("\nStep 3/5: Identifying viral contigs...")
+        click.echo("\nStep 3/6: Identifying viral contigs...")
         viral_contig_results = self._identify_viral_contigs_efficiently(assembly_results)
         viral_count = sum(
             info.get("viral_contig_count", len(info.get("viral_contigs", [])))
@@ -294,7 +294,7 @@ class ViralAssembler:
         
         # Step 4: Gene prediction and annotation
         logger.info("Step 4: Predicting and annotating viral genes")
-        click.echo("\nStep 4/5: Predicting genes and annotating...")
+        click.echo("\nStep 4/6: Predicting genes and annotating...")
         
         # Collect classification data from all assembly types
         all_classification_data = {}
@@ -331,7 +331,7 @@ class ViralAssembler:
         
         # Step 5: Validation and quality assessment
         logger.info("Step 5: Validating viral assemblies")
-        click.echo("\nStep 5/5: Validating assemblies...")
+        click.echo("\nStep 5/6: Validating assemblies...")
         validation_results = self._validate_assemblies(
             viral_contig_results.get("viral_genomes", []),
             assembly_dir=self.output_dir / "01_assemblies"
