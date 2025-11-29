@@ -1373,15 +1373,18 @@ class ViralAssembler:
         return gene_prediction_results
     
     def _combine_viral_contigs(self, viral_genomes: List[str], output_file: Path) -> None:
-        """Combine all viral contigs into a single file."""
+        """Combine all viral contigs into a single file, removing duplicates."""
         all_contigs = []
+        seen_ids = set()
         
         for genome_file in viral_genomes:
             for record in SeqIO.parse(genome_file, "fasta"):
-                all_contigs.append(record)
+                if record.id not in seen_ids:
+                    all_contigs.append(record)
+                    seen_ids.add(record.id)
         
         SeqIO.write(all_contigs, output_file, "fasta")
-        logger.info(f"Combined {len(all_contigs)} viral contigs into {output_file}")
+        logger.info(f"Combined {len(all_contigs)} unique viral contigs into {output_file}")
     
     def _validate_assemblies(self, viral_genomes: List[str], assembly_dir: Optional[Path] = None) -> Dict[str, Dict]:
         """Validate and assess quality of assembled viral genomes."""
