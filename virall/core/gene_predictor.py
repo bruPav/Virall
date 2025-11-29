@@ -12,6 +12,8 @@ from loguru import logger
 import pandas as pd
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
+from Bio.SeqRecord import SeqRecord
+from Bio.SeqUtils.ProtParam import ProteinAnalysis
 from .vog_annotator import VOGAnnotator
 
 
@@ -846,8 +848,27 @@ class ViralGenePredictor:
     
     def _calculate_pi(self, protein_sequence: str) -> float:
         """Calculate isoelectric point of protein."""
-        # Simplified calculation - in practice, use proper algorithms
-        return 7.0  # Placeholder
+        try:
+            # Clean sequence - remove stop char if present
+            seq = protein_sequence.strip('*')
+            
+            # ProteinAnalysis handles standard amino acids
+            # We need to handle ambiguous ones by replacing or skipping
+            # For pI calculation, replacing X with nothing or a neutral AA like Glycine is a common approximation
+            # But BioPython might raise error for X, B, Z, J, U, O
+            
+            # Simple check for valid chars
+            valid_chars = set("ACDEFGHIKLMNPQRSTVWY")
+            clean_seq = "".join([c for c in seq.upper() if c in valid_chars])
+            
+            if not clean_seq:
+                return 7.0
+                
+            analysis = ProteinAnalysis(clean_seq)
+            return analysis.isoelectric_point()
+        except Exception as e:
+            logger.debug(f"Failed to calculate pI: {e}")
+            return 7.0  # Fallback
     
     def _run_vog_annotation(self, combined_results: Dict[str, List[Dict]], output_dir: Path, contigs_file: str = None) -> Dict[str, Dict]:
         """Run VOG annotation on predicted proteins."""

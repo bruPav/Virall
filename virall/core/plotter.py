@@ -462,3 +462,116 @@ class ViralPlotter:
                 logger.error(f"Failed to process summary file: {e}")
                 
         return generated_plots
+
+    def plot_high_quality_coverage(self, quality_file: Union[str, Path], depth_file: Union[str, Path], max_plots: int = 10) -> List[str]:
+        """
+        Generate coverage plots for high-quality contigs.
+        
+        Args:
+            quality_file: Path to quality_summary.tsv
+            depth_file: Path to contig_depth.txt
+            max_plots: Maximum number of plots to generate (default: 10)
+            
+        Returns:
+            List of paths to generated plot files
+        """
+        generated_plots = []
+        
+        if not os.path.exists(quality_file) or not os.path.exists(depth_file):
+            logger.warning("Quality summary or depth file not found, skipping coverage plots")
+            return generated_plots
+            
+        try:
+            # 1. Identify High-Quality Contigs
+            df_quality = pd.read_csv(quality_file, sep='\t')
+            
+            if df_quality.empty or 'checkv_quality' not in df_quality.columns:
+                logger.warning("Quality summary empty or missing checkv_quality column")
+                return generated_plots
+                
+            # Filter for High-quality
+            hq_contigs = df_quality[df_quality['checkv_quality'] == 'High-quality']
+            
+            if hq_contigs.empty:
+                logger.info("No High-quality contigs found to plot coverage for")
+                return generated_plots
+            
+            # Sort by length (longest first) and take top N
+            if 'contig_length' in hq_contigs.columns:
+                hq_contigs = hq_contigs.sort_values('contig_length', ascending=False)
+            
+            target_contigs = hq_contigs['contig_id'].head(max_plots).tolist()
+            logger.info(f"Generating coverage plots for top {len(target_contigs)} high-quality contigs")
+            
+            # 2. Read Depth Data
+            # contig_depth.txt usually has no header: contig_id, pos, depth
+            # It can be large, so we'll read it carefully or use pandas with chunking if needed
+            # For now assuming it fits in memory or is reasonable for the filtered set
+            
+            # Create subdirectory for coverage plots
+            coverage_dir = self.plots_dir / "coverage_plots"
+            coverage_dir.mkdir(exist_ok=True)
+            
+            # We'll read the whole file into a dataframe for simplicity, 
+            # but in production with huge files, we might want to optimize.
+            # Given the user's context, pandas read_csv should be fine.
+            # Using iterator to handle large files better
+            
+            chunk_size = 100000
+            chunks = pd.read_csv(depth_file, sep='\t', header=None, names=['contig_id', 'pos', 'depth'], chunksize=chunk_size)
+            
+            # We need to aggregate data for our target contigs
+            # Since the file is sorted by contig usually, we can process chunks
+            
+            current_contig_data = {contig: {'pos': [], 'depth': []} for contig in target_contigs}
+            
+            for chunk in chunks:
+                # Filter chunk for target contigs
+                relevant_data = chunk[chunk['contig_id'].isin(target_contigs)]
+                
+                if not relevant_data.empty:
+                    for contig_id, group in relevant_data.groupby('contig_id'):
+                        current_contig_data[contig_id]['pos'].extend(group['pos'].tolist())
+                        current_contig_data[contig_id]['depth'].extend(group['depth'].tolist())
+            
+            # 3. Generate Plots
+            for contig_id in target_contigs:
+                data = current_contig_data[contig_id]
+                if not data['pos']:
+                    continue
+                    
+                # Sort by position just in case
+                df_plot = pd.DataFrame(data).sort_values('pos')
+                
+                plt.figure(figsize=(12, 4))
+                
+                # Area plot
+                plt.fill_between(df_plot['pos'], df_plot['depth'], color='#2ecc71', alpha=0.6)
+                plt.plot(df_plot['pos'], df_plot['depth'], color='#27ae60', linewidth=1)
+                
+                plt.title(f"Read Coverage: {contig_id}", fontsize=14)
+                plt.xlabel("Position (bp)", fontsize=12)
+                plt.ylabel("Depth", fontsize=12)
+                plt.grid(True, linestyle='--', alpha=0.3)
+                
+                # Add mean coverage line
+                mean_cov = df_plot['depth'].mean()
+                plt.axhline(y=mean_cov, color='#e74c3c', linestyle='--', alpha=0.8, label=f"Mean: {mean_cov:.1f}x")
+                plt.legend()
+                
+                # Sanitize filename
+                safe_name = contig_id.replace('|', '_').replace('/', '_')
+                output_path = coverage_dir / f"coverage_{safe_name}.png"
+                
+                plt.savefig(output_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                
+                generated_plots.append(str(output_path))
+            
+            if generated_plots:
+                logger.info(f"Generated {len(generated_plots)} coverage plots in {coverage_dir}")
+                
+        except Exception as e:
+            logger.error(f"Failed to generate coverage plots: {e}")
+            
+        return generated_plots

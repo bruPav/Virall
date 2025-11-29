@@ -427,28 +427,36 @@ class ViralAssembler:
             annotations_file = None
             gene_summary_file = None
             
-            # Check results structure first
-            if "gene_predictions" in results:
-                gp_res = results["gene_predictions"]
-                if isinstance(gp_res, dict):
-                    if "annotations" in gp_res:
-                        annotations_file = gp_res["annotations"]
-                    if "summary" in gp_res:
-                        gene_summary_file = gp_res["summary"]
-            
-            # Fallback path
-            if not annotations_file:
-                candidate = self.output_dir / "05_gene_predictions" / "protein_annotations.tsv"
-                if candidate.exists():
-                    annotations_file = str(candidate)
-            
-            if not gene_summary_file:
-                candidate = self.output_dir / "05_gene_predictions" / "gene_prediction_summary.tsv"
-                if candidate.exists():
-                    gene_summary_file = str(candidate)
+            # Construct paths directly to avoid dictionary issues
+            candidate_ann = self.output_dir / "05_gene_predictions" / "protein_annotations.tsv"
+            if candidate_ann.exists():
+                annotations_file = str(candidate_ann)
+                
+            candidate_sum = self.output_dir / "05_gene_predictions" / "gene_prediction_summary.tsv"
+            if candidate_sum.exists():
+                gene_summary_file = str(candidate_sum)
             
             if annotations_file:
                 self.plotter.plot_gene_predictions(annotations_file, gene_summary_file)
+            
+            # Try to find coverage data for high-quality contigs
+            # Usually in 06_quantification/contigs/contig_depth.txt
+            depth_file = None
+            
+            # Check results structure first
+            if "quantification" in results:
+                quant_res = results["quantification"]
+                if isinstance(quant_res, dict) and "contig_depth" in quant_res:
+                    depth_file = quant_res["contig_depth"]
+            
+            # Fallback path
+            if not depth_file:
+                candidate = self.output_dir / "06_quantification" / "contigs" / "contig_depth.txt"
+                if candidate.exists():
+                    depth_file = str(candidate)
+            
+            if quality_summary and depth_file:
+                self.plotter.plot_high_quality_coverage(quality_summary, depth_file)
             
             click.echo("  Plots generated in 07_plots directory")
         else:
