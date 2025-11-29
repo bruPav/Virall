@@ -244,6 +244,9 @@ class ViralAssembler:
                 logger.warning("Reference-guided assembly failed - reference genome not detected in sample")
                 return result
             
+            # Generate plots for reference-guided assembly
+            self._generate_plots(result)
+            
             return result
         
         # Store read paths for quantification
@@ -358,76 +361,112 @@ class ViralAssembler:
         logger.info("Step 6: Generating analysis plots")
         click.echo("\nStep 6/6: Generating plots...")
         
-        # Find abundance file
+        # Generate plots for standard assembly
+        self._generate_plots(results)
+            
+        click.echo("  Plots generated in 07_plots directory")
+        
+        # Clean up temporary files
+        self.cleanup_temp_files()
+        
+        logger.info("Efficient assembly pipeline completed successfully")
+        click.echo("\nPipeline completed successfully!")
+        return results
+    
+    def _generate_plots(self, results: Dict[str, Any]) -> None:
+        """
+        Generate all plots based on available results.
+        Handles both standard and reference-guided assembly outputs.
+        """
+        logger.info("Generating plots")
+        click.echo("\nGenerating plots...")
+        
+        # 1. Abundance and Contig Lengths
         abundance_file = None
-        # Check in quantification results
-        for assembly_type, info in viral_contig_results.get("viral_contig_info", {}).items():
-            if "quantification" in info:
-                quant_res = info["quantification"]
-                if quant_res.get("status") == "completed":
-                    # Try to find the abundance file path from the result or construct it
-                    # The result usually contains 'abundance_file' or we can guess
-                    if "abundance_file" in quant_res:
-                        abundance_file = quant_res["abundance_file"]
-                        break
-                    else:
-                        # Construct path based on convention
-                        # output_dir/06_quantification/assembly_type/contig_abundance.tsv
-                        candidate = self.output_dir / "06_quantification" / assembly_type / "contig_abundance.tsv"
-                        if candidate.exists():
-                            abundance_file = str(candidate)
-                            break
+        
+        # Check results structure first
+        if "quantification" in results:
+            quant_res = results["quantification"]
+            if isinstance(quant_res, dict) and "abundance_file" in quant_res:
+                abundance_file = quant_res["abundance_file"]
+        
+        # Fallback paths (standard and reference-guided)
+        if not abundance_file:
+            candidates = [
+                self.output_dir / "06_quantification" / "contigs" / "contig_abundance.tsv",
+                self.output_dir / "06_quantification" / "reference_guided" / "contig_abundance.tsv"
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    abundance_file = str(candidate)
+                    break
         
         if abundance_file:
-            logger.info(f"Generating plots from {abundance_file}")
             self.plotter.plot_abundance(abundance_file)
             self.plotter.plot_contig_lengths(abundance_file)
             
-            # Also try to find Kaiju summary for sunburst plot
-            # Usually in 03_classifications/kaiju_contigs/kaiju_summary.tsv
-            # Or we can check viral_contig_results structure
+            # 2. Taxonomy Sunburst
             kaiju_summary = None
-            for assembly_type, info in viral_contig_results.get("viral_contig_info", {}).items():
-                if "kaiju_classification" in info:
-                    k_res = info["kaiju_classification"]
-                    if k_res.get("status") == "completed" and "summary_file" in k_res:
-                        kaiju_summary = k_res["summary_file"]
-                        break
             
+            # Check results structure
+            if "viral_contig_info" in results:
+                for info in results["viral_contig_info"].values():
+                    if "kaiju_classification" in info:
+                        k_res = info["kaiju_classification"]
+                        if "summary_file" in k_res:
+                            kaiju_summary = k_res["summary_file"]
+                            break
+            elif "viral_classifications" in results: # Reference guided structure
+                k_res = results["viral_classifications"].get("kaiju_classifications", {})
+                if "summary_file" in k_res:
+                    kaiju_summary = k_res["summary_file"]
+            
+            # Fallback paths
             if not kaiju_summary:
-                # Fallback path
-                candidate = self.output_dir / "03_classifications" / "kaiju_contigs" / "kaiju_summary.tsv"
-                if candidate.exists():
-                    kaiju_summary = str(candidate)
+                candidates = [
+                    self.output_dir / "03_classifications" / "kaiju_results" / "kaiju_summary.tsv",
+                    self.output_dir / "03_classifications" / "kaiju_reference_guided" / "kaiju_summary.tsv"
+                ]
+                for candidate in candidates:
+                    if candidate.exists():
+                        kaiju_summary = str(candidate)
+                        break
             
             if kaiju_summary:
                 self.plotter.plot_taxonomy_sunburst(kaiju_summary)
             
-            # Try to find CheckV quality summary
-            # Usually in 04_quality_assessment/checkv_results/viral_contigs/quality_summary.tsv
+            # 3. Genome Quality
             quality_summary = None
             
-            # Check results structure first
+            # Check results structure
             if "validation_results" in results:
                 val_res = results["validation_results"]
                 if isinstance(val_res, dict) and "quality_summary" in val_res:
                      quality_summary = val_res["quality_summary"]
+            # Reference guided might store it differently or not in top level
             
+            # Fallback paths
             if not quality_summary:
-                # Fallback path
-                candidate = self.output_dir / "04_quality_assessment" / "checkv_results" / "viral_contigs" / "quality_summary.tsv"
-                if candidate.exists():
-                    quality_summary = str(candidate)
+                # CheckV output structure can be complex, check common locations
+                candidates = [
+                    self.output_dir / "04_quality_assessment" / "checkv_results" / "viral_contigs" / "quality_summary.tsv",
+                    # Reference guided might be under a different name or subdir
+                    self.output_dir / "04_quality_assessment" / "checkv_results" / "reference_matching_viral_contigs" / "quality_summary.tsv"
+                ]
+                # Also check recursive search if needed, but specific paths are safer
+                for candidate in candidates:
+                    if candidate.exists():
+                        quality_summary = str(candidate)
+                        break
             
             if quality_summary:
                 self.plotter.plot_genome_quality(quality_summary)
             
-            # Try to find Gene Prediction results
-            # Usually in 05_gene_predictions/protein_annotations.tsv
+            # 4. Gene Predictions
             annotations_file = None
             gene_summary_file = None
             
-            # Construct paths directly to avoid dictionary issues
+            # Paths are usually consistent in 05_gene_predictions
             candidate_ann = self.output_dir / "05_gene_predictions" / "protein_annotations.tsv"
             if candidate_ann.exists():
                 annotations_file = str(candidate_ann)
@@ -439,37 +478,32 @@ class ViralAssembler:
             if annotations_file:
                 self.plotter.plot_gene_predictions(annotations_file, gene_summary_file)
             
-            # Try to find coverage data for high-quality contigs
-            # Usually in 06_quantification/contigs/contig_depth.txt
+            # 5. Coverage Plots
             depth_file = None
             
-            # Check results structure first
+            # Check results structure
             if "quantification" in results:
                 quant_res = results["quantification"]
                 if isinstance(quant_res, dict) and "contig_depth" in quant_res:
                     depth_file = quant_res["contig_depth"]
             
-            # Fallback path
+            # Fallback paths
             if not depth_file:
-                candidate = self.output_dir / "06_quantification" / "contigs" / "contig_depth.txt"
-                if candidate.exists():
-                    depth_file = str(candidate)
+                candidates = [
+                    self.output_dir / "06_quantification" / "contigs" / "contig_depth.txt",
+                    self.output_dir / "06_quantification" / "reference_guided" / "contig_depth.txt"
+                ]
+                for candidate in candidates:
+                    if candidate.exists():
+                        depth_file = str(candidate)
+                        break
             
             if quality_summary and depth_file:
                 self.plotter.plot_high_quality_coverage(quality_summary, depth_file)
-            
-            click.echo("  Plots generated in 07_plots directory")
         else:
             logger.warning("No abundance file found, skipping plot generation")
             click.echo("  Skipping plots (no abundance data found)")
-        
-        # Clean up temporary files
-        self.cleanup_temp_files()
-        
-        logger.info("Efficient assembly pipeline completed successfully")
-        click.echo("\nPipeline completed successfully!")
-        return results
-    
+
     def assemble_and_identify(
         self,
         short_reads_1: Optional[str] = None,
