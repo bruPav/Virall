@@ -147,11 +147,11 @@ class ViralGenePredictor:
             kaiju_genes, additional_predictions, output_dir, viral_classifications
         )
         
-        # Annotate proteins
-        protein_annotations = self._annotate_proteins(combined_results, output_dir)
-        
         # VOG annotation for functional classification
         vog_annotations = self._run_vog_annotation(combined_results, output_dir, contigs_file)
+        
+        # Annotate proteins
+        protein_annotations = self._annotate_proteins(combined_results, output_dir, vog_annotations)
 
         # Additionally, write per-species protein FASTA files using Kaiju classifications
         # Build a simple contig_id -> { 'classification': species_name } map from provided Kaiju results
@@ -420,13 +420,19 @@ class ViralGenePredictor:
                         
                         gene_id = attributes.get('ID', f"{contig_id}_{start}_{end}")
                         
+                        # Extract additional attributes
+                        gc_content = float(attributes.get('gc_cont', 0.0))
+                        confidence = float(attributes.get('conf', 0.0))
+                        
                         genes.append({
                             'gene_id': gene_id,
                             'contig_id': contig_id,
                             'start': start,
                             'end': end,
                             'strand': strand,
-                            'attributes': attributes
+                            'attributes': attributes,
+                            'gc_content': gc_content,
+                            'confidence': confidence
                         })
         
         except Exception as e:
@@ -788,7 +794,8 @@ class ViralGenePredictor:
     def _annotate_proteins(
         self,
         combined_results: Dict[str, List[Dict]],
-        output_dir: Path
+        output_dir: Path,
+        vog_annotations: Dict[str, Dict] = None
     ) -> Dict[str, Dict]:
         """Annotate proteins using multiple databases."""
         logger.info("Annotating proteins")
@@ -808,12 +815,24 @@ class ViralGenePredictor:
             for gene in all_genes:
                 if 'protein_sequence' in gene:
                     # Placeholder for protein annotation
+                    # Get VOG annotation if available
+                    functional_prediction = 'Unknown'
+                    if vog_annotations and 'vog_hits' in vog_annotations:
+                        vog_hits = vog_annotations['vog_hits']
+                        # Try to find by gene ID
+                        gene_id = gene.get('id', gene.get('gene_id', 'unknown'))
+                        if gene_id in vog_hits:
+                            functional_prediction = vog_hits[gene_id].get('function', 'Unknown')
+                            # If function is still Unknown, check consensus
+                            if functional_prediction == 'Unknown':
+                                functional_prediction = vog_hits[gene_id].get('consensus_function', 'Unknown')
+                    
                     annotation = {
                         'gene_id': gene.get('id', gene.get('gene_id', 'unknown')),
                         'length': len(gene['protein_sequence']),
                         'molecular_weight': self._calculate_molecular_weight(gene['protein_sequence']),
                         'isoelectric_point': self._calculate_pi(gene['protein_sequence']),
-                        'functional_prediction': 'Unknown',
+                        'functional_prediction': functional_prediction,
                         'confidence': gene.get('confidence', 0)
                     }
                     annotations.append(annotation)
