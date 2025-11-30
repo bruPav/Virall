@@ -945,7 +945,7 @@ class ViralGenePredictor:
                 kaiju_genes = data.get('kaiju_genes', [])
                 for gene in kaiju_genes:
                     if 'protein_sequence' in gene and gene['protein_sequence']:
-                        gene_id = gene.get('id', f"{contig_id}_{protein_count}")
+                        gene_id = gene.get('id', gene.get('gene_id', f"{contig_id}_{protein_count}"))
                         f.write(f">{gene_id}\n{gene['protein_sequence']}\n")
                         protein_count += 1
                 
@@ -953,7 +953,7 @@ class ViralGenePredictor:
                 additional_genes = data.get('additional_genes', [])
                 for gene in additional_genes:
                     if 'protein_sequence' in gene and gene['protein_sequence']:
-                        gene_id = gene.get('id', f"{contig_id}_{protein_count}")
+                        gene_id = gene.get('id', gene.get('gene_id', f"{contig_id}_{protein_count}"))
                         f.write(f">{gene_id}\n{gene['protein_sequence']}\n")
                         protein_count += 1
         

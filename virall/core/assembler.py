@@ -424,6 +424,8 @@ class ViralAssembler:
             # Fallback paths
             if not kaiju_summary:
                 candidates = [
+                    self.output_dir / "03_classifications" / "kaiju_contigs" / "kaiju_summary.tsv",
+                    self.output_dir / "03_classifications" / "kaiju_scaffolds" / "kaiju_summary.tsv",
                     self.output_dir / "03_classifications" / "kaiju_results" / "kaiju_summary.tsv",
                     self.output_dir / "03_classifications" / "kaiju_reference_guided" / "kaiju_summary.tsv"
                 ]
@@ -476,7 +478,7 @@ class ViralAssembler:
                 gene_summary_file = str(candidate_sum)
             
             if annotations_file:
-                self.plotter.plot_gene_predictions(annotations_file, gene_summary_file)
+                self.plotter.plot_gene_predictions(annotations_file, gene_summary_file, kaiju_summary_file=kaiju_summary)
             
             # 5. Coverage Plots
             depth_file = None

@@ -366,13 +366,14 @@ class ViralPlotter:
             logger.error(f"Failed to generate quality plots: {e}")
             return generated_plots
 
-    def plot_gene_predictions(self, annotations_file: Union[str, Path], summary_file: Union[str, Path] = None) -> List[str]:
+    def plot_gene_predictions(self, annotations_file: Union[str, Path], summary_file: Union[str, Path] = None, kaiju_summary_file: Union[str, Path] = None) -> List[str]:
         """
         Generate plots from gene prediction results.
         
         Args:
             annotations_file: Path to protein_annotations.tsv
             summary_file: Path to gene_prediction_summary.tsv (optional)
+            kaiju_summary_file: Path to kaiju_summary.tsv (optional, for family coloring)
             
         Returns:
             List of paths to generated plot files
@@ -385,18 +386,71 @@ class ViralPlotter:
                 df_ann = pd.read_csv(annotations_file, sep='\t')
                 
                 if not df_ann.empty and 'molecular_weight' in df_ann.columns and 'isoelectric_point' in df_ann.columns:
-                    plt.figure(figsize=(10, 8))
+                    plt.figure(figsize=(12, 8))
+                    
+                    # Try to add family info if available
+                    hue_col = None
+                    palette = None
+                    
+                    if kaiju_summary_file and os.path.exists(kaiju_summary_file):
+                        try:
+                            df_kaiju = pd.read_csv(kaiju_summary_file, sep='\t')
+                            if 'contig_id' in df_kaiju.columns and 'lineage' in df_kaiju.columns:
+                                # Extract family from lineage (5th element, index 4)
+                                # Lineage: root; kingdom; phylum; class; order; family; ...
+                                # But sometimes it's just a list of names.
+                                # Let's try to parse it robustly.
+                                
+                                contig_to_family = {}
+                                for _, row in df_kaiju.iterrows():
+                                    lineage = str(row['lineage'])
+                                    parts = [p.strip() for p in lineage.split(';') if p.strip()]
+                                    
+                                    # Heuristic: Family is usually the one ending in 'viridae'
+                                    # Or we can just take a specific index if we trust the format.
+                                    # The user mentioned "dots colored by viral Family".
+                                    
+                                    family = "Unknown"
+                                    for part in parts:
+                                        if part.endswith('viridae'):
+                                            family = part
+                                            break
+                                    
+                                    # If no viridae found, maybe use the last classified level if it's not NA?
+                                    # But let's stick to explicit families for now to avoid clutter.
+                                    
+                                    contig_to_family[row['contig_id']] = family
+                                
+                                # Map to annotations
+                                # Annotations have 'contig_id' usually? 
+                                # Let's check the file content I viewed earlier.
+                                # Yes: contig_id	gene_id	length ...
+                                
+                                df_ann['Family'] = df_ann['contig_id'].map(contig_to_family).fillna('Unknown')
+                                
+                                # Filter out Unknowns for the legend if too many?
+                                # Or just plot them.
+                                hue_col = 'Family'
+                                # Use a categorical palette
+                                palette = 'tab20'
+                                
+                        except Exception as e:
+                            logger.warning(f"Failed to process Kaiju summary for plotting: {e}")
                     
                     # Scatter plot
                     sns.scatterplot(
                         data=df_ann,
                         x='isoelectric_point',
                         y='molecular_weight',
-                        alpha=0.6,
+                        hue=hue_col,
+                        palette=palette,
+                        alpha=0.7,
                         edgecolor=None,
-                        s=30,
-                        color='#2c3e50'
+                        s=40
                     )
+                    
+                    if hue_col:
+                        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
                     
                     plt.title("Viral Proteome Properties: MW vs. pI", fontsize=16)
                     plt.xlabel("Isoelectric Point (pI)", fontsize=12)
