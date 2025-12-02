@@ -19,6 +19,8 @@ From: ubuntu:22.04
     export LD_LIBRARY_PATH=/opt/conda/envs/virall/lib:$LD_LIBRARY_PATH
     export LC_ALL=C
     export LANG=C.UTF-8
+    # Set default database directory for the container
+    export VIRALL_DATABASE_DIR=/opt/virall/databases
 
 %post
     # Set environment variables
@@ -512,7 +514,7 @@ From: ubuntu:22.04
 
 %labels
     Author Virall Team
-    Version 0.1.1
+    Version 0.2.0
     Description Virall - A comprehensive tool for viral genome analysis
     Maintainer bruno.pavletic@gmail.com, britaniadiazf@gmail.com
 

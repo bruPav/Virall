@@ -66,12 +66,29 @@ class AssemblyValidator:
     
     def _setup_checkv_database(self) -> Optional[str]:
         """Setup CheckV database for viral contig quality assessment."""
+        # Check for VIRALL_DATABASE_DIR environment variable first
+        env_db_dir = os.environ.get("VIRALL_DATABASE_DIR")
+        if env_db_dir:
+            env_checkv_path = Path(env_db_dir) / "checkv_db"
+            # If the directory exists, try to use it
+            if env_checkv_path.exists():
+                logger.debug(f"Using CheckV database from environment variable: {env_checkv_path}")
+                # Still need to find the actual database files inside
+                actual_path = self._find_checkv_database_path(env_checkv_path)
+                if actual_path:
+                    return actual_path
+                # If files not found but directory exists, we might need to download it there
+                # But for now, let's add it to the search paths
+
         # ALWAYS check container bind mount paths first, even if config has a path
         # This ensures bind mounts work correctly in Singularity containers
         container_paths = [
             Path("/opt/virall/databases/checkv_db"),
             Path("/opt/virall/src/databases/checkv_db")
         ]
+        if env_db_dir:
+            container_paths.insert(0, Path(env_db_dir) / "checkv_db")
+
         checkv_db_path = None
         
         for container_path in container_paths:

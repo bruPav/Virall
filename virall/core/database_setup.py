@@ -64,6 +64,17 @@ class DatabaseSetup:
         if base_dir:
             return Path(base_dir)
         
+        # Check for VIRALL_DATABASE_DIR environment variable first
+        env_db_dir = os.environ.get("VIRALL_DATABASE_DIR")
+        if env_db_dir:
+            env_path = Path(env_db_dir)
+            # If it exists and is writable, use it
+            if env_path.exists() and os.access(env_path, os.W_OK):
+                return env_path
+            # If it doesn't exist but parent is writable, use it (we'll create it)
+            if not env_path.exists() and env_path.parent.exists() and os.access(env_path.parent, os.W_OK):
+                return env_path
+        
         # Check for common bind mount locations first (for containers)
         for bind_path in [Path("/opt/virall/databases"), Path("/opt/virall/src/databases")]:
             if bind_path.exists() and os.access(bind_path, os.W_OK):

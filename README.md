@@ -18,7 +18,8 @@ A comprehensive tool for viral genome analysis including assembly, classificatio
 - **Gene prediction**: Automated gene finding with Prodigal
 - **Functional annotation**: VOG database integration for viral protein annotation
 - **Quality assessment**: CheckV integration for viral genome completeness
- - **Single-cell RNA-seq (pooled)**: Supports pooled scRNA-seq by assembling cDNA (R2) with SPAdes rna-viral mode
+- **Interactive Plotting**: Dynamic visualizations for viral genome analysis
+- **Single-cell RNA-seq (pooled)**: Supports pooled scRNA-seq by assembling cDNA (R2) with SPAdes rna-viral mode
 
 ## Workflow
 
@@ -317,6 +318,11 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - This software was developed by Dr. Aurora Britania Diaz Fernandez and Bruno Pavletic, Msc together in collaboration with Nidia Trovao, PhD and Prof. Windy McNerny
 
 ## Changelog
+
+### v0.2.0
+- Added interactive plotting capabilities (Sunburst charts, etc.)
+- Improved database path resolution for containerized environments
+- Enhanced documentation
 
 ### v0.1.1
 - Support for short, long and Single Cell Seq reads

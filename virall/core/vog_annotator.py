@@ -115,6 +115,13 @@ class VOGAnnotator:
     
     def _find_vog_database(self) -> Path:
         """Find VOG database in common locations."""
+        # Check for VIRALL_DATABASE_DIR environment variable first
+        env_db_dir = os.environ.get("VIRALL_DATABASE_DIR")
+        if env_db_dir:
+            env_vog_path = Path(env_db_dir) / "vog_db"
+            if env_vog_path.exists() and (env_vog_path / "vog.hmm").exists():
+                return env_vog_path
+
         # Check common container database locations first (where virall setup-db creates them)
         container_paths = [
             Path("/opt/virall/databases/vog_db"),

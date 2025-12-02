@@ -173,6 +173,42 @@ class ViralAssembler:
     
     def _get_default_config(self) -> Dict:
         """Get default configuration parameters."""
+        # Check for VIRALL_DATABASE_DIR environment variable first
+        env_db_dir = os.environ.get("VIRALL_DATABASE_DIR")
+        if env_db_dir:
+            # If env var is set, use it directly for databases and return the full config
+            return {
+                "min_contig_length": 1000,
+                "min_coverage": 5,
+                "viral_confidence_threshold": 0.8,
+                "assembly_strategy": "hybrid",  # hybrid, short_only, long_only
+                "polishing_iterations": 3,
+                "quality_threshold": 20,
+                "trim_adapters": True,
+                "error_correction": True,
+                "databases": {
+                    "vog_db_path": str(Path(env_db_dir) / "vog_db"),
+                    "kaiju_db_path": str(Path(env_db_dir) / "kaiju_db"),
+                    "checkv_db_path": str(Path(env_db_dir) / "checkv_db")
+                },
+                "viral_identification": {
+                    "viral_filtering": True,
+                    "confidence_threshold": 0.8,
+                    "use_ml_model": True,
+                    "use_database_search": True,
+                    "min_viral_length": 1000
+                },
+                # Deprecated Flye parameters (kept for backward compat; unused)
+                "genome_size": "1m",
+                "flye_iterations": 1,
+                "flye_min_overlap": 1000,
+                "flye_read_mode": "raw",
+                "flye_read_error": 0.1,
+                # Long-read subsampling parameters
+                "max_long_reads": 50000,  # Subsample if more than this many reads
+                "long_read_subsample_size": 20000  # Subsample to this many reads
+            }
+
         # Get software directory for database paths - look in installation directory
         # Try to find the actual installation directory, not site-packages
         software_dir = self._find_installation_directory()

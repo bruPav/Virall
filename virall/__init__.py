@@ -3,7 +3,7 @@ Viral Genome Assembler - A comprehensive tool for viral genome assembly
 from short and long sequencing reads with high accuracy.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 __author__ = "Viral Assembly Team"
 __email__ = "bruno.pavletic@gmail.com"
 
