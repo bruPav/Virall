@@ -1033,6 +1033,15 @@ class ViralIdentifier:
             df = df.sort_values('relative_abundance', ascending=False)
             df.to_csv(summary_file, sep='\t', index=False)
             logger.info(f"Wrote combined abundance summary to {summary_file}")
+            
+            # Also write standard contig_abundance.tsv for plotting compatibility
+            # (without the extra combined-specific columns)
+            standard_file = output_dir / "contig_abundance.tsv"
+            standard_df = df[['contig_id', 'species', 'contig_length', 'mean_coverage', 
+                             'max_coverage', 'coverage_breadth', 'total_coverage', 
+                             'relative_abundance', 'mapped_positions']].copy()
+            standard_df.to_csv(standard_file, sep='\t', index=False)
+            logger.info(f"Wrote standard abundance summary to {standard_file}")
         else:
             logger.warning("No combined abundance data to write.")
 

@@ -430,7 +430,9 @@ class ViralAssembler:
         if not abundance_file:
             candidates = [
                 self.output_dir / "06_quantification" / "contigs" / "contig_abundance.tsv",
-                self.output_dir / "06_quantification" / "reference_guided" / "contig_abundance.tsv"
+                self.output_dir / "06_quantification" / "reference_guided" / "contig_abundance.tsv",
+                self.output_dir / "06_quantification" / "contigs" / "combined_contig_abundance.tsv",
+                self.output_dir / "06_quantification" / "reference_guided" / "combined_contig_abundance.tsv"
             ]
             for candidate in candidates:
                 if candidate.exists():
