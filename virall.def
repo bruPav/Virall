@@ -57,8 +57,8 @@ From: ubuntu:22.04
     /opt/conda/bin/conda init bash
     /opt/conda/bin/conda config --set auto_update_conda false
     /opt/conda/bin/conda config --set channel_priority flexible
-    /opt/conda/bin/conda config --set remote_read_timeout_secs 120
-    /opt/conda/bin/conda config --set remote_connect_timeout_secs 30
+    /opt/conda/bin/conda config --set remote_read_timeout_secs 300
+    /opt/conda/bin/conda config --set remote_connect_timeout_secs 60
     /opt/conda/bin/conda config --set remote_max_retries 10
 
     # Accept conda Terms of Service
