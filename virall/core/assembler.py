@@ -242,7 +242,8 @@ class ViralAssembler:
             "flye_read_error": 0.1,
             # Long-read subsampling parameters
             "max_long_reads": 50000,  # Subsample if more than this many reads
-            "long_read_subsample_size": 20000  # Subsample to this many reads
+            "long_read_subsample_size": 20000,  # Subsample to this many reads
+            "phred_offset": None  # PHRED quality offset (33 or 64)
         }
     
     def assemble(
@@ -874,6 +875,11 @@ class ViralAssembler:
         if "single" in reads:
             cmd.extend(["-s", reads["single"]])
         
+        # Add PHRED offset if specified
+        if self.config.get("phred_offset"):
+            cmd.extend(["--phred-offset", str(self.config["phred_offset"])])
+            logger.info(f"Using manual PHRED offset: {self.config['phred_offset']}")
+        
         # Run SPAdes
         # Run SPAdes
         log_file = output_dir / "spades_hybrid.log"
@@ -955,6 +961,11 @@ class ViralAssembler:
             cmd.extend(["-1", reads["short_1"], "-2", reads["short_2"]])
         if "single" in reads:
             cmd.extend(["-s", reads["single"]])
+            
+        # Add PHRED offset if specified
+        if self.config.get("phred_offset"):
+            cmd.extend(["--phred-offset", str(self.config["phred_offset"])])
+            logger.info(f"Using manual PHRED offset: {self.config['phred_offset']}")
         
         # Debug: Log the command being run
         logger.info(f"Running SPAdes command: {' '.join(cmd)}")

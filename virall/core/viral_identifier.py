@@ -949,6 +949,7 @@ class ViralIdentifier:
                 if contig_id in results:
                     metrics = results[contig_id]
                     contig_metrics[read_type] = {
+                        'contig_length': metrics.get('contig_length', 0),
                         'mean_coverage': metrics.get('mean_coverage', 0),
                         'max_coverage': metrics.get('max_coverage', 0),
                         'coverage_breadth': metrics.get('coverage_breadth', 0),

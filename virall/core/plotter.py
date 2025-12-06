@@ -116,17 +116,44 @@ class ViralPlotter:
                 logger.warning("Abundance file missing 'contig_length' column")
                 return None
                 
+            # Filter valid lengths (positive values only for log scale)
+            valid_df = df[df['contig_length'] > 0].copy()
+            
+            if valid_df.empty:
+                logger.warning("No valid contig lengths found (all <= 0)")
+                return None
+                
             # Create plot
             plt.figure(figsize=(10, 6))
-            sns.histplot(data=df, x="contig_length", log_scale=True, kde=True, color="teal")
+            
+            # Check if we have enough data for KDE and log scale
+            use_log = True
+            use_kde = True
+            
+            if len(valid_df) < 5:
+                use_kde = False
+            
+            # If range is small, log scale might not be useful or could cause issues
+            if valid_df['contig_length'].max() / valid_df['contig_length'].min() < 10:
+                use_log = False
+            
+            try:
+                sns.histplot(data=valid_df, x="contig_length", log_scale=use_log, kde=use_kde, color="teal")
+            except Exception as e:
+                logger.warning(f"Seaborn plot failed with log_scale={use_log}, kde={use_kde}: {e}. Retrying with simple hist.")
+                # Fallback to simple histogram
+                plt.clf()
+                plt.hist(valid_df['contig_length'], bins=30, color="teal", alpha=0.7)
+                if use_log:
+                    plt.xscale('log')
             
             plt.title("Distribution of Viral Contig Lengths", fontsize=16)
-            plt.xlabel("Contig Length (bp, log scale)", fontsize=12)
+            plt.xlabel(f"Contig Length (bp{' , log scale' if use_log else ''})", fontsize=12)
             plt.ylabel("Count", fontsize=12)
             
             # Add N50 line if possible
             # (Simple calculation for visualization purposes)
-            lengths = sorted(df['contig_length'].tolist(), reverse=True)
+            lengths = sorted(valid_df['contig_length'].tolist(), reverse=True)
             total_len = sum(lengths)
             cum_len = 0
             n50 = 0
@@ -136,8 +163,9 @@ class ViralPlotter:
                     n50 = l
                     break
             
-            plt.axvline(n50, color='red', linestyle='--', label=f'N50: {n50} bp')
-            plt.legend()
+            if n50 > 0:
+                plt.axvline(n50, color='red', linestyle='--', label=f'N50: {n50} bp')
+                plt.legend()
             
             # Save plot
             output_file = self.plots_dir / "contig_length_distribution.png"

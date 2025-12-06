@@ -106,6 +106,7 @@ def main(ctx: click.Context, verbose: bool, log_file: Optional[str]):
 @click.option('--rna-mode', is_flag=True, help='Enable RNA-specific assembly parameters')
 @click.option('--mem-efficient', '-m', is_flag=True, help='Enable memory-efficient mode with read subsampling for large datasets')
 @click.option('--single-cell', is_flag=True, help='Enable single-cell sequencing mode')
+@click.option('--phred-offset', type=click.Choice(['33', '64']), help='PHRED quality offset (33 or 64)')
 def assemble(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -122,7 +123,8 @@ def assemble(
     assembly_strategy: str,
     rna_mode: bool,
     mem_efficient: bool,
-    single_cell: bool
+    single_cell: bool,
+    phred_offset: Optional[str]
 ):
     """Assemble reads and identify viral contigs.
     
@@ -165,7 +167,10 @@ def assemble(
         "min_contig_length": min_contig_length,
         "viral_confidence_threshold": viral_confidence,
         "assembly_strategy": assembly_strategy,
-        "rna_mode": rna_mode
+        "viral_confidence_threshold": viral_confidence,
+        "assembly_strategy": assembly_strategy,
+        "rna_mode": rna_mode,
+        "phred_offset": phred_offset
     }
     
     # Load config file if provided
@@ -509,6 +514,7 @@ def assemble(
 @click.option('--rna-mode', is_flag=True, help='Enable RNA-specific assembly parameters')
 @click.option('--mem-efficient', '-m', is_flag=True, help='Enable memory-efficient mode with read subsampling for large datasets')
 @click.option('--single-cell', is_flag=True, help='Enable single-cell sequencing mode')
+@click.option('--phred-offset', type=click.Choice(['33', '64']), help='PHRED quality offset (33 or 64)')
 def analyse(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -525,7 +531,8 @@ def analyse(
     assembly_strategy: str,
     rna_mode: bool,
     mem_efficient: bool,
-    single_cell: bool
+    single_cell: bool,
+    phred_offset: Optional[str]
 ):
     """Run complete viral genome analysis pipeline from sequencing reads.
     
@@ -567,7 +574,8 @@ def analyse(
         "min_contig_length": min_contig_length,
         "viral_confidence_threshold": viral_confidence,
         "assembly_strategy": assembly_strategy,
-        "rna_mode": rna_mode
+        "rna_mode": rna_mode,
+        "phred_offset": phred_offset
     }
     
     if config and os.path.exists(config):
