@@ -69,18 +69,45 @@ echo "Activating conda environment..."
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate virall
 
-# Install Python dependencies with conda (avoids GCC compilation issues)
-echo "Installing Python dependencies with conda..."
-conda install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0
-
-# Ensure mamba is available before using it
-echo "Checking for mamba (faster dependency solver)..."
+# Install mamba first (faster dependency solver)
+echo "Installing mamba (faster dependency solver)..."
 if ! command -v mamba &> /dev/null; then
     echo "Mamba not found. Installing mamba..."
     conda install -c conda-forge mamba -y
     echo "Mamba installed successfully"
 else
     echo "Mamba found"
+fi
+
+# Install Python dependencies with mamba (faster and more reliable)
+echo "Installing Python dependencies with mamba..."
+if mamba install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0 2>&1 | tee /tmp/mamba_install.log; then
+    echo "Python dependencies installed successfully with mamba"
+    # Clean cache after installation to free up space
+    echo "Cleaning package cache to free up disk space..."
+    mamba clean -a -y 2>/dev/null || true
+    conda clean -a -y 2>/dev/null || true
+else
+    MAMBA_ERROR=$(cat /tmp/mamba_install.log 2>/dev/null | grep -i "critical\|error" | head -1 || echo "")
+    if echo "$MAMBA_ERROR" | grep -q "json\|cache\|corrupted"; then
+        echo "Warning: Mamba cache issues detected. Cleaning cache and trying with conda instead..."
+        mamba clean -a -y 2>/dev/null || true
+        conda clean -a -y 2>/dev/null || true
+        echo "Installing Python dependencies with conda (fallback)..."
+        conda install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0 || {
+            echo "Warning: Failed to install all Python packages together, trying in smaller batches..."
+            # Install in smaller batches with conda
+            conda install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 || true
+            conda install -c conda-forge -y plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 || true
+            conda install -c conda-forge -y click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0 || true
+        }
+    else
+        echo "Warning: Failed to install all Python packages together, trying in smaller batches with mamba..."
+        # Install in smaller batches
+        mamba install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 || true
+        mamba install -c conda-forge -y plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 || true
+        mamba install -c conda-forge -y click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0 || true
+    fi
 fi
 
 # Helper function to check if a command is available
@@ -113,6 +140,7 @@ TOOLS_TO_INSTALL=(
     ["hmmer"]="hmmer=3.4"
     ["prodigal"]="prodigal=2.6.3"
     ["kaiju"]="kaiju=1.10.1"
+    ["gsl"]="gsl=2.6"
 )
 
 # Check which tools are already available
@@ -190,6 +218,9 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
                 mamba install -c bioconda -c conda-forge "$tool" -y || true
             done
         }
+        # Clean cache after each major tool group to prevent disk space issues
+        echo "Cleaning package cache..."
+        mamba clean -a -y 2>/dev/null || true
     fi
     
     # Install assembly tools (spades, flye)
@@ -250,6 +281,9 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
                 mamba install -c bioconda -c conda-forge "$tool" -y || true
             done
         }
+        # Clean cache after each major tool group to prevent disk space issues
+        echo "Cleaning package cache..."
+        mamba clean -a -y 2>/dev/null || true
     fi
     
     # Install other tools (checkv, bcftools, pilon, hmmer, prodigal)
@@ -259,12 +293,36 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
         if [ -d "$CONDA_PREFIX/lib" ]; then
             export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
         fi
-        mamba install -c bioconda "${OTHER_TOOLS[@]}" -y || {
-            echo "Warning: Failed to install other tools together, trying individually..."
+        
+        # Install bcftools with explicit GSL dependency to ensure proper linking
+        if [[ " ${OTHER_TOOLS[@]} " =~ " bcftools=1.22 " ]]; then
+            echo "Installing bcftools with GSL dependency..."
+            mamba install -c bioconda -c conda-forge bcftools=1.22 gsl -y || {
+                echo "Warning: Failed to install bcftools with GSL, trying bcftools alone..."
+                mamba install -c bioconda bcftools=1.22 -y || true
+            }
+            # Remove bcftools and gsl from OTHER_TOOLS to avoid double installation
+            NEW_OTHER_TOOLS=()
             for tool in "${OTHER_TOOLS[@]}"; do
-                mamba install -c bioconda "$tool" -y || true
+                if [[ "$tool" != "bcftools=1.22" && "$tool" != "gsl=2.6" ]]; then
+                    NEW_OTHER_TOOLS+=("$tool")
+                fi
             done
-        }
+            OTHER_TOOLS=("${NEW_OTHER_TOOLS[@]}")
+        fi
+        
+        # Install remaining other tools
+        if [ ${#OTHER_TOOLS[@]} -gt 0 ]; then
+            mamba install -c bioconda "${OTHER_TOOLS[@]}" -y || {
+                echo "Warning: Failed to install other tools together, trying individually..."
+                for tool in "${OTHER_TOOLS[@]}"; do
+                    mamba install -c bioconda "$tool" -y || true
+                done
+            }
+        fi
+        # Clean cache after each major tool group to prevent disk space issues
+        echo "Cleaning package cache..."
+        mamba clean -a -y 2>/dev/null || true
     fi
     
     # Install kaiju separately (it's handled later in the script, but check if it's missing)
@@ -334,6 +392,43 @@ for tool in bwa minimap2; do
         echo "  Warning: $tool not found"
     fi
 done
+
+# Verify bcftools - critical for reference-guided assembly
+if check_command bcftools; then
+    # Ensure LD_LIBRARY_PATH includes conda lib directory
+    if [ -d "$CONDA_PREFIX/lib" ]; then
+        export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+    fi
+    
+    if bcftools --version >/dev/null 2>&1; then
+        echo "  bcftools is working correctly"
+        bcftools --version 2>&1 | head -1
+    else
+        echo "  bcftools found but not working correctly"
+        ERROR_OUTPUT=$(bcftools --version 2>&1 || true)
+        if echo "$ERROR_OUTPUT" | grep -q "libgsl\|cannot open shared object"; then
+            echo "    Detected GSL library issue. Attempting to fix..."
+            # Try installing gsl explicitly
+            mamba install -c conda-forge gsl -y 2>/dev/null || true
+            # Test again
+            if bcftools --version >/dev/null 2>&1; then
+                echo "  bcftools fixed successfully"
+            else
+                echo "  Warning: bcftools still has library issues"
+                echo "    You may need to install system GSL library:"
+                echo "    Ubuntu/Debian: sudo apt-get install libgsl25"
+                echo "    Or ensure LD_LIBRARY_PATH includes: $CONDA_PREFIX/lib"
+                VERIFICATION_FAILED=true
+            fi
+        else
+            echo "  Warning: bcftools has unknown issues"
+            VERIFICATION_FAILED=true
+        fi
+    fi
+else
+    echo "  Warning: bcftools not found - reference-guided assembly will not work"
+    VERIFICATION_FAILED=true
+fi
 
 if [ "$VERIFICATION_FAILED" = true ]; then
     echo ""
@@ -653,6 +748,22 @@ done
 
 echo "Cleaning up completed - keeping essential files and your samples/ folder"
 
+# Create activation script to set LD_LIBRARY_PATH for conda libraries
+echo "Setting up conda environment activation script..."
+ACTIVATE_SCRIPT="$CONDA_PREFIX/etc/conda/activate.d/virall_env.sh"
+mkdir -p "$CONDA_PREFIX/etc/conda/activate.d"
+cat > "$ACTIVATE_SCRIPT" << 'EOF'
+#!/bin/bash
+# Virall conda environment activation script
+# This ensures LD_LIBRARY_PATH includes conda libraries (needed for bcftools, HMMER, etc.)
+
+if [ -n "$CONDA_PREFIX" ] && [ -d "$CONDA_PREFIX/lib" ]; then
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+fi
+EOF
+chmod +x "$ACTIVATE_SCRIPT"
+echo "  Created activation script: $ACTIVATE_SCRIPT"
+
 # Test installation
 echo "Testing installation..."
 python -c "from virall import ViralAssembler; print('Installation successful!')"
@@ -702,9 +813,13 @@ echo "                                                                          
 echo ""
 echo "Next steps:"
 echo "1. Activate the environment: conda activate virall"
+echo "   (LD_LIBRARY_PATH will be set automatically for bcftools and other tools)"
 echo "2. Prepare your sequencing reads (fastq)"
 echo "3. Run virall: virall --help"
 echo "4. Happy virus hunt!"
+echo ""
+echo "Note: If you encounter bcftools library errors, ensure the conda environment"
+echo "      is activated (conda activate virall) which sets LD_LIBRARY_PATH automatically."
 echo ""
 echo "Databases installed:"
 echo "  - VOG database: $VOG_DB_DIR (for viral gene annotation)"

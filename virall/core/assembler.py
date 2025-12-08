@@ -282,6 +282,7 @@ class ViralAssembler:
                 return result
             
             # Generate plots for reference-guided assembly
+            click.echo("\nStep 6/6: Generating plots...")
             self._generate_plots(result)
             
             return result
@@ -484,7 +485,10 @@ class ViralAssembler:
                 val_res = results["validation_results"]
                 if isinstance(val_res, dict) and "quality_summary" in val_res:
                      quality_summary = val_res["quality_summary"]
-            # Reference guided might store it differently or not in top level
+            
+            # Check for reference-guided structure
+            if not quality_summary and "quality_summary_file" in results:
+                quality_summary = results["quality_summary_file"]
             
             # Fallback paths
             if not quality_summary:
@@ -492,7 +496,8 @@ class ViralAssembler:
                 candidates = [
                     self.output_dir / "04_quality_assessment" / "checkv_results" / "viral_contigs" / "quality_summary.tsv",
                     # Reference guided might be under a different name or subdir
-                    self.output_dir / "04_quality_assessment" / "checkv_results" / "reference_matching_viral_contigs" / "quality_summary.tsv"
+                    self.output_dir / "04_quality_assessment" / "checkv_results" / "reference_matching_viral_contigs" / "quality_summary.tsv",
+                    self.output_dir / "04_quality_assessment" / "reference_checkv" / "quality_summary.tsv"
                 ]
                 # Also check recursive search if needed, but specific paths are safer
                 for candidate in candidates:
@@ -540,7 +545,10 @@ class ViralAssembler:
                         break
             
             if quality_summary and depth_file:
-                self.plotter.plot_high_quality_coverage(quality_summary, depth_file)
+                # Check if we are in reference-guided mode to plot all contigs
+                is_ref_guided = "viral_classifications" in results
+                max_p = 50 if is_ref_guided else 10
+                self.plotter.plot_high_quality_coverage(quality_summary, depth_file, max_plots=max_p, plot_all=is_ref_guided)
         else:
             logger.warning("No abundance file found, skipping plot generation")
             click.echo("  Skipping plots (no abundance data found)")
@@ -1523,7 +1531,7 @@ class ViralAssembler:
         
         # Step 1: Preprocess reads
         logger.info("Step 1: Preprocessing reads for reference-guided assembly")
-        click.echo("\nStep 1/5: Preprocessing reads...")
+        click.echo("\nStep 1/6: Preprocessing reads...")
         preprocessed_reads = self._preprocess_reads(
             short_reads_1, short_reads_2, long_reads, single_reads
         )
@@ -1536,7 +1544,7 @@ class ViralAssembler:
         if has_short_reads and has_long_reads:
             # Both short and long reads - build long-read consensus against reference and polish with short reads
             logger.info("Step 2: Running reference-guided long-read assembly + short-read polishing (minimap2 + bcftools + pilon)")
-            click.echo("\nStep 2/5: Running reference-guided assembly (long reads + short-read polishing)...")
+            click.echo("\nStep 2/6: Running reference-guided assembly (long reads + short-read polishing)...")
             guided_assembly_results = self._run_reference_guided_long_then_polish(
                 preprocessed_reads, reference
             )
@@ -1544,7 +1552,7 @@ class ViralAssembler:
         elif has_short_reads and not has_long_reads:
             # Only short reads - use SPAdes reference-guided assembly
             logger.info("Step 2: Running reference-guided assembly with SPAdes (short reads only)")
-            click.echo("\nStep 2/5: Running reference-guided assembly with SPAdes...")
+            click.echo("\nStep 2/6: Running reference-guided assembly with SPAdes...")
             guided_assembly_results = self._run_reference_guided_spades(
                 preprocessed_reads, reference
             )
@@ -1552,7 +1560,7 @@ class ViralAssembler:
         elif has_long_reads and not has_short_reads:
             # Only long reads - build consensus against reference (no short-read polishing)
             logger.info("Step 2: Running reference-guided long-read consensus (minimap2 + bcftools)")
-            click.echo("\nStep 2/5: Running reference-guided consensus (long reads only)...")
+            click.echo("\nStep 2/6: Running reference-guided consensus (long reads only)...")
             guided_assembly_results = self._run_reference_guided_long_only_consensus(
                 preprocessed_reads, reference
             )
@@ -1560,6 +1568,25 @@ class ViralAssembler:
         else:
             logger.warning("No suitable reads found for reference-guided assembly")
             guided_assembly_results = None
+        
+        # Check if this is a dependency error vs actual reference detection failure
+        if isinstance(guided_assembly_results, dict) and guided_assembly_results.get("error") == "dependency_error":
+            error_details = guided_assembly_results.get("details", "")
+            logger.error(f"Reference-guided assembly failed due to missing system dependency: {error_details}")
+            return {
+                "status": "failed",
+                "error": f"Reference-guided assembly failed due to missing system dependency (likely bcftools library issue): {error_details}",
+                "message": "This is a system dependency issue, not a problem with the reference genome. Please install the missing library (e.g., libgsl25) and try again.",
+                "assembly_dir": str(self.output_dir),
+                "viral_genomes": [],
+                "total_viral_contigs": 0,
+                "statistics": {
+                    "total_contigs": 0,
+                    "total_length": 0,
+                    "average_contig_length": 0
+                },
+                "reference_guided_failed": True
+            }
         
         if not guided_assembly_results:
             logger.warning("Reference-guided assembly failed - no reference genome detected")
@@ -1579,7 +1606,7 @@ class ViralAssembler:
         
         # Step 3: Evaluate reference-guided assembly
         logger.info("Step 3: Evaluating reference-guided assembly")
-        click.echo("\nStep 3/5: Evaluating reference-guided assembly...")
+        click.echo("\nStep 3/6: Evaluating reference-guided assembly...")
         evaluation_results = self._evaluate_reference_assembly(
             guided_assembly_results, reference
         )
@@ -1587,7 +1614,7 @@ class ViralAssembler:
         
         # Step 4: Run complete pipeline on filtered contigs
         logger.info("Step 4: Running complete pipeline on reference-matching contigs")
-        click.echo("\nStep 4/5: Running complete pipeline on reference-matching contigs...")
+        # Step messages 4/6 and 5/6 are handled inside the function
         pipeline_results = self._run_complete_pipeline_on_filtered_contigs(
             guided_assembly_results, preprocessed_reads
         )
@@ -1629,6 +1656,7 @@ class ViralAssembler:
             
             # Step 1: Viral classification with Kaiju
             logger.info("Running viral classification on filtered contigs")
+            click.echo("\nStep 4/6: Running viral classification and annotation...")
             classifications_dir = self.output_dir / "03_classifications"
             classifications_dir.mkdir(parents=True, exist_ok=True)
             kaiju_dir = classifications_dir / "kaiju_reference_guided"
@@ -1653,6 +1681,7 @@ class ViralAssembler:
             
             # Step 3: Quantification
             logger.info("Running quantification on filtered contigs")
+            click.echo("\nStep 5/6: Running quantification...")
             quantification_dir = self.output_dir / "06_quantification"
             quantification_dir.mkdir(parents=True, exist_ok=True)
             quant_dir = quantification_dir / "reference_guided"
@@ -2064,13 +2093,17 @@ class ViralAssembler:
             sort_cmd = ["samtools", "sort", "-o", str(aligned_bam)]
 
             logger.info(f"Running minimap2: {' '.join(minimap2_cmd)} | {' '.join(sort_cmd)}")
-            p1 = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE, text=False)
-            log_file_sort = output_dir / "samtools_sort.log"
-            p2 = self._run_command(sort_cmd, stdin=p1.stdout, log_file=log_file_sort)
-            p1.stdout.close()  # type: ignore
-            if p1.wait() != 0 or p2.returncode != 0:
-                logger.error(f"Alignment failed: {p2.stderr.decode('utf-8', 'ignore')}")
-                return None
+            
+            # Open log file for minimap2 stderr
+            log_file_minimap = output_dir / "minimap2.log"
+            with open(log_file_minimap, "w") as log_minimap:
+                p1 = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE, stderr=log_minimap, text=False)
+                log_file_sort = output_dir / "samtools_sort.log"
+                p2 = self._run_command(sort_cmd, stdin=p1.stdout, log_file=log_file_sort)
+                p1.stdout.close()  # type: ignore
+                if p1.wait() != 0 or p2.returncode != 0:
+                    logger.error(f"Alignment failed. Check logs at {log_file_minimap} and {log_file_sort}")
+                    return None
 
             # Index BAM
             # Index BAM
@@ -2085,16 +2118,26 @@ class ViralAssembler:
             mpileup_cmd = ["bcftools", "mpileup", "-Ou", "-f", str(reference), str(aligned_bam)]
             call_cmd = ["bcftools", "call", "-mv", "-Oz", "-o", str(vcf_gz)]
             logger.info(f"Calling variants: {' '.join(mpileup_cmd)} | {' '.join(call_cmd)}")
-            p3 = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE, text=False)
-            log_file_call = output_dir / "bcftools_call.log"
-            p4 = self._run_command(call_cmd, stdin=p3.stdout, log_file=log_file_call)
-            p3.stdout.close()  # type: ignore
-            if p3.wait() != 0 or p4.returncode != 0:
-                logger.error(f"bcftools call failed: {p4.stderr.decode('utf-8', 'ignore')}")
-                return None
+            
+            # Open log file for mpileup stderr
+            log_file_mpileup = output_dir / "bcftools_mpileup.log"
+            with open(log_file_mpileup, "w") as log_mpileup:
+                p3 = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE, stderr=log_mpileup, text=False)
+                log_file_call = output_dir / "bcftools_call.log"
+                p4 = self._run_command(call_cmd, stdin=p3.stdout, log_file=log_file_call)
+                p3.stdout.close()  # type: ignore
+                if p3.wait() != 0 or p4.returncode != 0:
+                    error_msg = p4.stderr.decode('utf-8', 'ignore') if p4.stderr else ""
+                    # Check for library dependency errors
+                    if "cannot open shared object file" in error_msg or "libgsl" in error_msg.lower():
+                        logger.error(f"bcftools failed due to missing library dependency: {error_msg}")
+                        return {"error": "dependency_error", "details": error_msg}
+                    logger.error(f"bcftools call failed. Check logs at {log_file_mpileup} and {log_file_call}")
+                    return None
 
             # Index VCF and build consensus
-            subprocess.run(["bcftools", "index", str(vcf_gz)], check=False)
+            log_file_bcf_index = output_dir / "bcftools_index.log"
+            self._run_command(["bcftools", "index", str(vcf_gz)], log_file=log_file_bcf_index)
             consensus_fa = output_dir / "consensus.fa"
             consensus_cmd = ["bcftools", "consensus", "-f", str(reference), str(vcf_gz)]
             logger.info(f"Building consensus: {' '.join(consensus_cmd)} > {consensus_fa}")
@@ -2102,7 +2145,12 @@ class ViralAssembler:
             with open(consensus_fa, "w") as fh, open(log_file_consensus, "w") as log:
                 result = subprocess.run(consensus_cmd, stdout=fh, stderr=log, text=True)
             if result.returncode != 0 or not consensus_fa.exists():
-                logger.error(f"bcftools consensus failed: {result.stderr}")
+                error_msg = result.stderr if result.stderr else ""
+                # Check for library dependency errors
+                if "cannot open shared object file" in error_msg or "libgsl" in error_msg.lower():
+                    logger.error(f"bcftools failed due to missing library dependency: {error_msg}")
+                    return {"error": "dependency_error", "details": error_msg}
+                logger.error(f"bcftools consensus failed: {error_msg}")
                 return None
 
             return {
@@ -2146,14 +2194,18 @@ class ViralAssembler:
 
             logger.info(f"Running minimap2 for long reads: {' '.join(minimap2_cmd)} | {' '.join(samtools_sort_cmd)}")
             # Pipe minimap2 -> samtools sort
-            minimap_proc = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE, text=False)
-            log_file_sort = output_dir / "samtools_sort_long.log"
-            sort_proc = self._run_command(samtools_sort_cmd, stdin=minimap_proc.stdout, log_file=log_file_sort)
-            minimap_proc.stdout.close()  # type: ignore
-            ret1 = minimap_proc.wait()
-            if ret1 != 0 or sort_proc.returncode != 0:
-                logger.error(f"Long-read alignment failed: {sort_proc.stderr.decode('utf-8', 'ignore')}")
-                return None
+            
+            # Open log file for minimap2 stderr
+            log_file_minimap = output_dir / "minimap2_long.log"
+            with open(log_file_minimap, "w") as log_minimap:
+                minimap_proc = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE, stderr=log_minimap, text=False)
+                log_file_sort = output_dir / "samtools_sort_long.log"
+                sort_proc = self._run_command(samtools_sort_cmd, stdin=minimap_proc.stdout, log_file=log_file_sort)
+                minimap_proc.stdout.close()  # type: ignore
+                ret1 = minimap_proc.wait()
+                if ret1 != 0 or sort_proc.returncode != 0:
+                    logger.error(f"Long-read alignment failed. Check logs at {log_file_minimap} and {log_file_sort}")
+                    return None
 
             # Index BAM
             # Index BAM
@@ -2171,27 +2223,42 @@ class ViralAssembler:
             mpileup_cmd = ["bcftools", "mpileup", "-Ou", "-f", str(reference), str(long_bam)]
             call_cmd = ["bcftools", "call", "-mv", "-Ob", "-o", str(variants_bcf)]
             logger.info(f"Calling variants: {' '.join(mpileup_cmd)} | {' '.join(call_cmd)}")
-            mpileup_proc = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE, text=False)
-            log_file_call = output_dir / "bcftools_call.log"
-            call_proc = self._run_command(call_cmd, stdin=mpileup_proc.stdout, log_file=log_file_call)
-            mpileup_proc.stdout.close()  # type: ignore
-            ret2 = mpileup_proc.wait()
-            if ret2 != 0 or call_proc.returncode != 0:
-                logger.error(f"bcftools call failed: {call_proc.stderr.decode('utf-8', 'ignore')}")
-                return None
+            
+            # Open log file for mpileup stderr
+            log_file_mpileup = output_dir / "bcftools_mpileup.log"
+            with open(log_file_mpileup, "w") as log_mpileup:
+                mpileup_proc = subprocess.Popen(mpileup_cmd, stdout=subprocess.PIPE, stderr=log_mpileup, text=False)
+                log_file_call = output_dir / "bcftools_call.log"
+                call_proc = self._run_command(call_cmd, stdin=mpileup_proc.stdout, log_file=log_file_call)
+                mpileup_proc.stdout.close()  # type: ignore
+                ret2 = mpileup_proc.wait()
+                if ret2 != 0 or call_proc.returncode != 0:
+                    error_msg = call_proc.stderr.decode('utf-8', 'ignore') if call_proc.stderr else ""
+                    # Check for library dependency errors
+                    if "cannot open shared object file" in error_msg or "libgsl" in error_msg.lower():
+                        logger.error(f"bcftools failed due to missing library dependency: {error_msg}")
+                        return {"error": "dependency_error", "details": error_msg}
+                    logger.error(f"bcftools call failed. Check logs at {log_file_mpileup} and {log_file_call}")
+                    return None
 
             norm_cmd = ["bcftools", "norm", "-f", str(reference), "-Ob", "-o", str(variants_norm_bcf), str(variants_bcf)]
             logger.info(f"Normalizing variants: {' '.join(norm_cmd)}")
             log_file_norm = output_dir / "bcftools_norm.log"
             result = self._run_command(norm_cmd, log_file=log_file_norm)
             if result.returncode != 0:
-                logger.warning(f"bcftools norm failed, proceeding with raw variants: {result.stderr}")
+                error_msg = result.stderr if result.stderr else ""
+                # Check for library dependency errors
+                if "cannot open shared object file" in error_msg or "libgsl" in error_msg.lower():
+                    logger.error(f"bcftools failed due to missing library dependency: {error_msg}")
+                    return {"error": "dependency_error", "details": error_msg}
+                logger.warning(f"bcftools norm failed, proceeding with raw variants: {error_msg}")
                 variants_for_consensus = variants_bcf
             else:
                 variants_for_consensus = variants_norm_bcf
 
             # Index BCF
-            subprocess.run(["bcftools", "index", str(variants_for_consensus)], check=False)
+            log_file_bcf_index = output_dir / "bcftools_index_variants.log"
+            self._run_command(["bcftools", "index", str(variants_for_consensus)], log_file=log_file_bcf_index)
 
             consensus_cmd = ["bcftools", "consensus", "-f", str(reference), str(variants_for_consensus)]
             logger.info(f"Building draft consensus: {' '.join(consensus_cmd)} > {draft_fa}")
@@ -2199,7 +2266,12 @@ class ViralAssembler:
             with open(draft_fa, "w") as dfh, open(log_file_consensus, "w") as log:
                 result = subprocess.run(consensus_cmd, stdout=dfh, stderr=log, text=True)
             if result.returncode != 0 or not draft_fa.exists():
-                logger.error(f"bcftools consensus failed: {result.stderr}")
+                error_msg = result.stderr if result.stderr else ""
+                # Check for library dependency errors
+                if "cannot open shared object file" in error_msg or "libgsl" in error_msg.lower():
+                    logger.error(f"bcftools failed due to missing library dependency: {error_msg}")
+                    return {"error": "dependency_error", "details": error_msg}
+                logger.error(f"bcftools consensus failed: {error_msg}")
                 return None
 
             # 2) Polish with short reads using Pilon
@@ -2208,7 +2280,8 @@ class ViralAssembler:
             single = reads.get("single")
 
             # Build short-read alignment
-            subprocess.run(["bwa", "index", str(draft_fa)], check=False)
+            log_file_bwa_index = output_dir / "bwa_index.log"
+            self._run_command(["bwa", "index", str(draft_fa)], log_file=log_file_bwa_index)
             short_bam = output_dir / "short_aligned.bam"
             if short_1 and short_2:
                 bwa_cmd = ["bwa", "mem", str(draft_fa), str(short_1), str(short_2)]
@@ -2219,15 +2292,20 @@ class ViralAssembler:
                 return None
 
             logger.info(f"Aligning short reads to draft: {' '.join(bwa_cmd)} | samtools sort -o {short_bam}")
-            bwa_proc = subprocess.Popen(bwa_cmd, stdout=subprocess.PIPE, text=False)
-            log_file_sort2 = output_dir / "samtools_sort_short.log"
-            sort2_proc = self._run_command(["samtools", "sort", "-o", str(short_bam)], stdin=bwa_proc.stdout, log_file=log_file_sort2)
-            bwa_proc.stdout.close()  # type: ignore
-            ret3 = bwa_proc.wait()
-            if ret3 != 0 or sort2_proc.returncode != 0:
-                logger.error(f"Short-read alignment failed: {sort2_proc.stderr.decode('utf-8', 'ignore')}")
-                return None
-            subprocess.run(["samtools", "index", str(short_bam)], check=False)
+            
+            # Open log file for bwa stderr
+            log_file_bwa = output_dir / "bwa_mem.log"
+            with open(log_file_bwa, "w") as log_bwa:
+                bwa_proc = subprocess.Popen(bwa_cmd, stdout=subprocess.PIPE, stderr=log_bwa, text=False)
+                log_file_sort2 = output_dir / "samtools_sort_short.log"
+                sort2_proc = self._run_command(["samtools", "sort", "-o", str(short_bam)], stdin=bwa_proc.stdout, log_file=log_file_sort2)
+                bwa_proc.stdout.close()  # type: ignore
+                ret3 = bwa_proc.wait()
+                if ret3 != 0 or sort2_proc.returncode != 0:
+                    logger.error(f"Short-read alignment failed. Check logs at {log_file_bwa} and {log_file_sort2}")
+                    return None
+            log_file_sam_index = output_dir / "samtools_index_short.log"
+            self._run_command(["samtools", "index", str(short_bam)], log_file=log_file_sam_index)
 
             polished_prefix = output_dir / "polished_assembly"
             pilon_cmd = [
@@ -2482,6 +2560,7 @@ class ViralAssembler:
             "reference_matching_contigs": reference_hits.get("matching_contigs", []),
             "num_reference_hits": reference_hits.get("num_hits", 0),
             "alignment_results": reference_hits.get("alignment_results", []),
+            "quality_summary_file": str(quality_assessment_dir / "reference_checkv" / "quality_summary.tsv"),
             "message": f"Reference genome successfully assembled and filtered - {len(reference_hits.get('matching_contigs', []))} contigs match reference" if success else "Reference genome not detected in sample"
         }
     

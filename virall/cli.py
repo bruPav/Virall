@@ -644,13 +644,26 @@ def analyse(
             click.echo("="*50)
             click.echo(f"Output directory: {results['assembly_dir']}")
             click.echo(f"Error: {results.get('error', 'Unknown error')}")
-            click.echo(f"Message: {results.get('message', 'No additional information')}")
-            click.echo("\nThis means no contigs similar to the reference genome were found.")
-            click.echo("This could indicate:")
-            click.echo("  - The reference genome is not present in the sample")
-            click.echo("  - The reference genome is too divergent from the sample")
-            click.echo("  - The assembly quality was insufficient")
-            click.echo("  - The filtering parameters were too strict")
+            message = results.get('message', 'No additional information')
+            click.echo(f"Message: {message}")
+            
+            # Check if this is a dependency error
+            if "dependency" in results.get('error', '').lower() or "libgsl" in results.get('error', '').lower():
+                click.echo("\nThis is a SYSTEM DEPENDENCY issue, not a problem with the reference genome.")
+                click.echo("The reference genome was successfully found and aligned, but bcftools failed")
+                click.echo("due to a missing system library.")
+                click.echo("\nTo fix this issue:")
+                click.echo("  - Install the missing library (e.g., libgsl25 on Ubuntu/Debian)")
+                click.echo("  - On Ubuntu/Debian: sudo apt-get install libgsl25")
+                click.echo("  - On CentOS/RHEL: sudo yum install gsl-devel")
+                click.echo("  - Or reinstall bcftools with all dependencies")
+            else:
+                click.echo("\nThis means no contigs similar to the reference genome were found.")
+                click.echo("This could indicate:")
+                click.echo("  - The reference genome is not present in the sample")
+                click.echo("  - The reference genome is too divergent from the sample")
+                click.echo("  - The assembly quality was insufficient")
+                click.echo("  - The filtering parameters were too strict")
             return
         
         # Print results summary for successful analysis
@@ -677,6 +690,7 @@ def analyse(
         click.echo(f"  04_quality_assessment/  - Quality metrics (CheckV)")
         click.echo(f"  05_gene_predictions/    - Gene prediction and annotation")
         click.echo(f"  06_quantification/      - Read mapping and abundance")
+        click.echo(f"  07_plots/               - Visualization plots")
         
         # Display Kaiju classification results
         viral_contig_info = results.get('viral_contig_info', {})

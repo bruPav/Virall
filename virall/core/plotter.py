@@ -545,14 +545,15 @@ class ViralPlotter:
                 
         return generated_plots
 
-    def plot_high_quality_coverage(self, quality_file: Union[str, Path], depth_file: Union[str, Path], max_plots: int = 10) -> List[str]:
+    def plot_high_quality_coverage(self, quality_file: Union[str, Path], depth_file: Union[str, Path], max_plots: int = 10, plot_all: bool = False) -> List[str]:
         """
-        Generate coverage plots for high-quality contigs.
+        Generate coverage plots for high-quality contigs (or all contigs if plot_all=True).
         
         Args:
             quality_file: Path to quality_summary.tsv
             depth_file: Path to contig_depth.txt
             max_plots: Maximum number of plots to generate (default: 10)
+            plot_all: If True, plot all contigs regardless of quality (default: False)
             
         Returns:
             List of paths to generated plot files
@@ -571,8 +572,12 @@ class ViralPlotter:
                 logger.warning("Quality summary empty or missing checkv_quality column")
                 return generated_plots
                 
-            # Filter for High-quality
-            hq_contigs = df_quality[df_quality['checkv_quality'] == 'High-quality']
+            # Filter for High-quality unless plot_all is True
+            if plot_all:
+                hq_contigs = df_quality
+                logger.info("Plotting coverage for all contigs (reference mode enabled)")
+            else:
+                hq_contigs = df_quality[df_quality['checkv_quality'] == 'High-quality']
             
             if hq_contigs.empty:
                 logger.info("No High-quality contigs found to plot coverage for")
