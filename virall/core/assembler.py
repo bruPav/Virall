@@ -82,7 +82,7 @@ class ViralAssembler:
                 self.config["viral_confidence_threshold"] = 0.7  # Lower threshold for RNA
         
         # Initialize components
-        self.preprocessor = Preprocessor(threads=threads)
+        self.preprocessor = Preprocessor(threads=threads, config=self.config)
         self.viral_identifier = ViralIdentifier(config=self.config, threads=threads, memory=memory)
         self.validator = AssemblyValidator(threads=threads, config=self.config)
         self.gene_predictor = ViralGenePredictor(
@@ -243,6 +243,9 @@ class ViralAssembler:
             # Long-read subsampling parameters
             "max_long_reads": 50000,  # Subsample if more than this many reads
             "long_read_subsample_size": 20000,  # Subsample to this many reads
+            # Long-read preprocessing parameters
+            "long_read_quality_threshold": 7,  # Minimum quality score for long reads
+            "long_read_min_length": 1000,  # Minimum read length after filtering (lower for shorter reads)
             "phred_offset": None  # PHRED quality offset (33 or 64)
         }
     
@@ -537,10 +540,14 @@ class ViralAssembler:
             if not depth_file:
                 candidates = [
                     self.output_dir / "06_quantification" / "contigs" / "contig_depth.txt",
-                    self.output_dir / "06_quantification" / "reference_guided" / "contig_depth.txt"
+                    self.output_dir / "06_quantification" / "reference_guided" / "contig_depth.txt",
+                    # Check subdirectories for reference-guided quantification
+                    # Prefer paired_reads over long_reads as it's more reliable for coverage
+                    self.output_dir / "06_quantification" / "reference_guided" / "paired_reads" / "contig_depth.txt",
+                    self.output_dir / "06_quantification" / "reference_guided" / "long_reads" / "contig_depth.txt"
                 ]
                 for candidate in candidates:
-                    if candidate.exists():
+                    if candidate.exists() and candidate.stat().st_size > 0:
                         depth_file = str(candidate)
                         break
             

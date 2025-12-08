@@ -1298,6 +1298,32 @@ class ViralIdentifier:
                 logger.error(f"minimap2 mapping failed. See log at {log_file_map}")
                 return {"status": "failed", "error": f"minimap2 mapping failed. See log at {log_file_map}"}
         
+        # Validate that we have mapped reads (minimap2 returns 0 even when all reads are unmapped)
+        mapped_count = 0
+        if sam_file.exists():
+            with open(sam_file, 'r') as f:
+                for line in f:
+                    if line.startswith('@'):
+                        continue
+                    parts = line.strip().split('\t')
+                    if len(parts) >= 11:
+                        flag = int(parts[1])
+                        # Check if read is mapped (not flag 4 = unmapped)
+                        if not (flag & 4):
+                            mapped_count += 1
+        
+        if mapped_count == 0:
+            logger.warning(f"minimap2 completed but no reads were mapped. Check if reads match the contigs.")
+            logger.warning(f"See mapping details in: {log_file_map}")
+            return {
+                "status": "failed",
+                "error": "No reads were mapped to contigs. This may indicate read quality issues or sequence divergence.",
+                "sam_file": str(sam_file),
+                "log_file": str(log_file_map)
+            }
+        
+        logger.info(f"Successfully mapped {mapped_count} reads to contigs")
+        
         # Process BAM file
         return self._process_mapping_results(sam_file, bam_file, contigs_file, output_dir, "minimap2", classification_data)
 

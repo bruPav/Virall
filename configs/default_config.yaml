@@ -13,6 +13,9 @@ quality_control:
   min_read_length: 50
   trim_adapters: true  # Uses fastp with automatic adapter detection (no adapter files needed)
   error_correction: true
+  # Long-read specific parameters
+  long_read_quality_threshold: 7  # Minimum quality score for long reads (ONT/PacBio)
+  long_read_min_length: 1000  # Minimum read length after filtering (lower for shorter reads, e.g., 200-500)
 
 # Viral identification parameters
 viral_identification:

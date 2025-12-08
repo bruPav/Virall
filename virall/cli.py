@@ -107,6 +107,8 @@ def main(ctx: click.Context, verbose: bool, log_file: Optional[str]):
 @click.option('--mem-efficient', '-m', is_flag=True, help='Enable memory-efficient mode with read subsampling for large datasets')
 @click.option('--single-cell', is_flag=True, help='Enable single-cell sequencing mode')
 @click.option('--phred-offset', type=click.Choice(['33', '64']), help='PHRED quality offset (33 or 64)')
+@click.option('--min-len-sr', type=int, default=None, help='Minimum length for short reads after filtering (overrides config)')
+@click.option('--min-len-lr', type=int, default=None, help='Minimum length for long reads after filtering (overrides config)')
 def assemble(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -124,7 +126,9 @@ def assemble(
     rna_mode: bool,
     mem_efficient: bool,
     single_cell: bool,
-    phred_offset: Optional[str]
+    phred_offset: Optional[str],
+    min_len_sr: Optional[int],
+    min_len_lr: Optional[int]
 ):
     """Assemble reads and identify viral contigs.
     
@@ -178,6 +182,21 @@ def assemble(
         with open(config, 'r') as f:
             file_config = yaml.safe_load(f)
             config_dict.update(file_config)
+    
+    # Override with command-line flags if provided
+    if min_len_sr is not None:
+        config_dict["short_read_min_length"] = min_len_sr
+        # Also update nested structure if it exists
+        if "quality_control" not in config_dict:
+            config_dict["quality_control"] = {}
+        config_dict["quality_control"]["min_read_length"] = min_len_sr
+    
+    if min_len_lr is not None:
+        config_dict["long_read_min_length"] = min_len_lr
+        # Also update nested structure if it exists
+        if "quality_control" not in config_dict:
+            config_dict["quality_control"] = {}
+        config_dict["quality_control"]["long_read_min_length"] = min_len_lr
     
     try:
         # Handle single-cell mode as pooled scRNA-seq: use R2 as single-end, enable RNA mode
@@ -515,6 +534,8 @@ def assemble(
 @click.option('--mem-efficient', '-m', is_flag=True, help='Enable memory-efficient mode with read subsampling for large datasets')
 @click.option('--single-cell', is_flag=True, help='Enable single-cell sequencing mode')
 @click.option('--phred-offset', type=click.Choice(['33', '64']), help='PHRED quality offset (33 or 64)')
+@click.option('--min-len-sr', type=int, default=None, help='Minimum length for short reads after filtering (overrides config)')
+@click.option('--min-len-lr', type=int, default=None, help='Minimum length for long reads after filtering (overrides config)')
 def analyse(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -532,7 +553,9 @@ def analyse(
     rna_mode: bool,
     mem_efficient: bool,
     single_cell: bool,
-    phred_offset: Optional[str]
+    phred_offset: Optional[str],
+    min_len_sr: Optional[int],
+    min_len_lr: Optional[int]
 ):
     """Run complete viral genome analysis pipeline from sequencing reads.
     
@@ -582,6 +605,21 @@ def analyse(
         with open(config, 'r') as f:
             file_config = yaml.safe_load(f)
             config_dict.update(file_config)
+    
+    # Override with command-line flags if provided
+    if min_len_sr is not None:
+        config_dict["short_read_min_length"] = min_len_sr
+        # Also update nested structure if it exists
+        if "quality_control" not in config_dict:
+            config_dict["quality_control"] = {}
+        config_dict["quality_control"]["min_read_length"] = min_len_sr
+    
+    if min_len_lr is not None:
+        config_dict["long_read_min_length"] = min_len_lr
+        # Also update nested structure if it exists
+        if "quality_control" not in config_dict:
+            config_dict["quality_control"] = {}
+        config_dict["quality_control"]["long_read_min_length"] = min_len_lr
     
     try:
         # Handle single-cell mode as pooled scRNA-seq: use R2 as single-end, enable RNA mode
@@ -1300,8 +1338,12 @@ def train_model(viral_sequences: str, non_viral_sequences: str, output_model: st
 @click.option('--pacbio', help='PacBio long reads file')
 @click.option('--output-dir', '-o', required=True, help='Output directory')
 @click.option('--threads', '-t', default=8, help='Number of threads')
+@click.option('--config', help='Configuration file path')
+@click.option('--min-len-sr', type=int, default=None, help='Minimum length for short reads after filtering (overrides config)')
+@click.option('--min-len-lr', type=int, default=None, help='Minimum length for long reads after filtering (overrides config)')
 def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Optional[str], 
-               nanopore: Optional[str], pacbio: Optional[str], output_dir: str, threads: int):
+               nanopore: Optional[str], pacbio: Optional[str], output_dir: str, threads: int,
+               config: Optional[str], min_len_sr: Optional[int], min_len_lr: Optional[int]):
     """Preprocess sequencing reads (quality control, trimming, error correction).
     
     This command performs:
@@ -1336,13 +1378,33 @@ def preprocess(reads_1: Optional[str], reads_2: Optional[str], single_reads: Opt
             click.echo(f"Error: Read file not found: {file_path}", err=True)
             sys.exit(1)
     
+    # Load configuration
+    config_dict = {}
+    if config and os.path.exists(config):
+        with open(config, 'r') as f:
+            file_config = yaml.safe_load(f)
+            config_dict.update(file_config)
+    
+    # Override with command-line flags if provided
+    if min_len_sr is not None:
+        config_dict["short_read_min_length"] = min_len_sr
+        if "quality_control" not in config_dict:
+            config_dict["quality_control"] = {}
+        config_dict["quality_control"]["min_read_length"] = min_len_sr
+    
+    if min_len_lr is not None:
+        config_dict["long_read_min_length"] = min_len_lr
+        if "quality_control" not in config_dict:
+            config_dict["quality_control"] = {}
+        config_dict["quality_control"]["long_read_min_length"] = min_len_lr
+    
     try:
         click.echo("\n" + "="*60)
         click.echo("Virall - Read Preprocessing")
         click.echo("="*60)
         
-        # Initialize preprocessor
-        preprocessor = Preprocessor(threads=threads)
+        # Initialize preprocessor with config
+        preprocessor = Preprocessor(threads=threads, config=config_dict)
         
         # Create output directory
         Path(output_dir).mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,7 @@ import tempfile
 import shutil
 import gzip
 from pathlib import Path
-from typing import Tuple, Optional, Dict, List, Set
+from typing import Tuple, Optional, Dict, Optional, Dict, List, Set
 from loguru import logger
 
 import pandas as pd
@@ -22,15 +22,17 @@ class Preprocessor:
     adapter trimming, and error correction for both short and long reads.
     """
     
-    def __init__(self, threads: int = 8):
+    def __init__(self, threads: int = 8, config: Optional[Dict] = None):
         """
         Initialize the preprocessor.
         
         Args:
             threads: Number of threads to use for processing
+            config: Optional configuration dictionary
         """
         self.threads = threads
         self.temp_dir = Path(tempfile.mkdtemp(prefix="viral_preprocess_"))
+        self.config = config or {}
         
         logger.info(f"Preprocessor initialized with {threads} threads")
     
@@ -38,8 +40,8 @@ class Preprocessor:
         self, 
         reads_1: str, 
         reads_2: str,
-        quality_threshold: int = 20,
-        min_length: int = 50
+        quality_threshold: Optional[int] = None,
+        min_length: Optional[int] = None
     ) -> Tuple[str, str]:
         """
         Process paired-end reads with quality control and trimming.
@@ -47,13 +49,27 @@ class Preprocessor:
         Args:
             reads_1: Path to first mate reads
             reads_2: Path to second mate reads
-            quality_threshold: Minimum quality score threshold
-            min_length: Minimum read length after trimming
+            quality_threshold: Minimum quality score threshold (default: 20, or from config)
+            min_length: Minimum read length after trimming (default: 50, or from config)
             
         Returns:
             Tuple of (processed_reads_1, processed_reads_2)
         """
         logger.info(f"Processing paired-end reads: {reads_1}, {reads_2}")
+        
+        # Get thresholds from config if not provided
+        if quality_threshold is None:
+            quality_threshold = (
+                self.config.get("quality_threshold") or
+                self.config.get("quality_control", {}).get("quality_threshold", 20)
+            )
+        if min_length is None:
+            min_length = (
+                self.config.get("short_read_min_length") or
+                self.config.get("quality_control", {}).get("min_read_length", 50)
+            )
+        
+        logger.info(f"Using quality_threshold={quality_threshold}, min_length={min_length} for short reads")
         
         # Quality control with FastQC
         self._run_fastqc(reads_1, reads_2)
@@ -73,21 +89,36 @@ class Preprocessor:
     def process_long_reads(
         self, 
         reads: str,
-        quality_threshold: int = 7,
-        min_length: int = 1000
+        quality_threshold: Optional[int] = None,
+        min_length: Optional[int] = None
     ) -> str:
         """
         Process long reads (PacBio/ONT) with quality control and trimming using fastplong.
         
         Args:
             reads: Path to long reads
-            quality_threshold: Minimum quality score threshold
-            min_length: Minimum read length after filtering
+            quality_threshold: Minimum quality score threshold (default: 7, or from config)
+            min_length: Minimum read length after filtering (default: 1000, or from config)
             
         Returns:
             Path to processed reads
         """
         logger.info(f"Processing long reads: {reads}")
+        
+        # Get thresholds from config if not provided
+        # Support both flat and nested config structures
+        if quality_threshold is None:
+            quality_threshold = (
+                self.config.get("long_read_quality_threshold") or
+                self.config.get("quality_control", {}).get("long_read_quality_threshold", 7)
+            )
+        if min_length is None:
+            min_length = (
+                self.config.get("long_read_min_length") or
+                self.config.get("quality_control", {}).get("long_read_min_length", 1000)
+            )
+        
+        logger.info(f"Using quality_threshold={quality_threshold}, min_length={min_length} for long reads")
         
         # Use fastplong for all-in-one QC, adapter detection, and trimming
         try:
@@ -113,21 +144,35 @@ class Preprocessor:
     def process_single_reads(
         self, 
         reads: str,
-        quality_threshold: int = 20,
-        min_length: int = 50
+        quality_threshold: Optional[int] = None,
+        min_length: Optional[int] = None
     ) -> str:
         """
         Process single-end reads with quality control and trimming.
         
         Args:
             reads: Path to single-end reads
-            quality_threshold: Minimum quality score threshold
-            min_length: Minimum read length after trimming
+            quality_threshold: Minimum quality score threshold (default: 20, or from config)
+            min_length: Minimum read length after trimming (default: 50, or from config)
             
         Returns:
             Path to processed reads
         """
         logger.info(f"Processing single-end reads: {reads}")
+        
+        # Get thresholds from config if not provided
+        if quality_threshold is None:
+            quality_threshold = (
+                self.config.get("quality_threshold") or
+                self.config.get("quality_control", {}).get("quality_threshold", 20)
+            )
+        if min_length is None:
+            min_length = (
+                self.config.get("short_read_min_length") or
+                self.config.get("quality_control", {}).get("min_read_length", 50)
+            )
+        
+        logger.info(f"Using quality_threshold={quality_threshold}, min_length={min_length} for single reads")
         
         # Quality control
         self._run_fastqc(reads)

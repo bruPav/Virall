@@ -563,6 +563,11 @@ class ViralPlotter:
         if not os.path.exists(quality_file) or not os.path.exists(depth_file):
             logger.warning("Quality summary or depth file not found, skipping coverage plots")
             return generated_plots
+        
+        # Check if depth file is empty
+        if os.path.getsize(depth_file) == 0:
+            logger.warning(f"Depth file is empty (no mapped reads), skipping coverage plots: {depth_file}")
+            return generated_plots
             
         try:
             # 1. Identify High-Quality Contigs
