@@ -1123,7 +1123,17 @@ class ViralAssembler:
         result = self._run_command(flye_cmd, log_file=log_file)
         if result.returncode != 0:
             logger.error(f"Flye failed. See log at {log_file}")
-            if "Sequence and quality captions differ" in result.stderr or "Sequence and quality captions differ" in result.stdout:
+            
+            # Read log file content to check for specific errors
+            log_content = ""
+            if log_file.exists():
+                try:
+                    with open(log_file, "r") as f:
+                        log_content = f.read()
+                except Exception as e:
+                    logger.warning(f"Could not read Flye log file: {e}")
+            
+            if "Sequence and quality captions differ" in log_content:
                 logger.error("FASTQ format error detected. The input file may be corrupted or malformed.")
                 logger.error("This often happens when preprocessing tools produce invalid FASTQ format.")
                 logger.error(f"Problematic file: {input_file}")
