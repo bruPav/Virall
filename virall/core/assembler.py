@@ -1565,6 +1565,15 @@ class ViralAssembler:
             guided_assembly_results = self._run_reference_guided_long_then_polish(
                 preprocessed_reads, reference
             )
+            
+            # Check for no mapped reads error in hybrid mode and fallback
+            if isinstance(guided_assembly_results, dict) and guided_assembly_results.get("error") == "no_mapped_reads":
+                logger.warning("No long reads mapped to reference. Falling back to short-read-only reference-guided assembly.")
+                click.echo("  Long reads did not map to reference. Falling back to short reads...")
+                guided_assembly_results = self._run_reference_guided_spades(
+                    preprocessed_reads, reference
+                )
+            
             click.echo("  Assembly completed")
         elif has_short_reads and not has_long_reads:
             # Only short reads - use SPAdes reference-guided assembly
@@ -1586,6 +1595,24 @@ class ViralAssembler:
             logger.warning("No suitable reads found for reference-guided assembly")
             guided_assembly_results = None
         
+        # Check for no mapped reads error
+        if isinstance(guided_assembly_results, dict) and guided_assembly_results.get("error") == "no_mapped_reads":
+            logger.warning("No reference sequences found among reads")
+            return {
+                "status": "failed",
+                "error": "No reference sequences found among reads",
+                "message": "Reference-guided assembly aborted because no reads mapped to the provided reference genome.",
+                "assembly_dir": str(self.output_dir),
+                "viral_genomes": [],
+                "total_viral_contigs": 0,
+                "statistics": {
+                    "total_contigs": 0,
+                    "total_length": 0,
+                    "average_contig_length": 0
+                },
+                "reference_guided_failed": True
+            }
+
         # Check if this is a dependency error vs actual reference detection failure
         if isinstance(guided_assembly_results, dict) and guided_assembly_results.get("error") == "dependency_error":
             error_details = guided_assembly_results.get("details", "")
@@ -2101,12 +2128,24 @@ class ViralAssembler:
 
             aligned_bam = output_dir / "aligned.bam"
             tech = str(self.config.get("long_read_tech", "")).lower()
-            preset = "map-hifi" if tech == "pacbio" else "map-ont"
+            
+            # Use RNA-specific parameters for RNA mode
+            if self.rna_mode:
+                # For RNA alignment, use smaller k-mer and window size for better sensitivity
+                preset = "map-hifi" if tech == "pacbio" else "map-ont"
+                minimap2_cmd = [
+                    "minimap2", "-t", str(self.threads), "-ax", preset,
+                    "-k14", "-w5",  # RNA-specific parameters for better sensitivity
+                    str(reference), str(long_reads)
+                ]
+                logger.info("Using RNA-specific minimap2 parameters (-k14 -w5)")
+            else:
+                preset = "map-hifi" if tech == "pacbio" else "map-ont"
+                minimap2_cmd = [
+                    "minimap2", "-t", str(self.threads), "-ax", preset, str(reference), str(long_reads)
+                ]
 
             # Align and sort
-            minimap2_cmd = [
-                "minimap2", "-t", str(self.threads), "-ax", preset, str(reference), str(long_reads)
-            ]
             sort_cmd = ["samtools", "sort", "-o", str(aligned_bam)]
 
             logger.info(f"Running minimap2: {' '.join(minimap2_cmd)} | {' '.join(sort_cmd)}")
@@ -2129,6 +2168,33 @@ class ViralAssembler:
             if result.returncode != 0:
                 logger.error(f"samtools index failed: {result.stderr}")
                 return None
+
+            # Check for mapped reads
+            check_cmd = ["samtools", "view", "-c", "-F", "4", str(aligned_bam)]
+            result = subprocess.run(check_cmd, capture_output=True, text=True, stderr=subprocess.PIPE)
+            if result.returncode == 0:
+                # Parse stdout, ignoring any stderr warnings (like library version warnings)
+                try:
+                    mapped_count = int(result.stdout.strip())
+                    if mapped_count == 0:
+                        logger.warning("No reads mapped to reference genome.")
+                        # Log total reads for debugging
+                        total_cmd = ["samtools", "view", "-c", str(aligned_bam)]
+                        total_result = subprocess.run(total_cmd, capture_output=True, text=True, stderr=subprocess.PIPE)
+                        if total_result.returncode == 0:
+                            total_reads = int(total_result.stdout.strip())
+                            logger.info(f"Total reads in BAM: {total_reads}, Mapped reads: {mapped_count}")
+                        return {"error": "no_mapped_reads"}
+                    else:
+                        logger.info(f"Mapped {mapped_count} reads to reference")
+                except ValueError as e:
+                    logger.error(f"Failed to parse mapped read count from samtools output: {result.stdout}")
+                    logger.error(f"samtools stderr: {result.stderr}")
+                    return {"error": "parse_error", "details": str(e)}
+            else:
+                logger.warning(f"Failed to check mapped read count. samtools return code: {result.returncode}")
+                logger.warning(f"samtools stderr: {result.stderr}")
+                # Try to continue anyway - the BAM file might still be valid
 
             # Variant calling and consensus
             vcf_gz = output_dir / "calls.vcf.gz"
@@ -2202,11 +2268,21 @@ class ViralAssembler:
             long_bam = output_dir / "long_aligned.bam"
             long_bam_index = output_dir / "long_aligned.bam.bai"
             tech = str(self.config.get("long_read_tech", "")).lower()
-            preset = "map-pb" if tech == "pacbio" else "map-ont"
-
-            minimap2_cmd = [
-                "minimap2", "-t", str(self.threads), "-ax", preset, str(reference), str(long_reads)
-            ]
+            
+            # Use RNA-specific parameters for RNA mode
+            if self.rna_mode:
+                preset = "map-pb" if tech == "pacbio" else "map-ont"
+                minimap2_cmd = [
+                    "minimap2", "-t", str(self.threads), "-ax", preset,
+                    "-k14", "-w5",  # RNA-specific parameters for better sensitivity
+                    str(reference), str(long_reads)
+                ]
+                logger.info("Using RNA-specific minimap2 parameters (-k14 -w5) for long reads")
+            else:
+                preset = "map-pb" if tech == "pacbio" else "map-ont"
+                minimap2_cmd = [
+                    "minimap2", "-t", str(self.threads), "-ax", preset, str(reference), str(long_reads)
+                ]
             samtools_sort_cmd = ["samtools", "sort", "-o", str(long_bam)]
 
             logger.info(f"Running minimap2 for long reads: {' '.join(minimap2_cmd)} | {' '.join(samtools_sort_cmd)}")
@@ -2231,6 +2307,33 @@ class ViralAssembler:
             if result.returncode != 0:
                 logger.error(f"samtools index failed: {result.stderr}")
                 return None
+
+            # Check for mapped reads
+            check_cmd = ["samtools", "view", "-c", "-F", "4", str(long_bam)]
+            result = subprocess.run(check_cmd, capture_output=True, text=True, stderr=subprocess.PIPE)
+            if result.returncode == 0:
+                # Parse stdout, ignoring any stderr warnings (like library version warnings)
+                try:
+                    mapped_count = int(result.stdout.strip())
+                    if mapped_count == 0:
+                        logger.warning("No reads mapped to reference genome.")
+                        # Log total reads for debugging
+                        total_cmd = ["samtools", "view", "-c", str(long_bam)]
+                        total_result = subprocess.run(total_cmd, capture_output=True, text=True, stderr=subprocess.PIPE)
+                        if total_result.returncode == 0:
+                            total_reads = int(total_result.stdout.strip())
+                            logger.info(f"Total reads in BAM: {total_reads}, Mapped reads: {mapped_count}")
+                        return {"error": "no_mapped_reads"}
+                    else:
+                        logger.info(f"Mapped {mapped_count} reads to reference")
+                except ValueError as e:
+                    logger.error(f"Failed to parse mapped read count from samtools output: {result.stdout}")
+                    logger.error(f"samtools stderr: {result.stderr}")
+                    return {"error": "parse_error", "details": str(e)}
+            else:
+                logger.warning(f"Failed to check mapped read count. samtools return code: {result.returncode}")
+                logger.warning(f"samtools stderr: {result.stderr}")
+                # Try to continue anyway - the BAM file might still be valid
 
             # Call variants and build consensus
             variants_bcf = output_dir / "variants.bcf"

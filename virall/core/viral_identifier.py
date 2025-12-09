@@ -1282,9 +1282,15 @@ class ViralIdentifier:
         bam_file = output_dir / "mapped_reads.bam"
         
         logger.info("Mapping long reads to viral contigs with minimap2")
+        
+        # Determine preset based on technology
+        tech = str(self.config.get("long_read_tech", "")).lower()
+        preset = "map-pb" if tech == "pacbio" else "map-ont"
+        logger.info(f"Using minimap2 preset: {preset}")
+        
         map_cmd = [
             "minimap2",
-            "-ax", "map-ont",  # Use map-ont for ONT reads, map-pb for PacBio
+            "-ax", preset,
             "-t", str(self.threads),
             contigs_file,
             long_reads
@@ -1315,14 +1321,9 @@ class ViralIdentifier:
         if mapped_count == 0:
             logger.warning(f"minimap2 completed but no reads were mapped. Check if reads match the contigs.")
             logger.warning(f"See mapping details in: {log_file_map}")
-            return {
-                "status": "failed",
-                "error": "No reads were mapped to contigs. This may indicate read quality issues or sequence divergence.",
-                "sam_file": str(sam_file),
-                "log_file": str(log_file_map)
-            }
-        
-        logger.info(f"Successfully mapped {mapped_count} reads to contigs")
+            # Proceed anyway to generate empty abundance files
+        else:
+            logger.info(f"Successfully mapped {mapped_count} reads to contigs")
         
         # Process BAM file
         return self._process_mapping_results(sam_file, bam_file, contigs_file, output_dir, "minimap2", classification_data)
@@ -1562,10 +1563,33 @@ class ViralIdentifier:
         depth_cmd = ["samtools", "depth", str(bam_file)]
         
         log_file_depth = output_dir / "samtools_depth.log"
-        with open(depth_file, 'w') as f, open(log_file_depth, 'w') as log:
-            result = subprocess.run(depth_cmd, stdout=f, stderr=log, text=True)
+        try:
+            with open(depth_file, 'w') as f, open(log_file_depth, 'w') as log:
+                result = subprocess.run(depth_cmd, stdout=f, stderr=log, text=True)
+                
             if result.returncode != 0:
-                logger.error(f"SAMtools depth failed. See log at {log_file_depth}")
+                logger.warning(f"SAMtools depth failed. See log at {log_file_depth}")
+                logger.info("Falling back to SAM-based abundance calculation")
+                # Try to find the SAM file
+                sam_file = output_dir / "mapped_reads.sam"
+                if sam_file.exists():
+                    return self._calculate_contig_abundance_from_sam(
+                        contigs_file, sam_file, output_dir, classification_data
+                    )
+                else:
+                    logger.error("SAM file not found for fallback calculation")
+                    return {}
+        except Exception as e:
+            logger.error(f"Error running samtools depth: {e}")
+            logger.info("Falling back to SAM-based abundance calculation")
+            # Try to find the SAM file
+            sam_file = output_dir / "mapped_reads.sam"
+            if sam_file.exists():
+                return self._calculate_contig_abundance_from_sam(
+                    contigs_file, sam_file, output_dir, classification_data
+                )
+            else:
+                logger.error("SAM file not found for fallback calculation")
                 return {}
         
         # Parse depth data - convert to per-position coverage lists
