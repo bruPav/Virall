@@ -246,7 +246,7 @@ class ViralAssembler:
             # Long-read preprocessing parameters
             "long_read_quality_threshold": 7,  # Minimum quality score for long reads
             "long_read_min_length": 1000,  # Minimum read length after filtering (lower for shorter reads)
-            "phred_offset": None  # PHRED quality offset (33 or 64)
+            "phred_offset": 33  # PHRED quality offset (33 or 64), default to 33
         }
     
     def assemble(

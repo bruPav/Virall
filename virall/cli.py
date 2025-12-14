@@ -171,11 +171,11 @@ def assemble(
         "min_contig_length": min_contig_length,
         "viral_confidence_threshold": viral_confidence,
         "assembly_strategy": assembly_strategy,
-        "viral_confidence_threshold": viral_confidence,
-        "assembly_strategy": assembly_strategy,
-        "rna_mode": rna_mode,
-        "phred_offset": phred_offset
+        "rna_mode": rna_mode
     }
+    
+    if phred_offset:
+        config_dict["phred_offset"] = phred_offset
     
     # Load config file if provided
     if config and Path(config).exists():
@@ -597,9 +597,11 @@ def analyse(
         "min_contig_length": min_contig_length,
         "viral_confidence_threshold": viral_confidence,
         "assembly_strategy": assembly_strategy,
-        "rna_mode": rna_mode,
-        "phred_offset": phred_offset
+        "rna_mode": rna_mode
     }
+    
+    if phred_offset:
+        config_dict["phred_offset"] = phred_offset
     
     if config and os.path.exists(config):
         with open(config, 'r') as f:
