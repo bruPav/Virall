@@ -3,6 +3,12 @@
 
 set -e  # Exit on any error
 
+
+# Set higher network timeouts for unstable connections
+export CONDA_REMOTE_READ_TIMEOUT_SECS=300
+export CONDA_REMOTE_CONNECT_TIMEOUT_SECS=60
+export CONDA_REMOTE_MAX_RETRIES=5
+
 echo "Virall - Installation Script"
 echo "============================"
 
@@ -81,7 +87,8 @@ fi
 
 # Install Python dependencies with mamba (faster and more reliable)
 echo "Installing Python dependencies with mamba..."
-if mamba install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0 2>&1 | tee /tmp/mamba_install.log; then
+mamba install -v -c conda-forge -y "numpy>=2.0.0" "pandas>=2.2.0" "matplotlib>=3.8.0" "seaborn>=0.13.0" "plotly>=5.18.0" "biopython>=1.80" "scikit-learn>=1.4.0" "click>=8.1.0" "tqdm>=4.66.0" "pyyaml>=6.0.0" "loguru>=0.7.0" "psutil>=5.9.0" 2>&1 | tee /tmp/mamba_install.log
+if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo "Python dependencies installed successfully with mamba"
     # Clean cache after installation to free up space
     echo "Cleaning package cache to free up disk space..."
@@ -94,19 +101,19 @@ else
         mamba clean -a -y 2>/dev/null || true
         conda clean -a -y 2>/dev/null || true
         echo "Installing Python dependencies with conda (fallback)..."
-        conda install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0 || {
+        conda install -v -c conda-forge -y "numpy>=2.0.0" "pandas>=2.2.0" "matplotlib>=3.8.0" "seaborn>=0.13.0" "plotly>=5.18.0" "biopython>=1.80" "scikit-learn>=1.4.0" "click>=8.1.0" "tqdm>=4.66.0" "pyyaml>=6.0.0" "loguru>=0.7.0" "psutil>=5.9.0" || {
             echo "Warning: Failed to install all Python packages together, trying in smaller batches..."
             # Install in smaller batches with conda
-            conda install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 || true
-            conda install -c conda-forge -y plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 || true
-            conda install -c conda-forge -y click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0 || true
+            conda install -v -c conda-forge -y "numpy>=2.0.0" "pandas>=2.2.0" "matplotlib>=3.8.0" "seaborn>=0.13.0" || true
+            conda install -v -c conda-forge -y "plotly>=5.18.0" "biopython>=1.80" "scikit-learn>=1.4.0" || true
+            conda install -v -c conda-forge -y "click>=8.1.0" "tqdm>=4.66.0" "pyyaml>=6.0.0" "loguru>=0.7.0" "psutil>=5.9.0" || true
         }
     else
         echo "Warning: Failed to install all Python packages together, trying in smaller batches with mamba..."
         # Install in smaller batches
-        mamba install -c conda-forge -y numpy=2.3.4 pandas=2.3.3 matplotlib=3.10.6 seaborn=0.13.2 || true
-        mamba install -c conda-forge -y plotly=6.4.0 biopython=1.85 scikit-learn=1.7.2 || true
-        mamba install -c conda-forge -y click=8.3.0 tqdm=4.67.1 pyyaml=6.0.3 loguru=0.7.3 psutil=7.0.0 || true
+        mamba install -v -c conda-forge -y "numpy>=2.0.0" "pandas>=2.2.0" "matplotlib>=3.8.0" "seaborn>=0.13.0" || true
+        mamba install -v -c conda-forge -y "plotly>=5.18.0" "biopython>=1.80" "scikit-learn>=1.4.0" || true
+        mamba install -v -c conda-forge -y "click>=8.1.0" "tqdm>=4.66.0" "pyyaml>=6.0.0" "loguru>=0.7.0" "psutil>=5.9.0" || true
     fi
 fi
 
@@ -134,6 +141,7 @@ TOOLS_TO_INSTALL=(
     ["fastp"]="fastp=1.0.1"
     ["fastplong"]="fastplong=0.4.1"
     ["fastqc"]="fastqc=0.12.1"
+    ["seqtk"]="seqtk=1.3"
     ["checkv"]="checkv=1.0.3"
     ["bcftools"]="bcftools=1.22"
     ["pilon"]="pilon=1.24"
@@ -173,72 +181,26 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
     echo ""
     echo "Installing missing bioinformatics tools using mamba..."
     
-    # Group tools by installation method for better dependency resolution
-    # Mapping/alignment tools
-    MAPPING_TOOLS=()
+    # Build list of all tools to install (excluding kaiju which is installed later)
+    ALL_TOOLS=()
     for tool in "${MISSING_TOOLS[@]}"; do
-        if [[ "$tool" == "samtools" || "$tool" == "bwa" || "$tool" == "minimap2" ]]; then
-            MAPPING_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+        if [[ "$tool" != "kaiju" ]]; then
+            ALL_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
         fi
     done
     
-    # Assembly tools
-    ASSEMBLY_TOOLS=()
-    for tool in "${MISSING_TOOLS[@]}"; do
-        if [[ "$tool" == "spades" || "$tool" == "flye" ]]; then
-            ASSEMBLY_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
-        fi
-    done
-    
-    # QC tools
-    QC_TOOLS=()
-    for tool in "${MISSING_TOOLS[@]}"; do
-        if [[ "$tool" == "fastp" || "$tool" == "fastplong" || "$tool" == "fastqc" ]]; then
-            QC_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
-        fi
-    done
-    
-    # Other tools
-    OTHER_TOOLS=()
-    for tool in "${MISSING_TOOLS[@]}"; do
-        if [[ ! "$tool" == "samtools" && ! "$tool" == "bwa" && ! "$tool" == "minimap2" && \
-              ! "$tool" == "spades" && ! "$tool" == "flye" && \
-              ! "$tool" == "fastp" && ! "$tool" == "fastplong" && ! "$tool" == "fastqc" && \
-              ! "$tool" == "kaiju" ]]; then
-            OTHER_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
-        fi
-    done
-    
-    # Install mapping tools (samtools, bwa, minimap2)
-    if [ ${#MAPPING_TOOLS[@]} -gt 0 ]; then
-        echo "Installing mapping tools: ${MAPPING_TOOLS[*]}..."
-        mamba install -c bioconda -c conda-forge "${MAPPING_TOOLS[@]}" -y || {
-            echo "Warning: Failed to install mapping tools together, trying individually..."
-            for tool in "${MAPPING_TOOLS[@]}"; do
-                mamba install -c bioconda -c conda-forge "$tool" -y || true
-            done
-        }
-        # Clean cache after each major tool group to prevent disk space issues
-        echo "Cleaning package cache..."
-        mamba clean -a -y 2>/dev/null || true
-    fi
-    
-    # Install assembly tools (spades, flye)
-    if [ ${#ASSEMBLY_TOOLS[@]} -gt 0 ]; then
-        echo "Installing assembly tools: ${ASSEMBLY_TOOLS[*]}..."
-        for tool in "${ASSEMBLY_TOOLS[@]}"; do
-            if [[ "$tool" == "spades=4.2.0" ]]; then
-                mamba install -c conda-forge -c bioconda spades=4.2.0 -y || true
-                
-                # Ensure OpenMPI libraries are accessible in the environment
-                # (SPAdes installs OpenMPI but libraries might not be in $CONDA_PREFIX/lib)
-                # Check conda cache (created during installation) for the library
-                echo "Verifying OpenMPI libraries are accessible..."
+    # Try installing all tools in one transaction first (best for dependency resolution)
+    if [ ${#ALL_TOOLS[@]} -gt 0 ]; then
+        echo "Attempting to install all tools in one transaction for better dependency resolution..."
+        if mamba install -c bioconda -c conda-forge "${ALL_TOOLS[@]}" -y 2>/dev/null; then
+            echo "All tools installed successfully in one transaction!"
+            
+            # Handle SPAdes OpenMPI library linking if SPAdes was installed
+            if [[ " ${MISSING_TOOLS[@]} " =~ " spades " ]]; then
+                echo "Verifying OpenMPI libraries are accessible for SPAdes..."
                 if [ ! -f "$CONDA_PREFIX/lib/libmpi.so.40" ]; then
-                    # First check in environment
                     OPENMPI_LIB=$(find $CONDA_PREFIX -type f -name "libmpi.so.40*" 2>/dev/null | grep -E "libmpi\.so\.40$|libmpi\.so\.40\." | head -1)
                     
-                    # If not found in environment, check conda package cache (created during installation)
                     if [ -z "$OPENMPI_LIB" ]; then
                         CONDA_BASE=$(conda info --base)
                         OPENMPI_LIB=$(find "$CONDA_BASE/pkgs" -type f -name "libmpi.so.40*" 2>/dev/null | grep -E "libmpi\.so\.40$|libmpi\.so\.40\." | head -1)
@@ -248,14 +210,10 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
                         OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
                         echo "Found OpenMPI library at: $OPENMPI_LIB"
                         echo "Linking all OpenMPI libraries to environment lib directory..."
-                        # Ensure lib directory exists
                         mkdir -p "$CONDA_PREFIX/lib"
-                        # Link ALL OpenMPI libraries (not just libmpi.so.40)
-                        # This includes libmpi.so.40, libopen-rte.so.40, libopen-pal.so.40, etc.
                         for lib in "$OPENMPI_LIB_DIR"/*.so*; do
                             if [ -f "$lib" ] || [ -L "$lib" ]; then
                                 lib_name=$(basename "$lib")
-                                # Create symlink for each library
                                 ln -sf "$lib" "$CONDA_PREFIX/lib/$lib_name" 2>/dev/null || true
                             fi
                         done
@@ -266,64 +224,167 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
                 else
                     echo "OpenMPI library already in environment lib directory"
                 fi
-            elif [[ "$tool" == "flye=2.9.6" ]]; then
-                mamba install -c bioconda -c conda-forge flye=2.9.6 -y || true
             fi
-        done
-    fi
-    
-    # Install QC tools (fastp, fastplong, fastqc)
-    if [ ${#QC_TOOLS[@]} -gt 0 ]; then
-        echo "Installing QC tools: ${QC_TOOLS[*]}..."
-        mamba install -c bioconda "${QC_TOOLS[@]}" -y || {
-            echo "Warning: Failed to install QC tools together, trying individually..."
-            for tool in "${QC_TOOLS[@]}"; do
-                mamba install -c bioconda -c conda-forge "$tool" -y || true
-            done
-        }
-        # Clean cache after each major tool group to prevent disk space issues
-        echo "Cleaning package cache..."
-        mamba clean -a -y 2>/dev/null || true
-    fi
-    
-    # Install other tools (checkv, bcftools, pilon, hmmer, prodigal)
-    if [ ${#OTHER_TOOLS[@]} -gt 0 ]; then
-        echo "Installing other tools: ${OTHER_TOOLS[*]}..."
-        # Ensure MPI libraries are available for HMMER (if OpenMPI was installed via SPAdes)
-        if [ -d "$CONDA_PREFIX/lib" ]; then
-            export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
-        fi
-        
-        # Install bcftools with explicit GSL dependency to ensure proper linking
-        if [[ " ${OTHER_TOOLS[@]} " =~ " bcftools=1.22 " ]]; then
-            echo "Installing bcftools with GSL dependency..."
-            mamba install -c bioconda -c conda-forge bcftools=1.22 gsl -y || {
-                echo "Warning: Failed to install bcftools with GSL, trying bcftools alone..."
-                mamba install -c bioconda bcftools=1.22 -y || true
-            }
-            # Remove bcftools and gsl from OTHER_TOOLS to avoid double installation
-            NEW_OTHER_TOOLS=()
-            for tool in "${OTHER_TOOLS[@]}"; do
-                if [[ "$tool" != "bcftools=1.22" && "$tool" != "gsl=2.6" ]]; then
-                    NEW_OTHER_TOOLS+=("$tool")
+            
+            # Clean cache after installation
+            echo "Cleaning package cache..."
+            mamba clean -a -y 2>/dev/null || true
+        else
+            echo "Single transaction failed, falling back to grouped installation..."
+            
+            # Group tools by installation method for better dependency resolution
+            # Mapping/alignment tools
+            MAPPING_TOOLS=()
+            for tool in "${MISSING_TOOLS[@]}"; do
+                if [[ "$tool" == "samtools" || "$tool" == "bwa" || "$tool" == "minimap2" ]]; then
+                    MAPPING_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
                 fi
             done
-            OTHER_TOOLS=("${NEW_OTHER_TOOLS[@]}")
-        fi
-        
-        # Install remaining other tools
-        if [ ${#OTHER_TOOLS[@]} -gt 0 ]; then
-            mamba install -c bioconda "${OTHER_TOOLS[@]}" -y || {
-                echo "Warning: Failed to install other tools together, trying individually..."
-                for tool in "${OTHER_TOOLS[@]}"; do
-                    mamba install -c bioconda "$tool" -y || true
+            
+            # Assembly tools
+            ASSEMBLY_TOOLS=()
+            for tool in "${MISSING_TOOLS[@]}"; do
+                if [[ "$tool" == "spades" || "$tool" == "flye" ]]; then
+                    ASSEMBLY_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+                fi
+            done
+            
+            # QC tools
+            QC_TOOLS=()
+            for tool in "${MISSING_TOOLS[@]}"; do
+                if [[ "$tool" == "fastp" || "$tool" == "fastplong" || "$tool" == "fastqc" || "$tool" == "seqtk" ]]; then
+                    QC_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+                fi
+            done
+            
+            # Other tools
+            OTHER_TOOLS=()
+            for tool in "${MISSING_TOOLS[@]}"; do
+                if [[ ! "$tool" == "samtools" && ! "$tool" == "bwa" && ! "$tool" == "minimap2" && \
+                      ! "$tool" == "spades" && ! "$tool" == "flye" && \
+                      ! "$tool" == "fastp" && ! "$tool" == "fastplong" && ! "$tool" == "fastqc" && ! "$tool" == "seqtk" && \
+                      ! "$tool" == "kaiju" ]]; then
+                    OTHER_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+                fi
+            done
+    
+            # Install mapping tools (samtools, bwa, minimap2)
+            if [ ${#MAPPING_TOOLS[@]} -gt 0 ]; then
+                echo "Installing mapping tools: ${MAPPING_TOOLS[*]}..."
+                mamba install -c bioconda -c conda-forge "${MAPPING_TOOLS[@]}" -y || {
+                    echo "Warning: Failed to install mapping tools together, trying individually..."
+                    for tool in "${MAPPING_TOOLS[@]}"; do
+                        mamba install -c bioconda -c conda-forge "$tool" -y || true
+                    done
+                }
+                # Clean cache after each major tool group to prevent disk space issues
+                echo "Cleaning package cache..."
+                mamba clean -a -y 2>/dev/null || true
+            fi
+            
+            # Install assembly tools (spades, flye)
+            if [ ${#ASSEMBLY_TOOLS[@]} -gt 0 ]; then
+                echo "Installing assembly tools: ${ASSEMBLY_TOOLS[*]}..."
+                for tool in "${ASSEMBLY_TOOLS[@]}"; do
+                    if [[ "$tool" == "spades=4.2.0" ]]; then
+                        mamba install -c conda-forge -c bioconda spades=4.2.0 -y || true
+                        
+                        # Ensure OpenMPI libraries are accessible in the environment
+                        # (SPAdes installs OpenMPI but libraries might not be in $CONDA_PREFIX/lib)
+                        # Check conda cache (created during installation) for the library
+                        echo "Verifying OpenMPI libraries are accessible..."
+                        if [ ! -f "$CONDA_PREFIX/lib/libmpi.so.40" ]; then
+                            # First check in environment
+                            OPENMPI_LIB=$(find $CONDA_PREFIX -type f -name "libmpi.so.40*" 2>/dev/null | grep -E "libmpi\.so\.40$|libmpi\.so\.40\." | head -1)
+                            
+                            # If not found in environment, check conda package cache (created during installation)
+                            if [ -z "$OPENMPI_LIB" ]; then
+                                CONDA_BASE=$(conda info --base)
+                                OPENMPI_LIB=$(find "$CONDA_BASE/pkgs" -type f -name "libmpi.so.40*" 2>/dev/null | grep -E "libmpi\.so\.40$|libmpi\.so\.40\." | head -1)
+                            fi
+                            
+                            if [ -n "$OPENMPI_LIB" ]; then
+                                OPENMPI_LIB_DIR=$(dirname "$OPENMPI_LIB")
+                                echo "Found OpenMPI library at: $OPENMPI_LIB"
+                                echo "Linking all OpenMPI libraries to environment lib directory..."
+                                # Ensure lib directory exists
+                                mkdir -p "$CONDA_PREFIX/lib"
+                                # Link ALL OpenMPI libraries (not just libmpi.so.40)
+                                # This includes libmpi.so.40, libopen-rte.so.40, libopen-pal.so.40, etc.
+                                for lib in "$OPENMPI_LIB_DIR"/*.so*; do
+                                    if [ -f "$lib" ] || [ -L "$lib" ]; then
+                                        lib_name=$(basename "$lib")
+                                        # Create symlink for each library
+                                        ln -sf "$lib" "$CONDA_PREFIX/lib/$lib_name" 2>/dev/null || true
+                                    fi
+                                done
+                                echo "OpenMPI libraries linked to environment lib directory"
+                            else
+                                echo "Warning: OpenMPI library not found - HMMER may have issues with VOG database setup"
+                            fi
+                        else
+                            echo "OpenMPI library already in environment lib directory"
+                        fi
+                    elif [[ "$tool" == "flye=2.9.6" ]]; then
+                        mamba install -c bioconda -c conda-forge flye=2.9.6 -y || true
+                    fi
                 done
-            }
-        fi
-        # Clean cache after each major tool group to prevent disk space issues
-        echo "Cleaning package cache..."
-        mamba clean -a -y 2>/dev/null || true
-    fi
+            fi
+    
+            # Install QC tools (fastp, fastplong, fastqc, seqtk)
+            if [ ${#QC_TOOLS[@]} -gt 0 ]; then
+                echo "Installing QC tools: ${QC_TOOLS[*]}..."
+                mamba install -c bioconda "${QC_TOOLS[@]}" -y || {
+                    echo "Warning: Failed to install QC tools together, trying individually..."
+                    for tool in "${QC_TOOLS[@]}"; do
+                        mamba install -c bioconda -c conda-forge "$tool" -y || true
+                    done
+                }
+                # Clean cache after each major tool group to prevent disk space issues
+                echo "Cleaning package cache..."
+                mamba clean -a -y 2>/dev/null || true
+            fi
+    
+            # Install other tools (checkv, bcftools, pilon, hmmer, prodigal)
+            if [ ${#OTHER_TOOLS[@]} -gt 0 ]; then
+                echo "Installing other tools: ${OTHER_TOOLS[*]}..."
+                # Ensure MPI libraries are available for HMMER (if OpenMPI was installed via SPAdes)
+                if [ -d "$CONDA_PREFIX/lib" ]; then
+                    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+                fi
+                
+                # Install bcftools with explicit GSL dependency to ensure proper linking
+                if [[ " ${OTHER_TOOLS[@]} " =~ " bcftools=1.22 " ]]; then
+                    echo "Installing bcftools with GSL dependency..."
+                    mamba install -c bioconda -c conda-forge bcftools=1.22 gsl -y || {
+                        echo "Warning: Failed to install bcftools with GSL, trying bcftools alone..."
+                        mamba install -c bioconda bcftools=1.22 -y || true
+                    }
+                    # Remove bcftools and gsl from OTHER_TOOLS to avoid double installation
+                    NEW_OTHER_TOOLS=()
+                    for tool in "${OTHER_TOOLS[@]}"; do
+                        if [[ "$tool" != "bcftools=1.22" && "$tool" != "gsl=2.6" ]]; then
+                            NEW_OTHER_TOOLS+=("$tool")
+                        fi
+                    done
+                    OTHER_TOOLS=("${NEW_OTHER_TOOLS[@]}")
+                fi
+                
+                # Install remaining other tools
+                if [ ${#OTHER_TOOLS[@]} -gt 0 ]; then
+                    mamba install -c bioconda "${OTHER_TOOLS[@]}" -y || {
+                        echo "Warning: Failed to install other tools together, trying individually..."
+                        for tool in "${OTHER_TOOLS[@]}"; do
+                            mamba install -c bioconda "$tool" -y || true
+                        done
+                    }
+                fi
+                # Clean cache after each major tool group to prevent disk space issues
+                echo "Cleaning package cache..."
+                mamba clean -a -y 2>/dev/null || true
+            fi
+        fi  # End of fallback grouped installation
+    fi  # End of if [ ${#ALL_TOOLS[@]} -gt 0 ]
     
     # Install kaiju separately (it's handled later in the script, but check if it's missing)
     if [[ " ${MISSING_TOOLS[@]} " =~ " kaiju " ]]; then
@@ -438,14 +499,28 @@ fi
 # Get the software installation directory (needed for package installation and database setup)
 SOFTWARE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Install pip if not available (required for virall package installation)
+if ! command -v pip &> /dev/null; then
+    echo "pip not found. Installing pip..."
+    if ! mamba install -c conda-forge pip -y; then
+        echo "Warning: Failed to install pip with mamba, trying conda..."
+        if ! conda install -c conda-forge pip -y; then
+            echo "Error: Failed to install pip. Cannot install virall package."
+            echo "  Please install pip manually: conda activate virall && conda install -c conda-forge pip"
+            exit 1
+        fi
+    fi
+fi
+
 # Install the virall package in development mode
 # (Install before database setup since VOG setup needs it)
 echo "Installing Virall package in development mode..."
 cd "$SOFTWARE_DIR"
-pip install -e . || {
-    echo "Warning: Failed to install virall package"
-    echo "  Continuing anyway - you can install it manually later"
-}
+if ! pip install -e .; then
+    echo "Error: Failed to install virall package"
+    echo "  Please try manually: conda activate virall && pip install -e ."
+    exit 1
+fi
 
 # Set up VOG database for viral gene annotation
 echo "Setting up VOG (Viral Orthologous Groups) database..."

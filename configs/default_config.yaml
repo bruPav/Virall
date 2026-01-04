@@ -36,6 +36,14 @@ performance:
   memory: "16G"
   chunk_size: 10000
 
+# Memory-efficient mode parameters
+memory_efficient:
+  # Short read subsampling (when --mem-efficient is enabled)
+  short_read_subsample_size: 30000000  # Subsample to 30 million reads maximum
+  # Long read subsampling (when --mem-efficient is enabled)
+  max_long_reads: 50000  # Maximum long reads before subsampling
+  long_read_subsample_size: 20000  # Subsample to 20k longest reads
+
 # Database paths (relative to software installation directory)
 databases:
   vog_db_path: "databases/vog_db"

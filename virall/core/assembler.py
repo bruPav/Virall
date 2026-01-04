@@ -92,6 +92,9 @@ class ViralAssembler:
         )
         self.plotter = ViralPlotter(output_dir=output_dir)
         
+        # Track temporary subsampled files for cleanup
+        self.subsampled_temp_files = []
+        
         logger.info(f"ViralAssembler initialized with {threads} threads, {memory} memory")
     
     def _run_command(self, cmd: Union[List[str], str], log_file: Optional[Path] = None, **kwargs) -> subprocess.CompletedProcess:
@@ -243,6 +246,9 @@ class ViralAssembler:
             # Long-read subsampling parameters
             "max_long_reads": 50000,  # Subsample if more than this many reads
             "long_read_subsample_size": 20000,  # Subsample to this many reads
+            # Short-read subsampling parameters (for mem-efficient mode)
+            "max_short_reads": 20000000,  # Subsample if more than 20M reads (~3-6GB depending on length)
+            "short_read_subsample_size": 10000000,  # Subsample to 10M reads (~1.5-3GB)
             # Long-read preprocessing parameters
             "long_read_quality_threshold": 7,  # Minimum quality score for long reads
             "long_read_min_length": 1000,  # Minimum read length after filtering (lower for shorter reads)
@@ -645,6 +651,20 @@ class ViralAssembler:
         """Preprocess all input reads."""
         preprocessed = {}
         
+        # Subsample short reads if memory efficient mode is enabled
+        if self.mem_efficient:
+            if short_reads_1 and short_reads_2:
+                logger.info("Checking if paired-end reads need subsampling (mem-efficient mode)")
+                s1, s2 = self._subsample_short_reads_if_needed(short_reads_1, short_reads_2)
+                if s1 and s2:
+                    short_reads_1, short_reads_2 = s1, s2
+            
+            if single_reads:
+                logger.info("Checking if single-end reads need subsampling (mem-efficient mode)")
+                s, _ = self._subsample_short_reads_if_needed(single_reads)
+                if s: 
+                    single_reads = s
+
         if short_reads_1 and short_reads_2:
             logger.info("Preprocessing paired-end reads")
             preprocessed["short_1"], preprocessed["short_2"] = self.preprocessor.process_paired_reads(
@@ -1343,16 +1363,117 @@ class ViralAssembler:
                 sequences.sort(key=lambda x: len(x.seq), reverse=True)
                 selected_sequences = sequences[:subsample_size]
                 
-                # Write subsampled reads to temporary file
-                temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.fastq.gz', delete=False)
-                with gzip.open(temp_file.name, "wt") as handle:
-                    for record in selected_sequences:
-                        SeqIO.write(record, handle, "fastq")
+                # Write subsampled reads to temporary file (always gzipped)
+                temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='_subsampled_long.fastq.gz', delete=False)
+                temp_file.close()  # Close the file handle so we can write to it
                 
-                logger.info(f"Subsampled to {len(selected_sequences)} reads (saved to {temp_file.name})")
+                # Write selected sequences to temp file (always gzipped for consistency)
+                with gzip.open(temp_file.name, "wt") as out_handle:
+                    SeqIO.write(selected_sequences, out_handle, "fastq")
+                
+                logger.info(f"Subsampled long reads to {temp_file.name}")
+                
+                # Track temporary file for cleanup
+                self.subsampled_temp_files.append(temp_file.name)
+                
                 return temp_file.name
-        
+                
         return None
+
+    def _subsample_short_reads_if_needed(
+        self, 
+        reads_1: Union[str, Path], 
+        reads_2: Optional[Union[str, Path]] = None
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Subsample short reads using seqtk if they exceed the maximum count.
+        Requires seqtk to be installed (included in virall installation).
+        
+        Args:
+            reads_1: Path to R1 or single reads
+            reads_2: Path to R2 (optional)
+            
+        Returns:
+            Tuple of (subsampled_1, subsampled_2) paths, or None if no subsampling occurred
+            
+        Raises:
+            RuntimeError: If seqtk is not found when mem-efficient mode is enabled
+        """
+        if not self.mem_efficient:
+            return None, None
+        
+        # Check if seqtk is available (required for mem-efficient mode)
+        try:
+            subprocess.run(
+                ["seqtk"], 
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL,
+                timeout=2
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            raise RuntimeError(
+                "seqtk is required for --mem-efficient mode but was not found. "
+                "Please install seqtk: conda activate virall && mamba install -c bioconda seqtk=1.3 -y"
+            )
+        
+        # Configuration: subsample to 30 million reads maximum
+        target_reads = self.config.get("short_read_subsample_size", 30000000)
+        
+        # Check file size to determine if subsampling is needed
+        # A rough estimate: 1M paired reads (gzip) is ~150-300MB. 
+        # 30M reads ~9-18GB. If file size > 10GB, likely needs subsampling.
+        file_size_bytes = os.path.getsize(reads_1)
+        size_threshold = 10 * 1024 * 1024 * 1024  # 10GB
+        
+        needs_subsampling = file_size_bytes > size_threshold
+        
+        if not needs_subsampling:
+            logger.info(f"File {reads_1} ({file_size_bytes/1e9:.2f} GB) appears small enough, skipping subsampling.")
+            return None, None
+        
+        logger.info(
+            f"File {reads_1} size ({file_size_bytes/1e9:.1f} GB) exceeds threshold. "
+            f"Subsampling to {target_reads:,} reads using seqtk..."
+        )
+        
+        # Create temp files
+        temp_1 = tempfile.NamedTemporaryFile(mode='w', suffix='_subsampled_R1.fastq.gz', delete=False).name
+        
+        # Seed for reproducibility
+        seed = 42
+        
+        # Run seqtk sample
+        cmd_1 = f"seqtk sample -s{seed} {reads_1} {target_reads} | gzip > {temp_1}"
+        logger.info(f"Running: {cmd_1}")
+        
+        try:
+            subprocess.check_call(cmd_1, shell=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"seqtk subsampling failed: {e}")
+        
+        temp_2 = None
+        if reads_2:
+            temp_2 = tempfile.NamedTemporaryFile(mode='w', suffix='_subsampled_R2.fastq.gz', delete=False).name
+            # Same seed MUST be used for paired reads to keep them synchronized!
+            cmd_2 = f"seqtk sample -s{seed} {reads_2} {target_reads} | gzip > {temp_2}"
+            logger.info(f"Running: {cmd_2}")
+            
+            try:
+                subprocess.check_call(cmd_2, shell=True)
+            except subprocess.CalledProcessError as e:
+                # Clean up temp_1 if R2 fails
+                if os.path.exists(temp_1):
+                    os.unlink(temp_1)
+                raise RuntimeError(f"seqtk subsampling failed for R2: {e}")
+        
+        logger.info(f"Subsampling complete: {target_reads:,} reads written to output files.")
+        
+        # Track temporary files for cleanup
+        self.subsampled_temp_files.append(temp_1)
+        if temp_2:
+            self.subsampled_temp_files.append(temp_2)
+        
+        return temp_1, temp_2
 
     def _is_gzipped(self, file_path: str) -> bool:
         """Return True if the file is gzipped based on magic bytes."""
@@ -2687,6 +2808,20 @@ class ViralAssembler:
     def cleanup_temp_files(self):
         """Clean up temporary files and directories created during analysis."""
         try:
+            # Clean up subsampled temporary files
+            subsampled_cleaned = 0
+            for temp_file in self.subsampled_temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+                        subsampled_cleaned += 1
+                        logger.debug(f"Cleaned up subsampled temporary file: {temp_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up subsampled file {temp_file}: {e}")
+            
+            if subsampled_cleaned > 0:
+                logger.info(f"Cleaned up {subsampled_cleaned} subsampled temporary file(s)")
+            
             # Find all temporary directories with viral_ prefix
             temp_patterns = [
                 "/tmp/viral_*",
@@ -2710,8 +2845,8 @@ class ViralAssembler:
             
             if total_cleaned > 0:
                 logger.info(f"Cleaned up {total_cleaned} temporary directories")
-            else:
-                logger.debug("No temporary directories found to clean up")
+            elif subsampled_cleaned == 0:
+                logger.debug("No temporary files or directories found to clean up")
                 
         except Exception as e:
             logger.warning(f"Error during temporary file cleanup: {e}")
