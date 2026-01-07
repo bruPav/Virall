@@ -219,38 +219,6 @@ databases:
   vog_db_path: "/path/to/vog_db"
 ```
 
-## Dependencies
-
-### Required Tools
-- **SPAdes**: Short-read assembly (including RNA viral mode)
-- **Flye**: Long-read assembly
-- **Kaiju**: Taxonomic classification
-- **CheckV**: Viral genome validation
-- **Prodigal**: Gene prediction
-- **HMMER**: Protein annotation (VOG database searches)
-- **BWA**: Short-read mapping for quantification
-- **minimap2**: Long-read mapping for quantification and polishing
-- **samtools**: BAM file processing
-- **bcftools**: Variant calling and consensus generation
-- **pilon**: Assembly polishing
-- **FastQC**: Quality control
-- **fastp**: Short-read trimming (automatic adapter detection)
-- **fastplong**: Long-read trimming (automatic adapter detection)
-
-### Python Packages
-- click (command-line interface)
-- pyyaml (configuration files)
-- biopython (sequence handling)
-- pandas (data manipulation)
-- numpy (numerical computing)
-- scikit-learn (machine learning)
-- loguru (logging)
-- tqdm (progress bars)
-- psutil (system utilities)
-- matplotlib (plotting - for future features)
-- seaborn (plotting - for future features)
-- plotly (plotting - for future features)
-
 ## Examples
 
 ### Example 1: Short-read Assembly
