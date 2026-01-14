@@ -141,10 +141,6 @@ class VOGAnnotator:
         
         possible_paths = [
             software_dir / "databases" / "vog_db",
-            Path.home() / "vog_db",
-            Path.home() / ".vog_db",
-            Path("/opt/vog_db"),
-            Path("/usr/local/vog_db"),
             Path.cwd() / "vog_db"
         ]
         
@@ -171,7 +167,7 @@ class VOGAnnotator:
         package_dir = current_file.parent.parent  # virall/
         installation_dir = package_dir.parent     # parent of virall/
         
-        # Check if databases directory exists in installation
+        # Check if databases directory exists in installation (e.g. source root or site-packages/databases)
         if (installation_dir / "databases").exists():
             return installation_dir
         
@@ -188,9 +184,14 @@ class VOGAnnotator:
         cwd = Path.cwd()
         if (cwd / "databases").exists():
             return cwd
+
+        # Method 5: Check common container locations (Singularity/Docker)
+        container_opt = Path("/opt/virall")
+        if container_opt.exists():
+             return container_opt
         
-        # Method 5: Fall back to package directory (original behavior)
-        logger.warning("Could not find installation directory, falling back to package directory")
+        # Method 6: Fall back to installation directory (original behavior)
+        logger.warning("Could not find installation directory, falling back to package parent directory")
         return installation_dir
     
     def _load_vog_database(self):

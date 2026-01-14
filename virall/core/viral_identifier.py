@@ -1784,7 +1784,7 @@ class ViralIdentifier:
         package_dir = current_file.parent.parent  # virall/
         installation_dir = package_dir.parent     # parent of virall/
         
-        # Check if databases directory exists in installation
+        # Check if databases directory exists in installation (e.g. source root or site-packages/databases)
         if (installation_dir / "databases").exists():
             return installation_dir
         
@@ -1801,9 +1801,14 @@ class ViralIdentifier:
         cwd = Path.cwd()
         if (cwd / "databases").exists():
             return cwd
+
+        # Method 5: Check common container locations (Singularity/Docker)
+        container_opt = Path("/opt/virall")
+        if container_opt.exists():
+             return container_opt
         
-        # Method 5: Fall back to package directory (original behavior)
-        logger.warning("Could not find installation directory, falling back to package directory")
+        # Method 6: Fall back to installation directory (original behavior)
+        logger.warning("Could not find installation directory, falling back to package parent directory")
         return installation_dir
     
     def _setup_kaiju_database(self) -> Optional[Path]:
@@ -1850,11 +1855,15 @@ class ViralIdentifier:
                 if cwd_db_path.exists():
                     kaiju_db_path = cwd_db_path
                     logger.debug(f"Found Kaiju database at CWD: {cwd_db_path}")
-                else:
-                    # Use the same installation directory detection as assembler
-                    software_dir = self._find_installation_directory()
-                    kaiju_db_path = software_dir / "databases" / "kaiju_db"
-                    logger.debug(f"Using installation directory for Kaiju database: {kaiju_db_path}")
+            
+            # Check user home directory default location
+
+
+            if kaiju_db_path is None:
+                # Use the same installation directory detection as assembler
+                software_dir = self._find_installation_directory()
+                kaiju_db_path = software_dir / "databases" / "kaiju_db"
+                logger.debug(f"Using installation directory for Kaiju database: {kaiju_db_path}")
         
         logger.debug(f"Looking for Kaiju database at: {kaiju_db_path}")
         

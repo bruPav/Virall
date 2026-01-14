@@ -594,6 +594,133 @@ class Preprocessor:
         
         return report
     
+    def filter_host_reads(
+        self,
+        reads_dict: Dict[str, str],
+        reference_path: str
+    ) -> Dict[str, str]:
+        """
+        Filter reads against a host reference using minimap2.
+        Returns updated dictionary with paths to filtered (unmapped) reads.
+        """
+        logger.info(f"Filtering host reads against {reference_path}")
+        filtered_reads = reads_dict.copy()
+        
+        # Check if minimap2 and samtools are available
+        if not self._check_tool_available("minimap2") or not self._check_tool_available("samtools"):
+            logger.warning("minimap2 or samtools not found. Skipping host filtering.")
+            return reads_dict
+
+        # Process paired reads
+        if "short_1" in reads_dict and "short_2" in reads_dict:
+             r1, r2 = self._filter_paired_reads(reads_dict["short_1"], reads_dict["short_2"], reference_path)
+             filtered_reads["short_1"] = r1
+             filtered_reads["short_2"] = r2
+        
+        # Process single reads
+        if "single" in reads_dict:
+             r1 = self._filter_single_reads(reads_dict["single"], reference_path)
+             filtered_reads["single"] = r1
+             
+        # Process long reads
+        if "long" in reads_dict:
+             r1 = self._filter_long_reads_against_host(reads_dict["long"], reference_path)
+             filtered_reads["long"] = r1
+             
+        return filtered_reads
+
+    def _filter_paired_reads(self, r1: str, r2: str, ref: str) -> Tuple[str, str]:
+        """Filter paired reads aiming to remove host sequences."""
+        out1 = self.temp_dir / "host_filtered_R1.fastq"
+        out2 = self.temp_dir / "host_filtered_R2.fastq"
+        
+        # Construct minimap2 command
+        # pipe to samtools sort -n (name sort) to keep pairs together
+        # then to samtools fastq -f 12 (both unmapped)
+        # Note: -f 12 requires both reads to be unmapped.
+        # This removes any pair where at least one read maps to host.
+        cmd = f"minimap2 -ax sr -t {self.threads} {ref} {r1} {r2} | " \
+              f"samtools sort -n - | " \
+              f"samtools fastq -f 12 -1 {out1} -2 {out2} -"
+              
+        logger.info(f"Running host filtering for paired reads (logs in temp dir)")
+        
+        # Redirect stderr to a log file to avoid flooding the terminal
+        log_file = self.temp_dir / "host_filtering_paired.log"
+        
+        try:
+            with open(log_file, "w") as f:
+                subprocess.check_call(cmd, shell=True, stderr=f)
+            
+            # Check if output files exist and are not empty
+            if not out1.exists() or out1.stat().st_size == 0:
+                logger.warning("Host filtering resulted in empty or missing output. Using original reads.")
+                return r1, r2
+                
+            # gzip outputs
+            out1_gz = str(out1) + ".gz"
+            out2_gz = str(out2) + ".gz"
+            subprocess.check_call(f"gzip -c {out1} > {out1_gz}", shell=True)
+            subprocess.check_call(f"gzip -c {out2} > {out2_gz}", shell=True)
+            
+            # Cleanup intermediate fastq
+            if out1.exists(): out1.unlink()
+            if out2.exists(): out2.unlink()
+            
+            return out1_gz, out2_gz
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Host filtering failed. Check log: {log_file}")
+            return r1, r2 # Return original on failure
+
+    def _filter_single_reads(self, r1: str, ref: str) -> str:
+        out1 = self.temp_dir / "host_filtered_single.fastq"
+        cmd = f"minimap2 -ax sr -t {self.threads} {ref} {r1} | " \
+              f"samtools fastq -f 4 {out1}" # -f 4 for unmapped
+        
+        log_file = self.temp_dir / "host_filtering_single.log"
+        
+        try:
+            with open(log_file, "w") as f:
+                subprocess.check_call(cmd, shell=True, stderr=f)
+            
+            if not out1.exists() or out1.stat().st_size == 0:
+                 return r1
+                 
+            out1_gz = str(out1) + ".gz"
+            subprocess.check_call(f"gzip -c {out1} > {out1_gz}", shell=True)
+            if out1.exists(): out1.unlink()
+            return out1_gz
+        except subprocess.CalledProcessError as e:
+             logger.error(f"Host filtering failed. Check log: {log_file}")
+             return r1
+
+    def _filter_long_reads_against_host(self, r1: str, ref: str) -> str:
+        out1 = self.temp_dir / "host_filtered_long.fastq"
+        
+        # Determine preset
+        tech = self.config.get("long_read_tech", "nanopore") # default to nanopore
+        preset = "map-pb" if tech == "pacbio" else "map-ont"
+        
+        cmd = f"minimap2 -ax {preset} -t {self.threads} {ref} {r1} | " \
+              f"samtools fastq -f 4 {out1}"
+              
+        log_file = self.temp_dir / "host_filtering_long.log"
+              
+        try:
+            with open(log_file, "w") as f:
+                subprocess.check_call(cmd, shell=True, stderr=f)
+            
+            if not out1.exists() or out1.stat().st_size == 0:
+                 return r1
+                 
+            out1_gz = str(out1) + ".gz"
+            subprocess.check_call(f"gzip -c {out1} > {out1_gz}", shell=True)
+            if out1.exists(): out1.unlink()
+            return out1_gz
+        except subprocess.CalledProcessError as e:
+             logger.error(f"Host filtering failed. Check log: {log_file}")
+             return r1
+
     def cleanup(self) -> None:
         """Clean up temporary files."""
         if self.temp_dir.exists():

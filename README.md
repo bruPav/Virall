@@ -80,6 +80,13 @@ Add a '--mem-efficient' flag. For example
 virall analyse --nanopore large_dataset.fastq --mem-efficient -o output_dir
 ```
 
+### Host Filtering
+Add a `--filter` flag to provide a host genome or sequences to filter out. For example:
+```bash
+# Filter out host reads (e.g., human) from analysis
+virall analyse --single-reads reads.fastq --filter host_genome.fasta -o output_dir
+```
+
 ### Single-cell RNA-seq (pooled)
 
 ```bash
@@ -180,6 +187,7 @@ Options:
   --rna-mode                   Enable RNA-specific assembly parameters
   -m, --mem-efficient          Enable memory-efficient mode with read subsampling for large datasets
   --single-cell                Enable single-cell sequencing mode (pooled scRNA-seq)
+  --filter TEXT                Path to host genome for filtering (e.g. human.fna)
   --help                       Show this message and exit.
 ```
 
@@ -318,6 +326,11 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - This software was developed by Dr. Aurora Britania Diaz Fernandez and Bruno Pavletic, Msc together in collaboration with Nidia Trovao, PhD and Prof. Windy McNerny
 
 ## Changelog
+
+### v0.2.1
+- Added `--version` flag to CLI
+- Added `--filter` option for host genome filtering
+- Documentation updates
 
 ### v0.2.0
 - Added interactive plotting capabilities (Sunburst charts, etc.)

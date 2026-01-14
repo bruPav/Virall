@@ -695,6 +695,22 @@ class ViralAssembler:
         except Exception as e:
             logger.warning(f"Failed to persist FastQC reports: {e}")
         
+        # Host filtering
+        if self.config.get("host_filtering_reference"):
+            host_ref = self.config["host_filtering_reference"]
+            if os.path.exists(host_ref):
+                logger.info(f"Filtering host reads using reference: {host_ref}")
+                click.echo("  Filtering host sequences...")
+                
+                # Filter reads
+                preprocessed = self.preprocessor.filter_host_reads(
+                    preprocessed,
+                    host_ref
+                )
+            else:
+                logger.warning(f"Host reference file not found: {host_ref}")
+                click.echo(f"  Warning: Host reference not found: {host_ref}")
+
         return preprocessed
     
     def _identify_viral_sequences(self, reads: Dict[str, str]) -> Dict[str, str]:

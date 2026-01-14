@@ -74,9 +74,12 @@ def setup_logging(output_dir: Optional[str] = None, log_file: Optional[str] = No
     return log_path
 
 
+from . import __version__
+
 @click.group()
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging to console')
 @click.option('--log-file', help='Log file path (overrides automatic log creation)')
+@click.version_option(version=__version__)
 @click.pass_context
 def main(ctx: click.Context, verbose: bool, log_file: Optional[str]):
     """Virall - Comprehensive viral genome analysis including assembly, classification, gene prediction, and annotation. Available commands: assemble, analyse, classify, preprocess, quantify, validate, annotate, setup-db. Under development: train-model (machine learning model training)"""
@@ -109,6 +112,7 @@ def main(ctx: click.Context, verbose: bool, log_file: Optional[str]):
 @click.option('--phred-offset', type=click.Choice(['33', '64']), help='PHRED quality offset (33 or 64)')
 @click.option('--min-len-sr', type=int, default=None, help='Minimum length for short reads after filtering (overrides config)')
 @click.option('--min-len-lr', type=int, default=None, help='Minimum length for long reads after filtering (overrides config)')
+@click.option('--filter', help='Path to host genome for filtering (e.g. human.fna)')
 def assemble(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -128,7 +132,8 @@ def assemble(
     single_cell: bool,
     phred_offset: Optional[str],
     min_len_sr: Optional[int],
-    min_len_lr: Optional[int]
+    min_len_lr: Optional[int],
+    filter: Optional[str]
 ):
     """Assemble reads and identify viral contigs.
     
@@ -197,6 +202,9 @@ def assemble(
         if "quality_control" not in config_dict:
             config_dict["quality_control"] = {}
         config_dict["quality_control"]["long_read_min_length"] = min_len_lr
+    
+    if filter:
+        config_dict["host_filtering_reference"] = filter
     
     try:
         # Handle single-cell mode as pooled scRNA-seq: use R2 as single-end, enable RNA mode
@@ -536,6 +544,7 @@ def assemble(
 @click.option('--phred-offset', type=click.Choice(['33', '64']), help='PHRED quality offset (33 or 64)')
 @click.option('--min-len-sr', type=int, default=None, help='Minimum length for short reads after filtering (overrides config)')
 @click.option('--min-len-lr', type=int, default=None, help='Minimum length for long reads after filtering (overrides config)')
+@click.option('--filter', help='Path to host genome for filtering (e.g. human.fna)')
 def analyse(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -555,7 +564,8 @@ def analyse(
     single_cell: bool,
     phred_offset: Optional[str],
     min_len_sr: Optional[int],
-    min_len_lr: Optional[int]
+    min_len_lr: Optional[int],
+    filter: Optional[str]
 ):
     """Run complete viral genome analysis pipeline from sequencing reads.
     
@@ -622,6 +632,9 @@ def analyse(
         if "quality_control" not in config_dict:
             config_dict["quality_control"] = {}
         config_dict["quality_control"]["long_read_min_length"] = min_len_lr
+    
+    if filter:
+        config_dict["host_filtering_reference"] = filter
     
     try:
         # Handle single-cell mode as pooled scRNA-seq: use R2 as single-end, enable RNA mode
