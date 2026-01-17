@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Union
 from loguru import logger
 
 import pandas as pd
+import yaml
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 
@@ -84,6 +85,27 @@ class AssemblyValidator:
                     return actual_path
                 # If files not found but directory exists, we might need to download it there
                 # But for now, let's add it to the search paths
+
+        # Check user config file first
+        user_config_path = Path.home() / ".virall" / "config.yaml"
+        if user_config_path.exists():
+            try:
+                with open(user_config_path, 'r') as f:
+                    user_config = yaml.safe_load(f)
+                    if user_config and "databases" in user_config:
+                        config_path = user_config["databases"].get("checkv_db_path")
+                        if config_path:
+                            config_checkv_path = Path(config_path)
+                            if config_checkv_path.exists():
+                                logger.debug(f"Using CheckV database path from user config: {config_checkv_path}")
+                                # Check if it's the directory or needs recursive search
+                                actual_path = self._find_checkv_database_path(config_checkv_path)
+                                if actual_path:
+                                    return actual_path
+                                # If exact path given in config exists, trust it even if empty (setup might fill it)
+                                return str(config_checkv_path)
+            except Exception as e:
+                logger.warning(f"Failed to load CheckV path from user config: {e}")
 
         # ALWAYS check container bind mount paths first, even if config has a path
         # This ensures bind mounts work correctly in Singularity containers

@@ -10,6 +10,7 @@ import glob
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 from loguru import logger
+import yaml
 
 import click
 import pandas as pd
@@ -216,7 +217,7 @@ class ViralAssembler:
         # Try to find the actual installation directory, not site-packages
         software_dir = self._find_installation_directory()
         
-        return {
+        config = {
             "min_contig_length": 1000,
             "min_coverage": 5,
             "viral_confidence_threshold": 0.8,
@@ -254,6 +255,30 @@ class ViralAssembler:
             "long_read_min_length": 1000,  # Minimum read length after filtering (lower for shorter reads)
             "phred_offset": 33  # PHRED quality offset (33 or 64), default to 33
         }
+        
+        # Check for user config file
+        user_config_path = Path.home() / ".virall" / "config.yaml"
+        if user_config_path.exists():
+            try:
+                with open(user_config_path, 'r') as f:
+                    user_config = yaml.safe_load(f)
+                    if user_config:
+                        # Deep update for databases
+                        if "databases" in user_config and "databases" in config:
+                            config["databases"].update(user_config["databases"])
+                        
+                        # Update other top-level keys if present
+                        for key, value in user_config.items():
+                            if key != "databases" and key in config:
+                                if isinstance(value, dict) and isinstance(config[key], dict):
+                                    config[key].update(value)
+                                else:
+                                    config[key] = value
+                logger.debug(f"Loaded user configuration from {user_config_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load user config from {user_config_path}: {e}")
+                
+        return config
     
     def assemble(
         self,

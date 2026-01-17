@@ -14,6 +14,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+import yaml
 from loguru import logger
 
 from .vog_annotator import VOGAnnotator
@@ -336,5 +337,39 @@ class DatabaseSetup:
         results['kaiju'] = self.setup_kaiju_database(kaiju_db)
         results['checkv'] = self.setup_checkv_database(checkv_db)
         
+        # Persist database paths to user config
+        db_paths = {
+            "vog_db_path": str(self.base_dir / "vog_db") if not vog_db else vog_db,
+            "kaiju_db_path": str(self.base_dir / "kaiju_db") if not kaiju_db else kaiju_db,
+            "checkv_db_path": str(self.base_dir / "checkv_db") if not checkv_db else checkv_db
+        }
+        self._update_user_config(db_paths)
+        
         return results
+
+    def _update_user_config(self, db_paths: Dict[str, str]) -> None:
+        """Update user configuration file with database paths."""
+        config_dir = Path.home() / ".virall"
+        config_file = config_dir / "config.yaml"
+        
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+            
+            config = {}
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = yaml.safe_load(f) or {}
+            
+            if "databases" not in config:
+                config["databases"] = {}
+                
+            config["databases"].update(db_paths)
+            
+            with open(config_file, 'w') as f:
+                yaml.dump(config, f, default_flow_style=False)
+                
+            logger.info(f"Updated user configuration with database paths at {config_file}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to update user configuration: {e}")
 

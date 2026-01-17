@@ -798,6 +798,31 @@ echo "All tools installed successfully!"
 
 # Clean up unnecessary files and folders (in SOFTWARE_DIR)
 echo "Cleaning up unnecessary files and folders..."
+
+# Create persistent user configuration
+echo "Creating user configuration..."
+mkdir -p "$HOME/.virall"
+CONFIG_FILE="$HOME/.virall/config.yaml"
+
+if [ -f "$SOFTWARE_DIR/configs/default_config.yaml" ]; then
+    cp "$SOFTWARE_DIR/configs/default_config.yaml" "$CONFIG_FILE"
+    
+    # Update database paths to absolute paths
+    # Use different delimiter for sed to avoid issues with path slashes
+    sed -i "s|vog_db_path: \"databases/vog_db\"|vog_db_path: \"$SOFTWARE_DIR/databases/vog_db\"|g" "$CONFIG_FILE"
+    sed -i "s|kaiju_db_path: \"databases/kaiju_db\"|kaiju_db_path: \"$SOFTWARE_DIR/databases/kaiju_db\"|g" "$CONFIG_FILE"
+    sed -i "s|checkv_db_path: \"databases/checkv_db\"|checkv_db_path: \"$SOFTWARE_DIR/databases/checkv_db\"|g" "$CONFIG_FILE"
+    
+    echo "Configuration saved to $CONFIG_FILE"
+    echo "Database paths updated to point to $SOFTWARE_DIR/databases"
+else
+    echo "Warning: default_config.yaml not found, creating minimal config..."
+    echo "databases:" > "$CONFIG_FILE"
+    echo "  vog_db_path: \"$SOFTWARE_DIR/databases/vog_db\"" >> "$CONFIG_FILE"
+    echo "  kaiju_db_path: \"$SOFTWARE_DIR/databases/kaiju_db\"" >> "$CONFIG_FILE"
+    echo "  checkv_db_path: \"$SOFTWARE_DIR/databases/checkv_db\"" >> "$CONFIG_FILE"
+    echo "Configuration saved to $CONFIG_FILE"
+fi
 echo "Removing build artifacts..."
 rm -rf "$SOFTWARE_DIR/build/" 2>/dev/null || echo "  - build/ directory not found"
 # Note: virall.egg-info is needed for editable install, don't remove it
