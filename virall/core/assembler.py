@@ -462,18 +462,31 @@ class ViralAssembler:
             if isinstance(quant_res, dict) and "abundance_file" in quant_res:
                 abundance_file = quant_res["abundance_file"]
         
-        # Fallback paths (standard and reference-guided)
+        # Fallback paths - check subdirectories first (long_reads, paired_reads, single_reads)
+        # then legacy paths (direct in contigs/)
         if not abundance_file:
-            candidates = [
-                self.output_dir / "06_quantification" / "contigs" / "contig_abundance.tsv",
-                self.output_dir / "06_quantification" / "reference_guided" / "contig_abundance.tsv",
-                self.output_dir / "06_quantification" / "contigs" / "combined_contig_abundance.tsv",
-                self.output_dir / "06_quantification" / "reference_guided" / "combined_contig_abundance.tsv"
-            ]
-            for candidate in candidates:
+            contigs_dir = self.output_dir / "06_quantification" / "contigs"
+            read_type_dirs = ["long_reads", "paired_reads", "single_reads"]
+            
+            # Check subdirectories first
+            for read_type in read_type_dirs:
+                candidate = contigs_dir / read_type / "contig_abundance.tsv"
                 if candidate.exists():
                     abundance_file = str(candidate)
                     break
+            
+            # Fallback to legacy paths (direct in contigs/ or combined files)
+            if not abundance_file:
+                candidates = [
+                    contigs_dir / "contig_abundance.tsv",
+                    contigs_dir / "combined_contig_abundance.tsv",
+                    self.output_dir / "06_quantification" / "reference_guided" / "contig_abundance.tsv",
+                    self.output_dir / "06_quantification" / "reference_guided" / "combined_contig_abundance.tsv"
+                ]
+                for candidate in candidates:
+                    if candidate.exists():
+                        abundance_file = str(candidate)
+                        break
         
         if abundance_file:
             self.plotter.plot_abundance(abundance_file)
@@ -559,34 +572,56 @@ class ViralAssembler:
                 self.plotter.plot_gene_predictions(annotations_file, gene_summary_file, kaiju_summary_file=kaiju_summary)
             
             # 5. Coverage Plots
-            depth_file = None
+            # For genome coverage, we use contigs/ (not scaffolds/) since we want actual genome sequences
+            # For hybrid assemblies, we combine coverage from all available read types (long_reads, paired_reads, single_reads)
+            depth_files = []
             
             # Check results structure
             if "quantification" in results:
                 quant_res = results["quantification"]
                 if isinstance(quant_res, dict) and "contig_depth" in quant_res:
+                    # If single file specified in results, use it
                     depth_file = quant_res["contig_depth"]
+                    if depth_file and os.path.exists(depth_file):
+                        depth_files = [depth_file]
             
-            # Fallback paths
-            if not depth_file:
-                candidates = [
-                    self.output_dir / "06_quantification" / "contigs" / "contig_depth.txt",
-                    self.output_dir / "06_quantification" / "reference_guided" / "contig_depth.txt",
-                    # Check subdirectories for reference-guided quantification
-                    # Prefer paired_reads over long_reads as it's more reliable for coverage
-                    self.output_dir / "06_quantification" / "reference_guided" / "paired_reads" / "contig_depth.txt",
-                    self.output_dir / "06_quantification" / "reference_guided" / "long_reads" / "contig_depth.txt"
-                ]
-                for candidate in candidates:
-                    if candidate.exists() and candidate.stat().st_size > 0:
-                        depth_file = str(candidate)
-                        break
+            # Find all available depth files in contigs/ subdirectories
+            # For hybrid assemblies, we want to combine coverage from all read types
+            if not depth_files:
+                contigs_dir = self.output_dir / "06_quantification" / "contigs"
+                read_type_dirs = ["long_reads", "paired_reads", "single_reads"]
+                
+                # Check each read type subdirectory
+                for read_type in read_type_dirs:
+                    depth_file_path = contigs_dir / read_type / "contig_depth.txt"
+                    if depth_file_path.exists() and depth_file_path.stat().st_size > 0:
+                        depth_files.append(str(depth_file_path))
+                
+                # Fallback: check for legacy paths (direct contig_depth.txt in contigs/)
+                if not depth_files:
+                    legacy_path = contigs_dir / "contig_depth.txt"
+                    if legacy_path.exists() and legacy_path.stat().st_size > 0:
+                        depth_files = [str(legacy_path)]
+                
+                # Also check reference-guided paths if no contigs found
+                if not depth_files:
+                    ref_guided_dir = self.output_dir / "06_quantification" / "reference_guided"
+                    for read_type in read_type_dirs:
+                        depth_file_path = ref_guided_dir / read_type / "contig_depth.txt"
+                        if depth_file_path.exists() and depth_file_path.stat().st_size > 0:
+                            depth_files.append(str(depth_file_path))
+                    
+                    if not depth_files:
+                        legacy_ref_path = ref_guided_dir / "contig_depth.txt"
+                        if legacy_ref_path.exists() and legacy_ref_path.stat().st_size > 0:
+                            depth_files = [str(legacy_ref_path)]
             
-            if quality_summary and depth_file:
+            if quality_summary and depth_files:
                 # Check if we are in reference-guided mode to plot all contigs
                 is_ref_guided = "viral_classifications" in results
                 max_p = 50 if is_ref_guided else 10
-                self.plotter.plot_high_quality_coverage(quality_summary, depth_file, max_plots=max_p, plot_all=is_ref_guided)
+                # Pass list of depth files to combine coverage from all sources
+                self.plotter.plot_high_quality_coverage(quality_summary, depth_files, max_plots=max_p, plot_all=is_ref_guided)
         else:
             logger.warning("No abundance file found, skipping plot generation")
             click.echo("  Skipping plots (no abundance data found)")

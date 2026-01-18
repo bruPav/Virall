@@ -545,13 +545,15 @@ class ViralPlotter:
                 
         return generated_plots
 
-    def plot_high_quality_coverage(self, quality_file: Union[str, Path], depth_file: Union[str, Path], max_plots: int = 10, plot_all: bool = False) -> List[str]:
+    def plot_high_quality_coverage(self, quality_file: Union[str, Path], depth_file: Union[str, Path, List[Union[str, Path]]], max_plots: int = 10, plot_all: bool = False) -> List[str]:
         """
         Generate coverage plots for high-quality contigs (or all contigs if plot_all=True).
         
+        For hybrid assemblies, combines coverage from multiple read types (long_reads, paired_reads, single_reads).
+        
         Args:
             quality_file: Path to quality_summary.tsv
-            depth_file: Path to contig_depth.txt
+            depth_file: Path to contig_depth.txt, or list of paths to combine coverage from multiple sources
             max_plots: Maximum number of plots to generate (default: 10)
             plot_all: If True, plot all contigs regardless of quality (default: False)
             
@@ -560,14 +562,27 @@ class ViralPlotter:
         """
         generated_plots = []
         
-        if not os.path.exists(quality_file) or not os.path.exists(depth_file):
-            logger.warning("Quality summary or depth file not found, skipping coverage plots")
+        if not os.path.exists(quality_file):
+            logger.warning("Quality summary file not found, skipping coverage plots")
             return generated_plots
         
-        # Check if depth file is empty
-        if os.path.getsize(depth_file) == 0:
-            logger.warning(f"Depth file is empty (no mapped reads), skipping coverage plots: {depth_file}")
+        # Handle single file or list of files
+        if isinstance(depth_file, (str, Path)):
+            depth_files = [depth_file]
+        else:
+            depth_files = list(depth_file)
+        
+        # Filter to existing, non-empty files
+        valid_depth_files = []
+        for df in depth_files:
+            if os.path.exists(df) and os.path.getsize(df) > 0:
+                valid_depth_files.append(df)
+        
+        if not valid_depth_files:
+            logger.warning("No valid depth files found, skipping coverage plots")
             return generated_plots
+        
+        logger.info(f"Combining coverage from {len(valid_depth_files)} source(s): {[Path(f).parent.name for f in valid_depth_files]}")
             
         try:
             # 1. Identify High-Quality Contigs
@@ -604,27 +619,35 @@ class ViralPlotter:
             coverage_dir = self.plots_dir / "coverage_plots"
             coverage_dir.mkdir(exist_ok=True)
             
-            # We'll read the whole file into a dataframe for simplicity, 
-            # but in production with huge files, we might want to optimize.
-            # Given the user's context, pandas read_csv should be fine.
-            # Using iterator to handle large files better
+            # 2. Read and combine depth data from all sources
+            # For hybrid assemblies, we combine coverage from multiple read types
+            # We'll aggregate depth by (contig_id, pos) and sum the depths
             
             chunk_size = 100000
-            chunks = pd.read_csv(depth_file, sep='\t', header=None, names=['contig_id', 'pos', 'depth'], chunksize=chunk_size)
+            # Dictionary to store combined coverage: {(contig_id, pos): total_depth}
+            combined_coverage = {}
             
-            # We need to aggregate data for our target contigs
-            # Since the file is sorted by contig usually, we can process chunks
+            for depth_file in valid_depth_files:
+                logger.debug(f"Reading coverage from {Path(depth_file).parent.name}")
+                chunks = pd.read_csv(depth_file, sep='\t', header=None, names=['contig_id', 'pos', 'depth'], chunksize=chunk_size)
+                
+                for chunk in chunks:
+                    # Filter for target contigs only
+                    relevant_data = chunk[chunk['contig_id'].isin(target_contigs)]
+                    
+                    if not relevant_data.empty:
+                        # Group by contig and position, sum depths
+                        for (contig_id, pos), group in relevant_data.groupby(['contig_id', 'pos']):
+                            key = (contig_id, pos)
+                            total_depth = group['depth'].sum()
+                            combined_coverage[key] = combined_coverage.get(key, 0) + total_depth
             
+            # Convert combined coverage to per-contig data structure
             current_contig_data = {contig: {'pos': [], 'depth': []} for contig in target_contigs}
             
-            for chunk in chunks:
-                # Filter chunk for target contigs
-                relevant_data = chunk[chunk['contig_id'].isin(target_contigs)]
-                
-                if not relevant_data.empty:
-                    for contig_id, group in relevant_data.groupby('contig_id'):
-                        current_contig_data[contig_id]['pos'].extend(group['pos'].tolist())
-                        current_contig_data[contig_id]['depth'].extend(group['depth'].tolist())
+            for (contig_id, pos), depth in combined_coverage.items():
+                current_contig_data[contig_id]['pos'].append(pos)
+                current_contig_data[contig_id]['depth'].append(depth)
             
             # 3. Generate Plots
             for contig_id in target_contigs:

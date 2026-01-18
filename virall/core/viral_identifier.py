@@ -847,20 +847,27 @@ class ViralIdentifier:
             logger.error("No reads provided for quantification")
             return {"status": "failed", "error": "No reads provided"}
         
-        # If multiple read types, run combined quantification
+        # Always use subdirectories for consistency, even with single read type
+        # This ensures consistent directory structure for plotting code
         if len(read_types) > 1:
             logger.info(f"Running combined quantification with {', '.join(read_types)} reads")
             return self._quantify_combined_reads(
                 contigs_file, reads_1, reads_2, single_reads, long_reads, output_dir, classification_data
             )
         else:
-            # Single read type
+            # Single read type - still create subdirectory for consistency
             if long_reads:
-                return self._quantify_with_minimap2(contigs_file, long_reads, output_dir, classification_data)
+                long_output_dir = output_dir / "long_reads"
+                long_output_dir.mkdir(exist_ok=True)
+                return self._quantify_with_minimap2(contigs_file, long_reads, long_output_dir, classification_data)
             elif reads_1 and reads_2:
-                return self._quantify_with_bwa_paired(contigs_file, reads_1, reads_2, output_dir, classification_data)
+                paired_output_dir = output_dir / "paired_reads"
+                paired_output_dir.mkdir(exist_ok=True)
+                return self._quantify_with_bwa_paired(contigs_file, reads_1, reads_2, paired_output_dir, classification_data)
             elif single_reads:
-                return self._quantify_with_bwa_single(contigs_file, single_reads, output_dir, classification_data)
+                single_output_dir = output_dir / "single_reads"
+                single_output_dir.mkdir(exist_ok=True)
+                return self._quantify_with_bwa_single(contigs_file, single_reads, single_output_dir, classification_data)
 
     def _quantify_combined_reads(
         self,
