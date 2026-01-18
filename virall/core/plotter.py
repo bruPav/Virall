@@ -592,15 +592,15 @@ class ViralPlotter:
                 logger.warning("Quality summary empty or missing checkv_quality column")
                 return generated_plots
                 
-            # Filter for High-quality unless plot_all is True
+            # Filter for High-quality and Complete genomes unless plot_all is True
             if plot_all:
                 hq_contigs = df_quality
                 logger.info("Plotting coverage for all contigs (reference mode enabled)")
             else:
-                hq_contigs = df_quality[df_quality['checkv_quality'] == 'High-quality']
+                hq_contigs = df_quality[df_quality['checkv_quality'].isin(['High-quality', 'Complete'])]
             
             if hq_contigs.empty:
-                logger.info("No High-quality contigs found to plot coverage for")
+                logger.info("No High-quality or Complete contigs found to plot coverage for")
                 return generated_plots
             
             # Sort by length (longest first) and take top N
@@ -608,7 +608,7 @@ class ViralPlotter:
                 hq_contigs = hq_contigs.sort_values('contig_length', ascending=False)
             
             target_contigs = hq_contigs['contig_id'].head(max_plots).tolist()
-            logger.info(f"Generating coverage plots for top {len(target_contigs)} high-quality contigs")
+            logger.info(f"Generating coverage plots for top {len(target_contigs)} high-quality/complete contigs")
             
             # 2. Read Depth Data
             # contig_depth.txt usually has no header: contig_id, pos, depth
