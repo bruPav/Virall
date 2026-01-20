@@ -675,7 +675,7 @@ class Preprocessor:
     def _filter_single_reads(self, r1: str, ref: str) -> str:
         out1 = self.temp_dir / "host_filtered_single.fastq"
         cmd = f"minimap2 -ax sr -t {self.threads} {ref} {r1} | " \
-              f"samtools fastq -f 4 {out1}" # -f 4 for unmapped
+              f"samtools fastq -f 4 - > {out1}" # -f 4 for unmapped
         
         log_file = self.temp_dir / "host_filtering_single.log"
         
@@ -702,7 +702,7 @@ class Preprocessor:
         preset = "map-pb" if tech == "pacbio" else "map-ont"
         
         cmd = f"minimap2 -ax {preset} -t {self.threads} {ref} {r1} | " \
-              f"samtools fastq -f 4 {out1}"
+              f"samtools fastq -f 4 - > {out1}"
               
         log_file = self.temp_dir / "host_filtering_long.log"
               
