@@ -1283,18 +1283,18 @@ class ViralAssembler:
                         logger.info("Flye succeeded with original file")
                     else:
                         logger.error(f"Flye also failed with original file. See log at {log_file_fallback}")
-                        return self._long_read_assembly_simple_fallback(reads, output_dir)
+                        raise RuntimeError(f"Flye assembly failed with both preprocessed and original files. See logs at {flye_dir}")
                 else:
-                    # Fallback to simple longest-reads selection if Flye fails
-                    return self._long_read_assembly_simple_fallback(reads, output_dir)
+                    # Raise error if original file not available or same as input
+                    raise RuntimeError(f"Flye assembly failed. FASTQ format error detected in {input_file}")
             else:
-                # Fallback to simple longest-reads selection if Flye fails
-                return self._long_read_assembly_simple_fallback(reads, output_dir)
+                # Raise error if Flye fails
+                raise RuntimeError(f"Flye assembly failed. See log at {log_file}")
 
         contigs_file = flye_dir / "assembly.fasta"
         if not contigs_file.exists():
-            logger.warning("Flye produced no contigs; using fallback strategy")
-            return self._long_read_assembly_simple_fallback(reads, output_dir)
+            logger.error("Flye produced no contigs")
+            raise RuntimeError("Flye assembly finished but produced no contigs (assembly.fasta not found)")
 
         return {
             "contigs": str(contigs_file),
@@ -1397,48 +1397,7 @@ class ViralAssembler:
             logger.warning(f"FASTQ validation error for {fastq_file}: {e}")
             return False
     
-    def _long_read_assembly_simple_fallback(self, reads: Dict[str, str], output_dir: Path, reference: Optional[Union[str, Path]] = None) -> Dict[str, str]:
-        """Simple fallback: select longest reads as contigs when all assemblers fail."""
-        logger.info("Running simple read selection strategy (last resort)")
-        
-        from Bio import SeqIO
-        import gzip
-        
-        # Read all sequences and sort by length
-        sequences = []
-        if self._is_gzipped(str(reads["long"])):
-            fh = gzip.open(reads["long"], "rt")
-        else:
-            fh = open(reads["long"], "rt")
-        with fh as handle:
-            for record in SeqIO.parse(handle, "fastq"):
-                sequences.append(record)
-        
-        # Sort by length (descending)
-        sequences.sort(key=lambda x: len(x.seq), reverse=True)
-        
-        # Select top 100 longest sequences as "contigs"
-        selected_sequences = sequences[:100]
-        
-        # Write contigs
-        contigs_file = output_dir / "contigs.fasta"
-        scaffolds_file = output_dir / "scaffolds.fasta"
-        
-        with open(contigs_file, "w") as handle:
-            for i, record in enumerate(selected_sequences):
-                record.id = f"contig_{i+1}_length_{len(record.seq)}"
-                record.description = f"Selected read {i+1} (length: {len(record.seq)})"
-                SeqIO.write(record, handle, "fasta")
-        
-        # Copy contigs to scaffolds (same file for simplicity)
-        import shutil
-        shutil.copy2(contigs_file, scaffolds_file)
-        
-        logger.info(f"Simple fallback completed: selected {len(selected_sequences)} longest reads as contigs")
-        return {
-            "contigs": str(contigs_file),
-            "scaffolds": str(scaffolds_file)
-        }
+
     
     def _subsample_long_reads_if_needed(self, reads_file: str) -> Optional[str]:
         """Subsample long reads if dataset is too large for memory constraints."""
