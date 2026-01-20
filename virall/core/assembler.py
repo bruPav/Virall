@@ -771,6 +771,16 @@ class ViralAssembler:
                     preprocessed,
                     host_ref
                 )
+                
+                # Copy host filtering logs
+                try:
+                    log_dir = self.output_dir / "00_qc" / "host_filtering"
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                    for log_file in self.preprocessor.temp_dir.glob("host_filtering_*.log"):
+                        shutil.copy2(log_file, log_dir / log_file.name)
+                        logger.info(f"Saved host filtering log: {log_dir / log_file.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to save host filtering logs: {e}")
             else:
                 logger.warning(f"Host reference file not found: {host_ref}")
                 click.echo(f"  Warning: Host reference not found: {host_ref}")
