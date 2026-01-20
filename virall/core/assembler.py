@@ -202,10 +202,10 @@ class ViralAssembler:
                     "use_database_search": True,
                     "min_viral_length": 1000
                 },
-                # Deprecated Flye parameters (kept for backward compat; unused)
+                # Flye parameters
                 "genome_size": "1m",
                 "flye_iterations": 1,
-                "flye_min_overlap": 1000,
+                "flye_min_overlap": "auto",
                 "flye_read_mode": "raw",
                 "flye_read_error": 0.1,
                 # Long-read subsampling parameters
@@ -238,10 +238,10 @@ class ViralAssembler:
                 "use_database_search": True,
                 "min_viral_length": 1000
             },
-            # Deprecated Flye parameters (kept for backward compat; unused)
+            # Flye parameters
             "genome_size": "1m",
             "flye_iterations": 1,
-            "flye_min_overlap": 1000,
+            "flye_min_overlap": "auto",  # auto or int
             "flye_read_mode": "raw",
             "flye_read_error": 0.1,
             # Long-read subsampling parameters
@@ -253,7 +253,11 @@ class ViralAssembler:
             # Long-read preprocessing parameters
             "long_read_quality_threshold": 7,  # Minimum quality score for long reads
             "long_read_min_length": 1000,  # Minimum read length after filtering (lower for shorter reads)
-            "phred_offset": 33  # PHRED quality offset (33 or 64), default to 33
+            "phred_offset": 33,  # PHRED quality offset (33 or 64), default to 33
+            # SPAdes parameters
+            "spades_k": None, # k-mer sizes (comma-separated string e.g. "21,33,55" or list)
+            "spades_cov_cutoff": "off", # coverage cutoff
+            "spades_careful": False # --careful flag
         }
         
         # Check for user config file
@@ -990,6 +994,20 @@ class ViralAssembler:
         if self.config.get("phred_offset"):
             cmd.extend(["--phred-offset", str(self.config["phred_offset"])])
             logger.info(f"Using manual PHRED offset: {self.config['phred_offset']}")
+
+        # Add configurable SPAdes parameters
+        if self.config.get("spades_k"):
+            k_val = self.config["spades_k"]
+            # Handle list or comma-separated string
+            if isinstance(k_val, list):
+                k_val = ",".join(map(str, k_val))
+            cmd.extend(["-k", str(k_val)])
+        
+        if self.config.get("spades_cov_cutoff") and str(self.config["spades_cov_cutoff"]) != "off":
+            cmd.extend(["--cov-cutoff", str(self.config["spades_cov_cutoff"])])
+            
+        if self.config.get("spades_careful"):
+            cmd.append("--careful")
         
         # Run SPAdes
         # Run SPAdes
@@ -1077,6 +1095,20 @@ class ViralAssembler:
         if self.config.get("phred_offset"):
             cmd.extend(["--phred-offset", str(self.config["phred_offset"])])
             logger.info(f"Using manual PHRED offset: {self.config['phred_offset']}")
+
+        # Add configurable SPAdes parameters
+        if self.config.get("spades_k"):
+            k_val = self.config["spades_k"]
+            # Handle list or comma-separated string
+            if isinstance(k_val, list):
+                k_val = ",".join(map(str, k_val))
+            cmd.extend(["-k", str(k_val)])
+        
+        if self.config.get("spades_cov_cutoff") and str(self.config["spades_cov_cutoff"]) != "off":
+            cmd.extend(["--cov-cutoff", str(self.config["spades_cov_cutoff"])])
+            
+        if self.config.get("spades_careful"):
+            cmd.append("--careful")
         
         # Debug: Log the command being run
         logger.info(f"Running SPAdes command: {' '.join(cmd)}")
@@ -1196,6 +1228,13 @@ class ViralAssembler:
             "--threads", str(self.threads),
             "--meta"
         ]
+        
+        # Add configurable parameters
+        if self.config.get("flye_min_overlap") and str(self.config["flye_min_overlap"]).lower() != "auto":
+             flye_cmd.extend(["--min-overlap", str(self.config["flye_min_overlap"])])
+        
+        if self.config.get("flye_iterations"):
+             flye_cmd.extend(["--iterations", str(self.config["flye_iterations"])])
 
         # Validate FASTQ file before passing to Flye
         logger.info(f"Validating FASTQ file format before Flye assembly...")

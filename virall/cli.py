@@ -113,6 +113,12 @@ def main(ctx: click.Context, verbose: bool, log_file: Optional[str]):
 @click.option('--min-len-sr', type=int, default=None, help='Minimum length for short reads after filtering (overrides config)')
 @click.option('--min-len-lr', type=int, default=None, help='Minimum length for long reads after filtering (overrides config)')
 @click.option('--filter', help='Path to host genome for filtering (e.g. human.fna)')
+# Advanced Assembly Options
+@click.option('--flye-min-overlap', help='Flye: minimum overlap between reads (int or "auto")')
+@click.option('--flye-iterations', type=int, help='Flye: number of polishing iterations')
+@click.option('--spades-k', help='SPAdes: comma-separated list of k-mer sizes (e.g. "21,33,55")')
+@click.option('--spades-cov-cutoff', help='SPAdes: coverage cutoff (float or "off"/"auto")')
+@click.option('--spades-careful', is_flag=True, help='SPAdes: tries to reduce number of mismatches and short indels')
 def assemble(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -133,7 +139,12 @@ def assemble(
     phred_offset: Optional[str],
     min_len_sr: Optional[int],
     min_len_lr: Optional[int],
-    filter: Optional[str]
+    filter: Optional[str],
+    flye_min_overlap: Optional[str],
+    flye_iterations: Optional[int],
+    spades_k: Optional[str],
+    spades_cov_cutoff: Optional[str],
+    spades_careful: bool
 ):
     """Assemble reads and identify viral contigs.
     
@@ -205,6 +216,18 @@ def assemble(
     
     if filter:
         config_dict["host_filtering_reference"] = filter
+
+    # Assembly parameters
+    if flye_min_overlap:
+        config_dict["flye_min_overlap"] = flye_min_overlap
+    if flye_iterations is not None:
+        config_dict["flye_iterations"] = flye_iterations
+    if spades_k:
+        config_dict["spades_k"] = spades_k
+    if spades_cov_cutoff:
+        config_dict["spades_cov_cutoff"] = spades_cov_cutoff
+    if spades_careful:
+        config_dict["spades_careful"] = True
     
     try:
         # Handle single-cell mode as pooled scRNA-seq: use R2 as single-end, enable RNA mode
@@ -545,6 +568,12 @@ def assemble(
 @click.option('--min-len-sr', type=int, default=None, help='Minimum length for short reads after filtering (overrides config)')
 @click.option('--min-len-lr', type=int, default=None, help='Minimum length for long reads after filtering (overrides config)')
 @click.option('--filter', help='Path to host genome for filtering (e.g. human.fna)')
+# Advanced Assembly Options
+@click.option('--flye-min-overlap', help='Flye: minimum overlap between reads (int or "auto")')
+@click.option('--flye-iterations', type=int, help='Flye: number of polishing iterations')
+@click.option('--spades-k', help='SPAdes: comma-separated list of k-mer sizes (e.g. "21,33,55")')
+@click.option('--spades-cov-cutoff', help='SPAdes: coverage cutoff (float or "off"/"auto")')
+@click.option('--spades-careful', is_flag=True, help='SPAdes: tries to reduce number of mismatches and short indels')
 def analyse(
     short_reads_1: Optional[str],
     short_reads_2: Optional[str],
@@ -565,7 +594,12 @@ def analyse(
     phred_offset: Optional[str],
     min_len_sr: Optional[int],
     min_len_lr: Optional[int],
-    filter: Optional[str]
+    filter: Optional[str],
+    flye_min_overlap: Optional[str],
+    flye_iterations: Optional[int],
+    spades_k: Optional[str],
+    spades_cov_cutoff: Optional[str],
+    spades_careful: bool
 ):
     """Run complete viral genome analysis pipeline from sequencing reads.
     
@@ -635,6 +669,18 @@ def analyse(
     
     if filter:
         config_dict["host_filtering_reference"] = filter
+
+    # Assembly parameters
+    if flye_min_overlap:
+        config_dict["flye_min_overlap"] = flye_min_overlap
+    if flye_iterations is not None:
+        config_dict["flye_iterations"] = flye_iterations
+    if spades_k:
+        config_dict["spades_k"] = spades_k
+    if spades_cov_cutoff:
+        config_dict["spades_cov_cutoff"] = spades_cov_cutoff
+    if spades_careful:
+        config_dict["spades_careful"] = True
     
     try:
         # Handle single-cell mode as pooled scRNA-seq: use R2 as single-end, enable RNA mode

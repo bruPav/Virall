@@ -295,6 +295,11 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Changelog
 
+### v0.2.2
+- Added configurable assembly parameters for Flye (min-overlap, iterations)
+- Added configurable assembly parameters for SPAdes (k-mers, cov-cutoff, careful mode)
+- Exposed advanced assembly options via CLI flags
+
 ### v0.2.1
 - Added `--version` flag to CLI
 - Added `--filter` option for host genome filtering
