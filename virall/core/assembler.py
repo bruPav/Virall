@@ -2714,7 +2714,7 @@ class ViralAssembler:
                     "-c",  # Output CIGAR instead of MD
                     "-N", "1",  # Report at most 1 secondary alignment
                     "--secondary=no",  # No secondary alignments
-                    "-x", "map-ont" if self.rna_mode else "asm",  # Preset for RNA or DNA
+                    "-x", "map-ont" if self.rna_mode else "asm10",  # Preset for RNA or DNA (asm10 allows ~10% divergence)
                     ref_index,
                     str(contigs_file)
                 ]
