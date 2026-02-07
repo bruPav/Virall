@@ -31,8 +31,10 @@ RUN mamba create -n virall -y python=3.11 && mamba clean -afy
 SHELL ["mamba", "run", "-n", "virall", "/bin/bash", "-c"]
 
 # Install Python dependencies
+# numpy 1.26.x is required for compatibility with both TensorFlow (<2.0) and numba (<2.4)
+# This allows geNomad's neural network classification to work
 RUN mamba install -n virall -c conda-forge -y \
-    "numpy>=2.0.0" \
+    "numpy>=1.26.0,<2.0" \
     "pandas>=2.2.0" \
     "matplotlib>=3.8.0" \
     "seaborn>=0.13.0" \
@@ -46,25 +48,31 @@ RUN mamba install -n virall -c conda-forge -y \
     "psutil>=5.9.0" \
     && mamba clean -afy
 
-# Install bioinformatics tools
+# Install bioinformatics tools (versions relaxed so solver can resolve libzlib/gsl)
 RUN mamba install -n virall -c bioconda -c conda-forge -y \
-    samtools=1.22.1 \
-    bwa=0.7.19 \
-    minimap2=2.30 \
-    spades=4.2.0 \
-    flye=2.9.6 \
-    fastp=1.0.1 \
-    fastplong=0.4.1 \
-    fastqc=0.12.1 \
-    seqtk=1.3 \
-    checkv=1.0.3 \
-    bcftools=1.22 \
-    pilon=1.24 \
-    hmmer=3.4 \
-    prodigal=2.6.3 \
-    kaiju=1.10.1 \
-    gsl=2.6 \
+    samtools \
+    bwa \
+    minimap2 \
+    spades \
+    flye \
+    fastp \
+    fastplong \
+    fastqc \
+    seqtk \
+    checkv \
+    diamond \
+    bcftools \
+    pilon \
+    hmmer \
+    prodigal \
+    kaiju \
+    genomad \
+    umi_tools \
     && mamba clean -afy
+
+# Note: virall Python package is NOT installed in the container
+# All Nextflow plotting functionality is self-contained in nextflow/bin/run_plots.py
+# This simplifies the container and avoids version sync issues
 
 # Set up directories for databases and work
 ENV SOFTWARE_DIR=/opt/virall
@@ -72,33 +80,47 @@ ENV VOG_DB_DIR=${SOFTWARE_DIR}/databases/vog_db
 ENV KAIJU_DB_DIR=${SOFTWARE_DIR}/databases/kaiju_db
 ENV CHECKV_DB_DIR=${SOFTWARE_DIR}/databases/checkv_db
 ENV CHECKV_DB=${CHECKV_DB_DIR}
+ENV GENOMAD_DB_DIR=${SOFTWARE_DIR}/databases/genomad_db
 
-RUN mkdir -p ${VOG_DB_DIR} ${KAIJU_DB_DIR} ${CHECKV_DB_DIR}
+RUN mkdir -p ${VOG_DB_DIR} ${KAIJU_DB_DIR} ${CHECKV_DB_DIR} ${GENOMAD_DB_DIR}
 
-# Download VOG database
+# Download VOG database (tarball may have AllVOG.hmm or individual VOG*.hmm files)
 RUN cd ${VOG_DB_DIR} && \
     wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.hmm.tar.gz && \
     tar -xzf vog.hmm.tar.gz && \
     rm -f vog.hmm.tar.gz && \
-    cat AllVOG.hmm > vog_all.hmm && \
-    rm -f AllVOG.hmm && \
+    ( [ -f AllVOG.hmm ] && cat AllVOG.hmm > vog_all.hmm ) || find . -name '*.hmm' -exec cat {} + > vog_all.hmm && \
     hmmpress vog_all.hmm
 
 # Download Kaiju database (viruses subset)
+# Tarball may extract flat or into a subdir; flatten so .fmi and .dmp are in KAIJU_DB_DIR
 RUN cd ${KAIJU_DB_DIR} && \
-    wget -q https://kaiju-idx.s3.eu-central-1.amazonaws.com/2024/kaiju_db_viruses_2024-10-04.tgz && \
-    tar -xzf kaiju_db_viruses_2024-10-04.tgz && \
-    rm -f kaiju_db_viruses_2024-10-04.tgz && \
+    wget -q https://kaiju-idx.s3.eu-central-1.amazonaws.com/2024/kaiju_db_viruses_2024-08-15.tgz -O kaiju_db_viruses.tgz && \
+    tar -xzf kaiju_db_viruses.tgz && \
+    rm -f kaiju_db_viruses.tgz && \
+    subdir=$(find . -maxdepth 1 -type d ! -name . | head -1) && \
+    if [ -n "$subdir" ]; then mv "$subdir"/* . 2>/dev/null; rmdir "$subdir" 2>/dev/null || true; fi && \
     for f in kaiju_db_viruses*.fmi kaiju_db_viruses*nodes.dmp kaiju_db_viruses*names.dmp; do \
-        [ -f "$f" ] && mv "$f" "$(echo $f | sed 's/kaiju_db_viruses[^.]*\./kaiju_db./g')"; \
-    done 2>/dev/null || true
+        [ -f "$f" ] && mv "$f" "$(echo "$f" | sed 's/kaiju_db_viruses[^.]*\./kaiju_db./g; s/kaiju_db_viruses[^_]*_/kaiju_db_/g')"; \
+    done 2>/dev/null || true && \
+    test -n "$(find . -maxdepth 1 -name '*.fmi' | head -1)" || (echo "Kaiju DB build failed: no .fmi in ${KAIJU_DB_DIR}" && exit 1)
 
-# Download CheckV database
+# Download CheckV database (v1.2+ tarball does not include .dmnd; build from .faa)
 RUN cd ${CHECKV_DB_DIR} && \
     curl -fL -o checkv-db.tar.gz https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz && \
     tar -xzf checkv-db.tar.gz && \
     rm -f checkv-db.tar.gz && \
-    if [ -d "checkv-db-v1.5" ]; then mv checkv-db-v1.5/* . && rmdir checkv-db-v1.5; fi
+    if [ -d "checkv-db-v1.5" ]; then mv checkv-db-v1.5/* . && rmdir checkv-db-v1.5; fi && \
+    if [ -f "genome_db/checkv_reps.faa" ] && [ ! -f "genome_db/checkv_reps.dmnd" ]; then \
+        diamond makedb --in genome_db/checkv_reps.faa --db genome_db/checkv_reps; \
+    fi && \
+    test -f genome_db/checkv_reps.dmnd || (echo "CheckV DB build failed: genome_db/checkv_reps.dmnd missing" && exit 1)
+
+# Download geNomad database (~4GB, for RNA viruses and eukaryotic DNA viruses)
+# geNomad is used alongside CheckV: CheckV for phages, geNomad for other viruses
+RUN genomad download-database ${GENOMAD_DB_DIR} && \
+    test -d ${GENOMAD_DB_DIR}/genomad_db || test -f ${GENOMAD_DB_DIR}/virus_hallmark_annotation.txt || \
+    (echo "geNomad DB download failed" && exit 1)
 
 # Create activation script for LD_LIBRARY_PATH
 RUN mkdir -p /opt/conda/envs/virall/etc/conda/activate.d && \

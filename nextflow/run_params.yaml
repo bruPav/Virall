@@ -1,0 +1,110 @@
+# Virall Nextflow run configuration
+# Copy this file, fill in your paths and options, then run:
+#   nextflow run nextflow/main.nf -params-file run_params.yaml -profile docker (or -profile singularity)
+# Optional: -resume to continue from last successful step
+
+# -----------------------------------------------------------------------------
+# Input
+# -----------------------------------------------------------------------------
+# Path to sample sheet CSV
+# Bulk mode columns: sample_id, read1, read2, single, long
+# Single-cell mode columns: sample_id, read1, read2, single, long, sc_read1, sc_read2
+samples: "nextflow/samples.csv"
+
+# Output directory for all results
+outdir: "results"
+
+# -----------------------------------------------------------------------------
+# Databases (required for full pipeline; or set env VIRALL_DATABASE_DIR)
+# -----------------------------------------------------------------------------
+# Leave null to use VIRALL_DATABASE_DIR/kaiju_db, etc. for Docker and Singularity uses
+kaiju_db: null
+checkv_db: null      # CheckV database (optimal for bacteriophages)
+genomad_db: null     # geNomad database (optimal for RNA viruses & eukaryotic viruses)
+vog_db: null
+
+# Quality assessment strategy:
+# - CheckV is used for bacteriophages (Caudovirales, etc.) - excellent phage-specific database
+# - geNomad is used for RNA viruses and eukaryotic viruses - better general coverage
+# Results are automatically merged based on Kaiju taxonomy classification
+
+# -----------------------------------------------------------------------------
+# Assembly and mode
+# -----------------------------------------------------------------------------
+# Assembly strategy: "auto" (detect from inputs) | "hybrid" | "short_only" | "long_only"
+# With "auto" (default): only paired/single → short_only; only long → long_only; both → hybrid
+assembly_strategy: "auto"
+
+# Set true for RNA-seq (SPAdes --rnaviral)
+rna_mode: false
+
+# Optional reference genome (e.g. viral reference FASTA)
+# When set: 1) SPAdes uses --trusted-contigs for guided assembly
+#           2) REFERENCE_CHECK process runs to detect if reference is present in sample
+#              (maps reads to reference, reports detection status, generates coverage plot)
+reference: null
+
+# Optional host genome FASTA to filter out host reads (like Virall --filter)
+# When set, reads mapping to the host are removed before assembly (minimap2 + samtools).
+host_genome: null
+
+# -----------------------------------------------------------------------------
+# Preprocessing
+# -----------------------------------------------------------------------------
+# PHRED quality threshold and minimum read length after trimming
+quality_phred: 20           # short reads (fastp)
+quality_phred_long: 7       # long reads (fastplong)
+min_read_len: 50            # short reads (fastp)
+min_read_len_long: 1000     # long reads (fastplong)
+
+# Long-read sequencing technology: "nanopore" or "pacbio". This parameter is ignored if only short reads are present
+# Affects SPAdes (--nanopore vs --pacbio), Flye (--nano-raw vs --pacbio-raw), minimap2 presets
+long_read_tech: "nanopore"
+
+# Set true for Ion Torrent short reads (adds --iontorrent to SPAdes for homopolymer error correction)
+iontorrent: false
+
+# Set true to use metaviralSPAdes (--metaviral) instead of regular SPAdes
+# Note: When enabled, --trusted-contigs is automatically disabled (metaviralSPAdes handles reference differently)
+# The reference genome will still be used for REFERENCE_CHECK if provided
+metaviral_mode: false
+
+# -----------------------------------------------------------------------------
+# Resources
+# -----------------------------------------------------------------------------
+threads: 8
+memory: "16G"
+
+# -----------------------------------------------------------------------------
+# Optional minimum contig length
+# -----------------------------------------------------------------------------
+min_contig_len: 1000
+
+# -----------------------------------------------------------------------------
+# Single-Cell Sequencing (10x Genomics)
+# -----------------------------------------------------------------------------
+# Enable single-cell mode for 10x Genomics data
+# When enabled, the pipeline:
+#   1. Extracts cell barcodes and UMIs from R1
+#   2. Pools all cells for assembly and viral discovery
+#   3. Maps barcoded reads back to viral contigs
+#   4. Generates per-cell viral quantification (MTX format)
+single_cell_mode: false
+
+# 10x chemistry version - determines barcode/UMI structure
+# Supported values:
+#   - "10x_v3" (or "10x_3prime_v3", "10x_5prime_v3"): 16bp barcode + 12bp UMI (default)
+#   - "10x_v2" (or "10x_3prime_v2", "10x_5prime_v2"): 16bp barcode + 10bp UMI
+#   - "10x_v1" (or "10x_3prime_v1"): 14bp barcode + 10bp UMI
+sc_chemistry: "10x_v3"
+
+# Optional: custom barcode whitelist file
+# If not provided, all observed barcodes are used
+sc_barcode_whitelist: null
+
+# Minimum reads per cell to include in output matrix
+# Cells with fewer reads are filtered out
+sc_min_reads_per_cell: 100
+
+# Minimum viral UMIs to classify a cell as "infected"
+sc_min_viral_umis: 1

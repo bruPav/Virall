@@ -2,15 +2,9 @@ Bootstrap: docker
 From: ubuntu:22.04
 
 %files
-    # Copy virall source code into container
-    # Paths are relative to where you run: singularity build virall.sif virall.def
-    # Run from the virall source directory (where setup.py is located)
-    virall /opt/virall/src/virall
-    setup.py /opt/virall/src/setup.py
-    requirements.txt /opt/virall/src/requirements.txt
-    README.md /opt/virall/src/README.md
-    configs /opt/virall/src/configs
-    LICENSE /opt/virall/src/LICENSE
+    # Note: virall Python package is NOT copied into the container
+    # All Nextflow plotting functionality is self-contained in nextflow/bin/run_plots.py
+    # This simplifies the container and avoids version sync issues
 
 %environment
     export DEBIAN_FRONTEND=noninteractive
@@ -21,6 +15,8 @@ From: ubuntu:22.04
     export LANG=C.UTF-8
     # Set default database directory for the container
     export VIRALL_DATABASE_DIR=/opt/virall/databases
+    # geNomad database path
+    export GENOMAD_DB=/opt/virall/databases/genomad_db
 
 %post
     # Set environment variables
@@ -249,13 +245,21 @@ From: ubuntu:22.04
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y pilon" || echo "Warning: pilon installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
-    echo "Installing checkv..."
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y checkv" || echo "Warning: checkv installation failed, continuing..."
+    echo "Installing checkv and diamond (CheckV v1.2+ builds .dmnd from .faa)..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y checkv diamond" || echo "Warning: checkv/diamond installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing geNomad (for RNA viruses and eukaryotic DNA viruses)..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y genomad" || echo "Warning: genomad installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     echo "Installing kaiju..."
     # Install Kaiju 1.10.1 (includes kaiju-makedb) instead of default 1.4.4
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y 'kaiju=1.10.1'" || echo "Warning: kaiju installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing umi_tools (for single-cell sequencing support)..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y umi_tools" || echo "Warning: umi_tools installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     # Try to install minimap2 and fastqc with conda (they failed with mamba)
@@ -329,6 +333,7 @@ From: ubuntu:22.04
     mkdir -p /opt/virall/databases/vog_db
     mkdir -p /opt/virall/databases/kaiju_db
     mkdir -p /opt/virall/databases/checkv_db
+    mkdir -p /opt/virall/databases/genomad_db
     
     # Create directory for virall source code
     # The source code should be copied into the container during build
@@ -346,139 +351,85 @@ From: ubuntu:22.04
         du -sh /opt/conda/pkgs 2>/dev/null || true
     fi
 
-    # Install virall package (if source code is available)
-    # This assumes the virall source code is in the build context
-    # Copy source code if it exists in the build directory
-    if [ -d "/opt/virall/src" ] && [ -f "/opt/virall/src/setup.py" ]; then
-        # Install virall in editable mode
-        cd /tmp
-        bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install -e /opt/virall/src"
-    else
-        echo "Note: Virall source code not found during build."
-        echo "Install it at runtime with: pip install -e /path/to/virall/source"
-    fi
+    # Note: virall Python package is NOT installed in the container
+    # All Nextflow plotting functionality is self-contained in nextflow/bin/run_plots.py
+    # This simplifies the container and avoids version sync issues
+    
+    # Fix numpy version for TensorFlow + numba/geNomad compatibility
+    # TensorFlow requires numpy < 2.0, numba requires numpy < 2.4
+    # numpy 1.26.x satisfies both requirements
+    echo "Ensuring numpy version compatibility for TensorFlow and numba/geNomad..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install 'numpy>=1.26.0,<2.0'" || echo "Warning: numpy version fix failed"
 
     # ========================================================================
-    # Database Setup (Optional - will increase container size by ~21GB)
+    # Database Setup (included in image for easy cluster use, ~21GB total)
     # ========================================================================
-    # Uncomment the sections below to include databases in the container
-    # Note: This will significantly increase build time and container size
-    # Alternative: Mount databases at runtime using bind mounts
-    # ========================================================================
+    # Same as Dockerfile: VOG, Kaiju (viruses), CheckV baked in at /opt/virall/databases/
     
-    # Set up VOG database for viral gene annotation
-    # Uncomment to include VOG database (~1GB) in container
-    # echo "Setting up VOG (Viral Orthologous Groups) database..."
-    # VOG_DB_DIR="/opt/virall/databases/vog_db"
-    # mkdir -p "$VOG_DB_DIR"
-    # if [ ! -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
-    #     echo "Downloading and setting up VOG database (this may take 5-10 minutes)..."
-    #     # Set LD_LIBRARY_PATH for HMMER (needs OpenMPI libraries)
-    #     export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-    #     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && python -c \"
-    # import os
-    # import sys
-    # from virall.core.vog_annotator import VOGAnnotator
-    # 
-    # # Set LD_LIBRARY_PATH for subprocess calls (hmmpress needs MPI libraries)
-    # conda_prefix = os.environ.get('CONDA_PREFIX', '')
-    # if conda_prefix:
-    #     lib_path = os.path.join(conda_prefix, 'lib')
-    #     if os.path.isdir(lib_path):
-    #         current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
-    #         new_ld_path = f'{lib_path}:{current_ld_path}' if current_ld_path else lib_path
-    #         os.environ['LD_LIBRARY_PATH'] = new_ld_path
-    # 
-    # try:
-    #     annotator = VOGAnnotator()
-    #     if annotator.setup_vog_database('$VOG_DB_DIR'):
-    #         print('VOG database setup completed successfully')
-    #         sys.exit(0)
-    #     else:
-    #         print('VOG database setup failed')
-    #         sys.exit(1)
-    # except Exception as e:
-    #     print(f'VOG database setup error: {e}')
-    #     sys.exit(1)
-    # \"" || echo "Warning: VOG database setup failed - can be done at runtime"
-    #     # Try manual pressing if database file exists but not pressed
-    #     if [ -f "$VOG_DB_DIR/vog.hmm" ] && [ ! -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
-    #         echo "Pressing VOG database manually..."
-    #         LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH" hmmpress "$VOG_DB_DIR/vog.hmm" 2>/dev/null || echo "Warning: Manual pressing failed"
-    #     fi
-    # else
-    #     echo "VOG database already exists"
-    # fi
+    echo "Setting up VOG (Viral Orthologous Groups) database..."
+    VOG_DB_DIR="/opt/virall/databases/vog_db"
+    mkdir -p "$VOG_DB_DIR"
+    if [ ! -f "$VOG_DB_DIR/vog.hmm.h3m" ]; then
+        echo "Downloading and setting up VOG database (this may take 5-10 minutes)..."
+        export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+        cd "$VOG_DB_DIR" && \
+            wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.hmm.tar.gz && \
+            tar -xzf vog.hmm.tar.gz && rm -f vog.hmm.tar.gz && \
+            ( [ -f AllVOG.hmm ] && cat AllVOG.hmm > vog.hmm && rm -f AllVOG.hmm ) || true && \
+            ( [ -f vog.hmm ] && hmmpress vog.hmm ) || true
+        cd - >/dev/null
+    fi
     
-    # Set up Kaiju database for viral contig classification
-    # Uncomment to include Kaiju database (~several GB) in container
-    # echo "Setting up Kaiju viral database..."
-    # KAIJU_DB_DIR="/opt/virall/databases/kaiju_db"
-    # mkdir -p "$KAIJU_DB_DIR"
-    # if [ ! -f "$KAIJU_DB_DIR/kaiju_db_viruses.fmi" ]; then
-    #     echo "Downloading Kaiju viral database (this may take 10-30 minutes)..."
-    #     echo "Note: This will download the full NCBI taxonomy database first, then create viral subset"
-    #     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && kaiju-makedb -s viruses -d $KAIJU_DB_DIR" || echo "Warning: Kaiju database setup failed - can be done at runtime"
-    #     # Clean up temporary files
-    #     if [ -d "$KAIJU_DB_DIR" ]; then
-    #         cd "$KAIJU_DB_DIR"
-    #         rm -f kaiju_db_viruses.bwt kaiju_db_viruses.sa 2>/dev/null || true
-    #         # Verify nodes.dmp exists (required for Kaiju)
-    #         if [ ! -f "$KAIJU_DB_DIR/nodes.dmp" ]; then
-    #             echo "Downloading full taxonomy database for Kaiju..."
-    #             bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && kaiju-makedb -d $KAIJU_DB_DIR" || echo "Warning: Full taxonomy download failed"
-    #         fi
-    #     fi
-    # else
-    #     echo "Kaiju database already exists"
-    # fi
+    echo "Setting up Kaiju viral database..."
+    KAIJU_DB_DIR="/opt/virall/databases/kaiju_db"
+    mkdir -p "$KAIJU_DB_DIR"
+    if [ -z "$(find "$KAIJU_DB_DIR" -maxdepth 2 -name '*.fmi' 2>/dev/null | head -1)" ]; then
+        echo "Downloading Kaiju viral database (pre-built viruses subset)..."
+        cd "$KAIJU_DB_DIR" && \
+            wget -q https://kaiju-idx.s3.eu-central-1.amazonaws.com/2024/kaiju_db_viruses_2024-08-15.tgz -O kaiju_db_viruses.tgz && \
+            tar -xzf kaiju_db_viruses.tgz && rm -f kaiju_db_viruses.tgz && \
+            subdir=$(find . -maxdepth 1 -type d ! -name . | head -1) && \
+            if [ -n "$subdir" ]; then mv "$subdir"/* . 2>/dev/null; rmdir "$subdir" 2>/dev/null || true; fi && \
+            for f in kaiju_db_viruses*.fmi kaiju_db_viruses*nodes.dmp kaiju_db_viruses*names.dmp; do \
+                [ -f "$f" ] && mv "$f" "$(echo "$f" | sed 's/kaiju_db_viruses[^.]*\./kaiju_db./g; s/kaiju_db_viruses[^_]*_/kaiju_db_/g')"; \
+            done 2>/dev/null || true && \
+            test -n "$(find . -maxdepth 1 -name '*.fmi' | head -1)" || (echo "Kaiju DB build failed: no .fmi in $KAIJU_DB_DIR" && exit 1)
+        cd - >/dev/null
+    fi
     
-    # Set up CheckV database for viral contig quality assessment
-    # Uncomment to include CheckV database (~3GB) in container
-    # echo "Setting up CheckV database for viral contig quality assessment..."
-    # CHECKV_DB_DIR="/opt/virall/databases/checkv_db"
-    # mkdir -p "$CHECKV_DB_DIR"
-    # if [ ! -d "$CHECKV_DB_DIR" ] || [ -z "$(ls -A $CHECKV_DB_DIR 2>/dev/null)" ]; then
-    #     echo "Downloading CheckV database (this may take 10-30 minutes)..."
-    #     MAX_RETRIES=3
-    #     RETRY_COUNT=0
-    #     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    #         echo "Attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES..."
-    #         bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && checkv download_database $CHECKV_DB_DIR" && break
-    #         RETRY_COUNT=$((RETRY_COUNT + 1))
-    #         if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-    #             echo "Retrying in 60 seconds..."
-    #             sleep 60
-    #         fi
-    #     done
-    #     # Fallback to manual download if checkv command fails
-    #     if [ ! -d "$CHECKV_DB_DIR" ] || [ -z "$(ls -A $CHECKV_DB_DIR 2>/dev/null)" ]; then
-    #         echo "Trying manual CheckV database download..."
-    #         CHECKV_URL="https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz"
-    #         CHECKV_TAR="$CHECKV_DB_DIR/checkv-db.tar.gz"
-    #         if curl -fL -o "$CHECKV_TAR" "$CHECKV_URL"; then
-    #             if [ -s "$CHECKV_TAR" ] && tar -tzf "$CHECKV_TAR" >/dev/null 2>&1; then
-    #                 echo "Extracting CheckV database..."
-    #                 cd "$CHECKV_DB_DIR"
-    #                 tar -xzf checkv-db.tar.gz && rm -f checkv-db.tar.gz
-    #                 echo "CheckV database downloaded and extracted successfully"
-    #             else
-    #                 echo "Warning: Downloaded file is invalid"
-    #                 rm -f "$CHECKV_TAR"
-    #             fi
-    #         else
-    #             echo "Warning: CheckV database download failed - can be done at runtime"
-    #         fi
-    #     fi
-    # else
-    #     echo "CheckV database already exists"
-    # fi
+    echo "Setting up CheckV database..."
+    CHECKV_DB_DIR="/opt/virall/databases/checkv_db"
+    mkdir -p "$CHECKV_DB_DIR"
+    if [ ! -f "$CHECKV_DB_DIR/genome_db/checkv_reps.dmnd" ]; then
+        if [ ! -f "$CHECKV_DB_DIR/genome_db/checkv_reps.faa" ]; then
+            echo "Downloading CheckV database (this may take 10-30 minutes)..."
+            cd "$CHECKV_DB_DIR" && \
+                curl -fL -o checkv-db.tar.gz https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz && \
+                tar -xzf checkv-db.tar.gz --no-same-owner || true && \
+                rm -f checkv-db.tar.gz && \
+                if [ -d "checkv-db-v1.5" ]; then mv checkv-db-v1.5/* . 2>/dev/null; rm -rf checkv-db-v1.5; fi
+            cd - >/dev/null
+        fi
+        if [ -f "$CHECKV_DB_DIR/genome_db/checkv_reps.faa" ] && [ ! -f "$CHECKV_DB_DIR/genome_db/checkv_reps.dmnd" ]; then
+            echo "Building CheckV DIAMOND database from checkv_reps.faa..."
+            bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && cd $CHECKV_DB_DIR/genome_db && diamond makedb --in checkv_reps.faa --db checkv_reps"
+        fi
+        test -f "$CHECKV_DB_DIR/genome_db/checkv_reps.dmnd" || (echo "CheckV DB build failed: genome_db/checkv_reps.dmnd missing" && exit 1)
+    fi
     
-    echo "Database directories created at:"
+    echo "Setting up geNomad database (~4GB, for RNA viruses and eukaryotic DNA viruses)..."
+    GENOMAD_DB_DIR="/opt/virall/databases/genomad_db"
+    mkdir -p "$GENOMAD_DB_DIR"
+    if [ ! -d "$GENOMAD_DB_DIR/genomad_db" ] && [ ! -f "$GENOMAD_DB_DIR/virus_hallmark_annotation.txt" ]; then
+        echo "Downloading geNomad database (this may take 10-20 minutes)..."
+        bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && genomad download-database $GENOMAD_DB_DIR" || echo "Warning: geNomad DB download failed, continuing..."
+    fi
+    
+    echo "Databases installed at:"
     echo "  - VOG: /opt/virall/databases/vog_db"
     echo "  - Kaiju: /opt/virall/databases/kaiju_db"
     echo "  - CheckV: /opt/virall/databases/checkv_db"
-    echo "Note: Databases can be downloaded at runtime or mounted via bind mounts"
+    echo "  - geNomad: /opt/virall/databases/genomad_db"
 
     # Clean up apt cache
     apt-get clean || true
@@ -490,27 +441,27 @@ From: ubuntu:22.04
     find /var/tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
 
 %runscript
-    # Activate conda environment and run virall
-    # Runscript uses bash by default, so source works here
+    # Activate conda environment
     export PATH=/opt/conda/envs/virall/bin:/opt/conda/bin:$PATH
     export LD_LIBRARY_PATH=/opt/conda/envs/virall/lib:$LD_LIBRARY_PATH
     export CONDA_PREFIX=/opt/conda/envs/virall
     
-    # If virall is installed, run it; otherwise show help
-    if command -v virall >/dev/null 2>&1; then
-        exec virall "$@"
-    else
-        echo "Virall container is ready!"
-        echo "To install virall package, mount the source code and run:"
-        echo "  /opt/conda/bin/conda run -n virall pip install -e /path/to/virall/source"
-        echo ""
-        echo "Available tools:"
-        echo "  - samtools, bwa, minimap2 (mapping)"
-        echo "  - spades, flye (assembly)"
-        echo "  - fastp, fastplong, fastqc (QC)"
-        echo "  - checkv, bcftools, pilon, hmmer, prodigal, kaiju"
-        exec "$@"
-    fi
+    echo "Virall Nextflow container is ready!"
+    echo ""
+    echo "This container is designed for use with the Virall Nextflow pipeline."
+    echo "Run with: nextflow run nextflow/main.nf -params-file run_params.yaml -profile singularity"
+    echo ""
+    echo "Available tools:"
+    echo "  - samtools, bwa, minimap2 (mapping)"
+    echo "  - spades, flye (assembly)"
+    echo "  - fastp, fastplong, fastqc (QC)"
+    echo "  - checkv, genomad (quality assessment)"
+    echo "  - bcftools, pilon, hmmer, prodigal, kaiju"
+    echo "  - umi_tools (single-cell sequencing)"
+    echo ""
+    echo "Databases at /opt/virall/databases/:"
+    echo "  - kaiju_db, checkv_db, genomad_db, vog_db"
+    exec "$@"
 
 %labels
     Author Virall Team
@@ -519,58 +470,45 @@ From: ubuntu:22.04
     Maintainer bruno.pavletic@gmail.com, britaniadiazf@gmail.com
 
 %help
-    Virall Singularity Container
-    ============================
+    Virall Nextflow Container
+    =========================
     
-    This container includes all bioinformatics tools and dependencies needed
-    for the Virall viral genome analysis pipeline.
+    This container includes all bioinformatics tools and databases needed
+    for the Virall Nextflow viral genome analysis pipeline.
     
     Installed Tools:
     - Mapping: samtools, bwa, minimap2
-    - Assembly: SPAdes 4.2.0, Flye 2.9.6
-    - QC: fastp, fastplong 0.4.1, fastqc
-    - Other: checkv, bcftools, pilon, hmmer, prodigal, kaiju
+    - Assembly: SPAdes, Flye
+    - QC: fastp, fastplong, fastqc
+    - Quality: checkv (phages), genomad (RNA/eukaryotic viruses)
+    - Annotation: prodigal, hmmer (VOG)
+    - Classification: kaiju
+    - Other: bcftools, pilon
     
-    Python Packages:
-    - numpy, pandas, matplotlib, seaborn, plotly
-    - biopython, scikit-learn, click, tqdm, pyyaml, loguru, psutil
+    Python Packages (for plotting):
+    - numpy, pandas, matplotlib, plotly, biopython
     
-    Usage:
-    ------
-    1. Build the container (from the virall source directory):
-       # Option A: Build with source code included (recommended)
-       # First, edit the %files section in virall.def to include source files
+    Databases (included at /opt/virall/databases/):
+    - VOG: vog_db
+    - Kaiju (viruses): kaiju_db
+    - CheckV: checkv_db (optimized for phages)
+    - geNomad: genomad_db (RNA/eukaryotic viruses)
+    
+    Quality Assessment Strategy:
+    - CheckV is used for bacteriophages (Caudovirales, etc.)
+    - geNomad is used for RNA viruses and eukaryotic DNA viruses
+    - Results are automatically merged based on Kaiju taxonomy
+    
+    Usage with Nextflow:
+    -------------------
+    1. Build container:
        singularity build --fakeroot virall.sif virall.def
-       
-       # Option B: Build without source, install at runtime
-       singularity build virall.sif virall.def
-       # Then install virall package:
-       singularity exec virall.sif bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate virall && pip install -e /path/to/virall/source"
     
-    2. Set up databases (at runtime, via bind mounts, or during build):
-       - VOG database: /opt/virall/databases/vog_db (~1GB)
-       - Kaiju database: /opt/virall/databases/kaiju_db (~several GB)
-       - CheckV database: /opt/virall/databases/checkv_db (~3GB)
-       
-       Option A: Include databases during build (uncomment database sections in virall.def)
-       - This will increase container size by ~21GB
-       - Databases will be included in the container image
-       - No need to download or mount at runtime
-       
-       Option B: Mount existing databases from host:
-       singularity exec -B /path/to/host/databases:/opt/virall/databases virall.sif virall ...
-       
-       Option C: Download databases inside container at runtime:
-       singularity exec virall.sif bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate virall && python -c 'from virall.core.vog_annotator import VOGAnnotator; VOGAnnotator().setup_vog_database(\"/opt/virall/databases/vog_db\")'"
+    2. Run pipeline:
+       nextflow run nextflow/main.nf \\
+         -params-file nextflow/run_params.yaml \\
+         -profile singularity
     
-    3. Run virall:
-       singularity exec virall.sif virall --help
-       # Or with database bind mount:
-       singularity exec -B /path/to/databases:/opt/virall/databases virall.sif virall --help
-    
-    Note: By default, databases are not included in the container image due to size (~21GB total).
-    To include databases during build, uncomment the database setup sections in the %post section.
-    Alternatively, databases can be downloaded at runtime or mounted from the host system.
-    
-    To include source code during build, uncomment and adjust paths in the %files section.
+    Note: The virall Python package is NOT installed in this container.
+    All plotting and analysis logic is self-contained in nextflow/bin/run_plots.py
 

@@ -213,6 +213,8 @@ class ViralPlotter:
             data = []
             
             for lineage in df['lineage'].dropna():
+                # Split by semicolon and filter out ONLY empty parts (keep "NA" as valid taxonomy)
+                # Lineages often end with ";" which creates empty strings
                 parts = [p.strip() for p in lineage.split(';') if p.strip()]
                 if not parts:
                     continue
@@ -240,20 +242,24 @@ class ViralPlotter:
             max_depth = max(len(d) for d in data)
             cols = [f"Level_{i}" for i in range(max_depth)]
             
-            # Pad shorter lineages with None
+            # Pad shorter lineages with None (plotly handles None/NaN fine)
             padded_data = [d + [None] * (max_depth - len(d)) for d in data]
-            
             df_lineage = pd.DataFrame(padded_data, columns=cols)
-            
-            # Add a count column
             df_lineage['count'] = 1
             
-            # Create sunburst
-            # We use the columns that have enough data
+            # Only replace empty strings with None - keep "NA" as valid taxonomy level
+            for col in cols:
+                df_lineage[col] = df_lineage[col].replace('', None)
+            
+            # Find valid columns: plotly sunburst can't handle None in paths,
+            # so we only include columns where ALL rows have data (no nulls).
+            # We stop at the first column that has any nulls.
             valid_cols = []
             for col in cols:
-                if df_lineage[col].notna().sum() > 0:
+                if df_lineage[col].isna().sum() == 0:
                     valid_cols.append(col)
+                else:
+                    break  # Stop at first column with nulls
             
             if not valid_cols:
                 return None
@@ -261,7 +267,7 @@ class ViralPlotter:
             # Find the best column for color (first one with >1 unique values)
             color_col = valid_cols[0]  # Default to root
             
-            # Skip the first column (usually 'Viruses' or 'NA') if possible
+            # Skip the first column (usually 'Viruses') if possible
             start_idx = 1 if len(valid_cols) > 1 else 0
             
             for col in valid_cols[start_idx:]:
@@ -303,10 +309,15 @@ class ViralPlotter:
 
     def plot_genome_quality(self, quality_file: Union[str, Path]) -> List[str]:
         """
-        Generate genome quality plots from CheckV results.
+        Generate genome quality plots from merged CheckV + geNomad results.
+        
+        Plots generated:
+        1. genome_quality_distribution.png - Quality tiers from both tools (or one if only one ran)
+        2. genome_quality_scatter.png - Completeness vs Contamination (CheckV only, if available)
+        3. completeness_by_source.png - Completeness distribution (both tools, or one if only one has data)
         
         Args:
-            quality_file: Path to quality_summary.tsv
+            quality_file: Path to quality_summary.tsv (merged or original)
             
         Returns:
             List of paths to generated plot files
@@ -324,62 +335,62 @@ class ViralPlotter:
                 logger.warning("Quality summary file is empty")
                 return generated_plots
                 
-            # Check for required columns
-            required_cols = ['completeness', 'contamination', 'checkv_quality']
-            if not all(col in df.columns for col in required_cols):
-                logger.warning(f"Quality file missing required columns: {required_cols}")
+            # Check for minimum required columns (checkv_quality is essential)
+            if 'checkv_quality' not in df.columns:
+                logger.warning("Quality file missing 'checkv_quality' column")
                 return generated_plots
-                
-            # 1. Scatter Plot: Completeness vs Contamination
-            plt.figure(figsize=(10, 8))
             
-            # Create scatter plot
-            sns.scatterplot(
-                data=df,
-                x='completeness',
-                y='contamination',
-                hue='checkv_quality',
-                style='checkv_quality',
-                s=100,
-                alpha=0.7,
-                palette='viridis'
-            )
+            # Determine data sources available
+            has_quality_source = 'quality_source' in df.columns
+            has_checkv = False
+            has_genomad = False
             
-            plt.title("Viral Genome Quality: Completeness vs. Contamination", fontsize=16)
-            plt.xlabel("Completeness (%)", fontsize=12)
-            plt.ylabel("Contamination (%)", fontsize=12)
-            plt.grid(True, linestyle='--', alpha=0.3)
-            plt.xlim(0, 105)  # Completeness is 0-100
-            plt.ylim(-5, 105) # Contamination is 0-100
+            if has_quality_source:
+                sources = df['quality_source'].unique()
+                has_checkv = any(s in ['checkv', 'checkv_fallback'] for s in sources if pd.notna(s))
+                has_genomad = 'genomad' in sources
             
-            # Add quality zones
-            plt.axvline(x=90, color='green', linestyle=':', alpha=0.5, label='High Quality (>90%)')
-            plt.axvline(x=50, color='orange', linestyle=':', alpha=0.5, label='Medium Quality (>50%)')
-            
-            output_scatter = self.plots_dir / "genome_quality_scatter.png"
-            plt.savefig(output_scatter, dpi=300, bbox_inches='tight')
-            plt.close()
-            
-            generated_plots.append(str(output_scatter))
-            logger.info(f"Generated quality scatter plot: {output_scatter}")
-            
-            # 2. Bar Chart: Quality Tier Distribution
+            # =====================================================================
+            # 1. Quality Distribution Plot (both tools, or one if only one ran)
+            # =====================================================================
             plt.figure(figsize=(10, 6))
             
-            quality_counts = df['checkv_quality'].value_counts()
-            
-            sns.barplot(
-                x=quality_counts.index, 
-                y=quality_counts.values,
-                hue=quality_counts.index,
-                legend=False,
-                palette='viridis'
-            )
-            
-            plt.title("Distribution of Viral Genome Quality", fontsize=16)
-            plt.xlabel("Quality Tier", fontsize=12)
-            plt.ylabel("Number of Genomes", fontsize=12)
-            plt.xticks(rotation=45)
+            if has_quality_source and (has_checkv or has_genomad):
+                # Create grouped counts by source
+                grouped = df.groupby(['checkv_quality', 'quality_source']).size().unstack(fill_value=0)
+                
+                if not grouped.empty:
+                    ax = grouped.plot(kind='bar', stacked=True, figsize=(10, 6), 
+                                     colormap='viridis', alpha=0.8)
+                    
+                    # Dynamic title based on what's available
+                    if has_checkv and has_genomad:
+                        title = "Distribution of Viral Genome Quality\n(CheckV for phages, geNomad for RNA/eukaryotic viruses)"
+                    elif has_genomad:
+                        title = "Distribution of Viral Genome Quality\n(geNomad assessment)"
+                    else:
+                        title = "Distribution of Viral Genome Quality\n(CheckV assessment)"
+                    
+                    plt.title(title, fontsize=14)
+                    plt.xlabel("Quality Tier", fontsize=12)
+                    plt.ylabel("Number of Genomes", fontsize=12)
+                    plt.xticks(rotation=45, ha='right')
+                    plt.legend(title='Quality Source', loc='upper right')
+                    plt.tight_layout()
+            else:
+                # Simple bar chart (no quality_source column)
+                quality_counts = df['checkv_quality'].value_counts()
+                sns.barplot(
+                    x=quality_counts.index, 
+                    y=quality_counts.values,
+                    hue=quality_counts.index,
+                    legend=False,
+                    palette='viridis'
+                )
+                plt.title("Distribution of Viral Genome Quality", fontsize=16)
+                plt.xlabel("Quality Tier", fontsize=12)
+                plt.ylabel("Number of Genomes", fontsize=12)
+                plt.xticks(rotation=45)
             
             output_bar = self.plots_dir / "genome_quality_distribution.png"
             plt.savefig(output_bar, dpi=300, bbox_inches='tight')
@@ -387,6 +398,106 @@ class ViralPlotter:
             
             generated_plots.append(str(output_bar))
             logger.info(f"Generated quality distribution plot: {output_bar}")
+            
+            # =====================================================================
+            # 2. Scatter Plot: Completeness vs Contamination (CheckV only)
+            # =====================================================================
+            if 'completeness' in df.columns and 'contamination' in df.columns:
+                # Filter to CheckV results only (they have contamination data)
+                if has_quality_source:
+                    checkv_df = df[df['quality_source'].isin(['checkv', 'checkv_fallback'])].copy()
+                else:
+                    checkv_df = df.copy()
+                
+                # Further filter to rows with valid completeness and contamination
+                scatter_df = checkv_df[checkv_df['completeness'].notna() & checkv_df['contamination'].notna()].copy()
+                
+                if not scatter_df.empty:
+                    plt.figure(figsize=(10, 8))
+                    
+                    sns.scatterplot(
+                        data=scatter_df,
+                        x='completeness',
+                        y='contamination',
+                        hue='checkv_quality',
+                        style='checkv_quality',
+                        s=100,
+                        alpha=0.7,
+                        palette='viridis'
+                    )
+                    
+                    plt.title("Viral Genome Quality: Completeness vs. Contamination\n(CheckV assessment - phage genomes)", fontsize=14)
+                    plt.xlabel("Completeness (%)", fontsize=12)
+                    plt.ylabel("Contamination (%)", fontsize=12)
+                    plt.grid(True, linestyle='--', alpha=0.3)
+                    plt.xlim(0, 105)
+                    plt.ylim(-5, 105)
+                    
+                    # Add quality zone lines
+                    plt.axvline(x=90, color='green', linestyle=':', alpha=0.5, label='High Quality (>90%)')
+                    plt.axvline(x=50, color='orange', linestyle=':', alpha=0.5, label='Medium Quality (>50%)')
+                    
+                    output_scatter = self.plots_dir / "genome_quality_scatter.png"
+                    plt.savefig(output_scatter, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                    generated_plots.append(str(output_scatter))
+                    logger.info(f"Generated quality scatter plot: {output_scatter} ({len(scatter_df)} CheckV contigs)")
+                else:
+                    logger.info("No CheckV contigs with completeness/contamination data for scatter plot")
+            
+            # =====================================================================
+            # 3. Completeness Distribution by Source (both tools, or one if only one has data)
+            # =====================================================================
+            if 'completeness' in df.columns:
+                completeness_df = df[df['completeness'].notna()].copy()
+                
+                if not completeness_df.empty:
+                    plt.figure(figsize=(10, 6))
+                    
+                    if has_quality_source:
+                        sources_with_data = completeness_df['quality_source'].unique()
+                        n_sources = len(sources_with_data)
+                        
+                        if n_sources > 1:
+                            # Multiple sources - box plot comparison
+                            sns.boxplot(
+                                data=completeness_df,
+                                x='quality_source',
+                                y='completeness',
+                                hue='quality_source',
+                                palette='viridis',
+                                legend=False
+                            )
+                            plt.title("Completeness Distribution by Assessment Tool", fontsize=16)
+                            plt.xlabel("Quality Assessment Tool", fontsize=12)
+                        else:
+                            # Single source - simple box plot
+                            source_name = sources_with_data[0] if len(sources_with_data) > 0 else "Unknown"
+                            sns.boxplot(
+                                y=completeness_df['completeness'],
+                                color='steelblue'
+                            )
+                            plt.title(f"Completeness Distribution ({source_name})", fontsize=16)
+                            plt.xlabel("")
+                    else:
+                        # No quality_source column - simple box plot
+                        sns.boxplot(
+                            y=completeness_df['completeness'],
+                            color='steelblue'
+                        )
+                        plt.title("Completeness Distribution", fontsize=16)
+                        plt.xlabel("")
+                    
+                    plt.ylabel("Completeness (%)", fontsize=12)
+                    plt.ylim(0, 105)
+                    
+                    output_completeness = self.plots_dir / "completeness_by_source.png"
+                    plt.savefig(output_completeness, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                    generated_plots.append(str(output_completeness))
+                    logger.info(f"Generated completeness plot: {output_completeness}")
             
             return generated_plots
             

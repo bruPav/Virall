@@ -1,0 +1,42 @@
+# Nextflow work directories and cache (32GB+)
+work/
+.nextflow/
+.nextflow.log*
+
+# Local databases (21GB) - Docker builds its own
+databases/
+
+# Singularity image (5.6GB)
+*.sif
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+
+# Git
+.git/
+.gitignore
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test results and outputs
+results/
+output/
+*.bam
+*.bai
+*.fq.gz
+*.fastq.gz
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store

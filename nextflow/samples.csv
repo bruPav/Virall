@@ -1,0 +1,11 @@
+sample_id,read1,read2,single,long,sc_read1,sc_read2
+# Bulk paired-end example:,,,,,,
+my_sample1,/path/to/reads_R1.fastq.gz,/path/to/reads_R2.fastq.gz,,,,
+# Bulk single-end example:,,,,,,
+my_sample2,,,/path/to/reads.fastq.gz,,,
+# Bulk long-read example:,,,,,,
+my_sample,,,,/path/to/long_reads.fastq.gz,,
+# Hybrid (short + long) example:,,,,,,
+my_sample,/path/to/R1.fastq.gz,/path/to/R2.fastq.gz,,/path/to/long.fastq.gz,,
+# Single-cell 10x example:,,,,,,
+my_sample,,,,,/path/to/sc_R1.fastq.gz,/path/to/sc_R2.fastq.gz

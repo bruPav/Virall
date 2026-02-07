@@ -193,3 +193,11 @@ Thumbs.db
 
 # Local logs
 logs.txt
+
+# Nextflow
+work/
+.nextflow/
+.nextflow.log*
+
+# Singularity/Apptainer images
+*.sif

@@ -1,5 +1,7 @@
 # Core dependencies for viral genome assembly tool
-numpy>=2.0.0
+# numpy 1.26.x required for compatibility with both TensorFlow (<2.0) and numba (<2.4)
+# This allows geNomad's neural network classification to work
+numpy>=1.26.0,<2.0
 pandas>=2.2.0
 biopython>=1.80
 scikit-learn>=1.4.0
