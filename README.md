@@ -25,7 +25,141 @@ A comprehensive tool for viral genome analysis including assembly, classificatio
 
 See the [complete workflow diagram](viral_assembly_workflow.md) for a visual overview of the pipeline, including preprocessing, assembly, viral identification, and annotation steps.
 
-## Installation
+## Running with Nextflow (Docker / Singularity)
+
+The recommended way to run Virall at scale is through the **Nextflow pipeline** with a containerised environment. All bioinformatics tools and viral databases are bundled inside the container so there is nothing else to install.
+
+### Prerequisites
+
+| Requirement | Version |
+|-------------|---------|
+| [Nextflow](https://www.nextflow.io/) | >= 22.10 |
+| [Docker](https://docs.docker.com/get-docker/) **or** [Singularity / Apptainer](https://apptainer.org/) | latest |
+
+### 1. Get the container image
+
+**Docker** -- pull the pre-built image from Docker Hub:
+
+```bash
+docker pull pavle17/virall
+```
+
+Or build locally from the repository:
+
+```bash
+docker build -t pavle17/virall .
+```
+
+**Singularity / Apptainer** -- build from the definition file:
+
+```bash
+singularity build --fakeroot virall.sif virall.def
+```
+
+> The container includes all bioinformatics tools and pre-indexed databases (~21 GB). Building from source only needs to be done once.
+
+### 2. Prepare your sample sheet
+
+Create (or edit) `nextflow/samples.csv` with one row per sample. Leave columns empty when a read type is not available.
+
+```
+sample_id,read1,read2,single,long,sc_read1,sc_read2
+my_sample,/path/to/reads_R1.fastq.gz,/path/to/reads_R2.fastq.gz,,,,
+```
+
+| Column | Description |
+|--------|-------------|
+| `sample_id` | Unique sample name |
+| `read1` / `read2` | Paired-end short reads (Illumina) |
+| `single` | Single-end short reads |
+| `long` | Long reads (ONT Nanopore or PacBio) |
+| `sc_read1` / `sc_read2` | 10x Genomics single-cell reads |
+
+### 3. Configure run parameters
+
+Copy and edit the template parameter file:
+
+```bash
+cp nextflow/run_params.yaml my_run.yaml
+```
+
+Key settings in `my_run.yaml`:
+
+```yaml
+samples: "nextflow/samples.csv"
+outdir: "results"
+
+# Assembly strategy: "auto" | "hybrid" | "short_only" | "long_only"
+assembly_strategy: "auto"
+
+# Set true for RNA-seq data (uses SPAdes --rnaviral)
+rna_mode: false
+
+# Optional reference genome for guided assembly
+reference: null
+
+# Optional host genome to filter out host reads
+host_genome: null
+
+# Resources
+threads: 8
+memory: "16G"
+```
+
+See [run_params.yaml](nextflow/run_params.yaml) for the full list of options including single-cell, Ion Torrent, and metaviral mode settings.
+
+### 4. Run the pipeline
+
+**With Docker**
+
+```bash
+nextflow run nextflow/main.nf \
+  -params-file my_run.yaml \
+  -profile docker \
+  -resume
+```
+
+**With Singularity**
+
+```bash
+nextflow run nextflow/main.nf \
+  -params-file my_run.yaml \
+  -profile singularity \
+  -resume
+```
+
+> The `-resume` flag lets Nextflow skip steps that already completed successfully, which is useful when re-running after a failure or parameter change.
+
+**On a cluster (SLURM example)**
+
+```bash
+nextflow run nextflow/main.nf \
+  -params-file my_run.yaml \
+  -profile singularity,slurm \
+  -resume
+```
+
+### Nextflow output structure
+
+Results are written per sample under the output directory:
+
+```
+results/
+└── my_sample/
+    ├── 00_preprocess/          # Trimmed reads and QC reports
+    ├── 01_assembly/            # Assembled contigs and scaffolds
+    ├── 02_viral_contigs/       # Filtered viral contigs
+    ├── 03_classifications/     # Kaiju taxonomic classification
+    ├── 04_quality_assessment/  # CheckV (phages) + geNomad (RNA/eukaryotic viruses)
+    ├── 05_gene_predictions/    # Prodigal + VOG annotation, organized by taxonomy
+    ├── 06_quantification/      # Read mapping depth and abundance
+    ├── 07_plots/               # Visualizations (taxonomy, coverage, quality)
+    └── 08_single_cell/         # (if --single-cell) Cell-by-virus matrix (MTX)
+```
+
+---
+
+## Installation (standalone, without Nextflow)
 
 ### Quick Start
 
