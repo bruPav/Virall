@@ -338,7 +338,7 @@ process ASSEMBLE {
     tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), emit: assembled
 
     script:
-    def mem = params.memory.replaceAll(/[Gg]/, '')
+    def mem = task.memory ? task.memory.toGiga().toString() : params.memory.replaceAll(/[Gg]/, '')
     def rna = params.rna_mode ? '--rnaviral' : ''
     def ion = params.iontorrent ? '--iontorrent' : ''
     def metaviral = params.metaviral_mode ? '--metaviral' : ''

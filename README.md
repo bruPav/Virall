@@ -62,11 +62,6 @@ singularity build --fakeroot virall.sif virall.def
 
 Create (or edit) `nextflow/samples.csv` with one row per sample. Leave columns empty when a read type is not available.
 
-```
-sample_id,read1,read2,single,long,sc_read1,sc_read2
-my_sample,/path/to/reads_R1.fastq.gz,/path/to/reads_R2.fastq.gz,,,,
-```
-
 | Column | Description |
 |--------|-------------|
 | `sample_id` | Unique sample name |
@@ -135,7 +130,7 @@ nextflow run nextflow/main.nf \
 ```bash
 nextflow run nextflow/main.nf \
   -params-file my_run.yaml \
-  -profile singularity,slurm \
+  -profile singularity\
   -resume
 ```
 
