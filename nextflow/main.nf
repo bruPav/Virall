@@ -1308,10 +1308,10 @@ workflow {
 
     def g_db = params.genomad_db ?: (db_dir ? "${db_dir}/genomad_db" : "${container_db}/genomad_db")
 
-    def ch_kaiju_db   = Channel.from(k_db)
-    def ch_checkv_db  = Channel.from(c_db)
-    def ch_genomad_db = Channel.from(g_db)
-    def ch_vog_db     = v_db ? Channel.from(v_db) : Channel.from(null)
+    def ch_kaiju_db   = Channel.value(k_db)
+    def ch_checkv_db  = Channel.value(c_db)
+    def ch_genomad_db = Channel.value(g_db)
+    def ch_vog_db     = v_db ? Channel.value(v_db) : Channel.value(null)
 
     // =========================================================================
     // SINGLE-CELL MODE: Extract barcodes, pool, run pipeline, then trace back
@@ -1368,7 +1368,7 @@ workflow {
     }
 
     KAIJU(ASSEMBLE.out.assembled, ch_kaiju_db)
-    FILTER_VIRAL(KAIJU.out.kaiju_done, Channel.fromPath(extract_script))
+    FILTER_VIRAL(KAIJU.out.kaiju_done, extract_script)
 
     // Run CheckV and geNomad in parallel on viral contigs
     VALIDATE(FILTER_VIRAL.out.viral, ch_checkv_db)
@@ -1405,7 +1405,7 @@ workflow {
 
     // Use merged quality for plotting
     ch_plot_input = QUANTIFY.out.quantified.join(MERGE_QUALITY.out.merged)
-    PLOT(ch_plot_input, Channel.fromPath(plot_script))
+    PLOT(ch_plot_input, plot_script)
 
     // =========================================================================
     // SINGLE-CELL: Map barcoded reads back to viral contigs, count, build matrix
