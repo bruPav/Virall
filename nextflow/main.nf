@@ -480,7 +480,10 @@ process FILTER_VIRAL {
       --fasta contigs \\
       --min-len ${params.min_contig_len} \\
       --out viral_contigs.fasta
-    [ -s viral_contigs.fasta ] || cp contigs viral_contigs.fasta
+    if [ ! -s viral_contigs.fasta ]; then
+      echo "NOTE: No viral contigs >= ${params.min_contig_len} bp found for ${sample_id}. Downstream steps will report empty results."
+      touch viral_contigs.fasta
+    fi
     """
 }
 
@@ -517,12 +520,18 @@ process VALIDATE {
     # Guard: if contigs are empty or too short for gene prediction, CheckV's
     # hmmsearch will fail on the empty proteins file.  Produce a valid but
     # empty quality_summary.tsv so downstream steps continue gracefully.
-    TOTAL_BP=\$(grep -v "^>" viral_contigs.fasta | tr -d '\\n' | wc -c)
-    if [ "\$TOTAL_BP" -lt 200 ]; then
-      echo "CheckV: skipping – viral contigs too short (\${TOTAL_BP} bp) for meaningful quality assessment"
+    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || echo 0)
+    if [ "\$CONTIG_COUNT" -eq 0 ]; then
+      echo "CheckV: skipping – no viral contigs found for ${sample_id}"
       printf "contig_id\\tcontig_length\\tprovirus\\tproviral_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tmiuvig_quality\\tcompleteness\\tcompleteness_method\\tcontamination\\tkmer_freq\\twarnings\\n" > checkv_dir/quality_summary.tsv
     else
-      checkv end_to_end viral_contigs.fasta checkv_dir -d "\$CHECKV_D" -t 1
+      TOTAL_BP=\$(grep -v "^>" viral_contigs.fasta | tr -d '\\n' | wc -c)
+      if [ "\$TOTAL_BP" -lt 200 ]; then
+        echo "CheckV: skipping – viral contigs too short (\${TOTAL_BP} bp) for meaningful quality assessment"
+        printf "contig_id\\tcontig_length\\tprovirus\\tproviral_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tmiuvig_quality\\tcompleteness\\tcompleteness_method\\tcontamination\\tkmer_freq\\twarnings\\n" > checkv_dir/quality_summary.tsv
+      else
+        checkv end_to_end viral_contigs.fasta checkv_dir -d "\$CHECKV_D" -t 1
+      fi
     fi
     """
 }
@@ -555,10 +564,14 @@ process GENOMAD {
       fi
     done
 
-    if [ -z "\$GENOMAD_D" ]; then
+    # Skip if no viral contigs
+    CONTIG_COUNT=\$(grep -c "^>" ${viral_contigs} 2>/dev/null || echo 0)
+    if [ "\$CONTIG_COUNT" -eq 0 ]; then
+      echo "geNomad: skipping – no viral contigs found for ${sample_id}"
+      touch genomad_out/virus_summary.tsv
+    elif [ -z "\$GENOMAD_D" ]; then
       echo "WARNING: geNomad database not found at ${genomad_db}. Skipping geNomad analysis."
       echo "To use geNomad, download the database: genomad download-database genomad_db"
-      # Create empty placeholder files so pipeline continues
       touch genomad_out/virus_summary.tsv
       touch genomad_out/skipped.txt
     else
@@ -894,10 +907,16 @@ process ANNOTATE {
     script:
     """
     mkdir -p annotation_dir
-    prodigal -i viral_contigs.fasta -a annotation_dir/proteins.faa -p meta -q
-    VOG_HMM=\$(find ${vog_db} -maxdepth 1 \\( -name 'vog_all.hmm' -o -name 'vog.hmm' \\) 2>/dev/null | head -1)
-    if [ -n "\$VOG_HMM" ] && [ -f "\$VOG_HMM" ]; then
-      hmmscan --cpu ${params.threads} -o annotation_dir/vog_out.txt --domtblout annotation_dir/vog_domains.txt "\$VOG_HMM" annotation_dir/proteins.faa
+    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || echo 0)
+    if [ "\$CONTIG_COUNT" -eq 0 ]; then
+      echo "ANNOTATE: skipping – no viral contigs found for ${sample_id}"
+      touch annotation_dir/proteins.faa
+    else
+      prodigal -i viral_contigs.fasta -a annotation_dir/proteins.faa -p meta -q
+      VOG_HMM=\$(find ${vog_db} -maxdepth 1 \\( -name 'vog_all.hmm' -o -name 'vog.hmm' \\) 2>/dev/null | head -1)
+      if [ -n "\$VOG_HMM" ] && [ -f "\$VOG_HMM" ]; then
+        hmmscan --cpu ${params.threads} -o annotation_dir/vog_out.txt --domtblout annotation_dir/vog_domains.txt "\$VOG_HMM" annotation_dir/proteins.faa
+      fi
     fi
     """
 }
@@ -918,11 +937,17 @@ process ORGANIZE_GENES {
 
     script:
     """
-    organize_genes_by_taxonomy.py \
-        --proteins ${annotation_dir}/proteins.faa \
-        --contigs ${viral_contigs} \
-        --kaiju ${kaiju_dir}/kaiju_results_with_names.tsv \
-        --outdir by_taxonomy
+    mkdir -p by_taxonomy
+    if [ -s ${annotation_dir}/proteins.faa ] && [ -s ${viral_contigs} ]; then
+      organize_genes_by_taxonomy.py \
+          --proteins ${annotation_dir}/proteins.faa \
+          --contigs ${viral_contigs} \
+          --kaiju ${kaiju_dir}/kaiju_results_with_names.tsv \
+          --outdir by_taxonomy
+    else
+      echo "ORGANIZE_GENES: skipping – no viral contigs or proteins found for ${sample_id}"
+      touch by_taxonomy/gene_taxonomy_mapping.tsv
+    fi
     """
 }
 
@@ -943,19 +968,25 @@ process QUANTIFY {
     script:
     """
     mkdir -p quant_dir
-    bwa index -p quant_dir/idx viral_contigs.fasta
-    # Use -s (non-empty file) instead of -f to avoid matching 0-byte placeholders
-    # In single-cell mode, R1/R2 are empty placeholders; actual data is in trimmed_single
-    if [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ]; then
-      bwa mem -t ${params.threads} quant_dir/idx preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz | samtools sort -o quant_dir/mapped.bam -
-    elif [ -s preprocess_dir/trimmed_single.fastq.gz ]; then
-      bwa mem -t ${params.threads} quant_dir/idx preprocess_dir/trimmed_single.fastq.gz | samtools sort -o quant_dir/mapped.bam -
-    elif [ -s preprocess_dir/trimmed_long.fastq.gz ]; then
-      MINIMAP2_LONG_PRESET=\$( [ "${params.long_read_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
-      minimap2 -t ${params.threads} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta preprocess_dir/trimmed_long.fastq.gz | samtools sort -o quant_dir/mapped.bam -
+    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || echo 0)
+    if [ "\$CONTIG_COUNT" -eq 0 ]; then
+      echo "QUANTIFY: skipping – no viral contigs found for ${sample_id}"
+      touch quant_dir/mapped.bam quant_dir/mapped.bam.bai quant_dir/depth.txt
+    else
+      bwa index -p quant_dir/idx viral_contigs.fasta
+      # Use -s (non-empty file) instead of -f to avoid matching 0-byte placeholders
+      # In single-cell mode, R1/R2 are empty placeholders; actual data is in trimmed_single
+      if [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ]; then
+        bwa mem -t ${params.threads} quant_dir/idx preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz | samtools sort -o quant_dir/mapped.bam -
+      elif [ -s preprocess_dir/trimmed_single.fastq.gz ]; then
+        bwa mem -t ${params.threads} quant_dir/idx preprocess_dir/trimmed_single.fastq.gz | samtools sort -o quant_dir/mapped.bam -
+      elif [ -s preprocess_dir/trimmed_long.fastq.gz ]; then
+        MINIMAP2_LONG_PRESET=\$( [ "${params.long_read_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
+        minimap2 -t ${params.threads} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta preprocess_dir/trimmed_long.fastq.gz | samtools sort -o quant_dir/mapped.bam -
+      fi
+      samtools index quant_dir/mapped.bam
+      samtools depth -a quant_dir/mapped.bam > quant_dir/depth.txt 2>/dev/null || true
     fi
-    samtools index quant_dir/mapped.bam
-    samtools depth -a quant_dir/mapped.bam > quant_dir/depth.txt 2>/dev/null || true
     """
 }
 
@@ -1166,12 +1197,18 @@ process PLOT {
     def viral_fasta = viral_contigs.name
     """
     mkdir -p plots_dir
-    python ${plot_script} \\
-      --quant-dir quant_dir \\
-      --viral-contigs ${viral_fasta} \\
-      --kaiju-dir kaiju_dir \\
-      --checkv-dir ${quality_dir} \\
-      --out-dir plots_dir
+    CONTIG_COUNT=\$(grep -c "^>" ${viral_fasta} 2>/dev/null || echo 0)
+    if [ "\$CONTIG_COUNT" -eq 0 ]; then
+      echo "PLOT: skipping – no viral contigs found for ${sample_id}"
+      echo "No viral contigs >= ${params.min_contig_len} bp were found in this sample." > plots_dir/NO_VIRAL_SEQUENCES.txt
+    else
+      python ${plot_script} \\
+        --quant-dir quant_dir \\
+        --viral-contigs ${viral_fasta} \\
+        --kaiju-dir kaiju_dir \\
+        --checkv-dir ${quality_dir} \\
+        --out-dir plots_dir
+    fi
     """
 }
 
