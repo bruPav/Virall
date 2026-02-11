@@ -12,7 +12,7 @@
 samples: "nextflow/samples.csv"
 
 # Output directory for all results
-outdir: "results"
+outdir: "media/bruno/ADdrive/AD/vir_results"
 
 # -----------------------------------------------------------------------------
 # Databases (required for full pipeline; or set env VIRALL_DATABASE_DIR)
@@ -36,7 +36,7 @@ vog_db: null
 assembly_strategy: "auto"
 
 # Set true for RNA-seq (SPAdes --rnaviral)
-rna_mode: false
+rna_mode: true
 
 # Optional reference genome (e.g. viral reference FASTA)
 # When set: 1) SPAdes uses --trusted-contigs for guided assembly
@@ -46,13 +46,13 @@ reference: null
 
 # Optional host genome FASTA to filter out host reads (like Virall --filter)
 # When set, reads mapping to the host are removed before assembly (minimap2 + samtools).
-host_genome: null
+host_genome: /home/bruno/analysis/paper/HumanGenome_GRCh38_genomic.fna
 
 # -----------------------------------------------------------------------------
 # Preprocessing
 # -----------------------------------------------------------------------------
 # PHRED quality threshold and minimum read length after trimming
-quality_phred: 20           # short reads (fastp)
+quality_phred: 30           # short reads (fastp)
 quality_phred_long: 7       # long reads (fastplong)
 min_read_len: 50            # short reads (fastp)
 min_read_len_long: 1000     # long reads (fastplong)
@@ -72,8 +72,8 @@ metaviral_mode: false
 # -----------------------------------------------------------------------------
 # Resources
 # -----------------------------------------------------------------------------
-threads: 8
-memory: "16G"
+threads: 12
+memory: "24G"
 
 # -----------------------------------------------------------------------------
 # Optional minimum contig length

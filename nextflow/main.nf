@@ -10,7 +10,6 @@ nextflow.enable.dsl = 2
 // Parameters (user requirements)
 // ---------------------------------------------------------------------------
 params.samples         = "${projectDir}/samples.csv"
-params.config         = "${projectDir}/../configs/default_config.yaml"
 params.outdir          = "results"
 params.threads         = 8
 params.memory          = "16G"
@@ -479,6 +478,7 @@ process FILTER_VIRAL {
     python ${extract_script} \\
       --kaiju kaiju_dir/kaiju_results_with_names.tsv \\
       --fasta contigs \\
+      --min-len ${params.min_contig_len} \\
       --out viral_contigs.fasta
     [ -s viral_contigs.fasta ] || cp contigs viral_contigs.fasta
     """
@@ -514,7 +514,16 @@ process VALIDATE {
       echo "Rebuild the container so the CheckV DB download completes, or set checkv_db in run_params to a path with the DB."
       exit 1
     fi
-    checkv end_to_end viral_contigs.fasta checkv_dir -d "\$CHECKV_D" -t 1
+    # Guard: if contigs are empty or too short for gene prediction, CheckV's
+    # hmmsearch will fail on the empty proteins file.  Produce a valid but
+    # empty quality_summary.tsv so downstream steps continue gracefully.
+    TOTAL_BP=\$(grep -v "^>" viral_contigs.fasta | tr -d '\\n' | wc -c)
+    if [ "\$TOTAL_BP" -lt 200 ]; then
+      echo "CheckV: skipping – viral contigs too short (\${TOTAL_BP} bp) for meaningful quality assessment"
+      printf "contig_id\\tcontig_length\\tprovirus\\tproviral_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tmiuvig_quality\\tcompleteness\\tcompleteness_method\\tcontamination\\tkmer_freq\\twarnings\\n" > checkv_dir/quality_summary.tsv
+    else
+      checkv end_to_end viral_contigs.fasta checkv_dir -d "\$CHECKV_D" -t 1
+    fi
     """
 }
 
