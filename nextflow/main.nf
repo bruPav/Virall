@@ -194,18 +194,21 @@ process PREPROCESS {
     def hasLong  = long_reads.name != ".placeholder_long" && long_reads.size() > 0
     def q = params.quality_phred
     def ml = params.min_read_len
+    // Ion Torrent: skip poly-G trimming (Illumina artifact) and adapter detection (already stripped by Torrent Suite)
+    def ion_opts = params.iontorrent ? "--disable_adapter_trimming --disable_trim_poly_g" : "--trim_poly_g"
+    def pe_adapter = params.iontorrent ? "" : "--detect_adapter_for_pe"
     """
     mkdir -p preprocess_dir
     if [ -s "${read1}" ] && [ -s "${read2}" ]; then
       fastp -i ${read1} -I ${read2} -o preprocess_dir/trimmed_R1.fastq.gz -O preprocess_dir/trimmed_R2.fastq.gz \\
         --html preprocess_dir/fastp_pe.html --json preprocess_dir/fastp_pe.json \\
         --thread ${params.threads} --qualified_quality_phred ${q} --length_required ${ml} \\
-        --detect_adapter_for_pe --cut_front --cut_tail --cut_mean_quality ${q} --trim_poly_g
+        ${pe_adapter} --cut_front --cut_tail --cut_mean_quality ${q} ${ion_opts}
     fi
     if [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ]; then
       fastp -i ${single} -o preprocess_dir/trimmed_single.fastq.gz \\
         --html preprocess_dir/fastp_single.html --json preprocess_dir/fastp_single.json \\
-        --thread ${params.threads} --qualified_quality_phred ${q} --length_required ${ml} --trim_poly_g
+        --thread ${params.threads} --qualified_quality_phred ${q} --length_required ${ml} ${ion_opts}
     fi
     if [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
       fastplong -i ${long_reads} -o preprocess_dir/trimmed_long.fastq.gz \\
