@@ -364,66 +364,64 @@ process ASSEMBLE {
     HAS_LONG=\$( [ -s preprocess_dir/trimmed_long.fastq.gz ] && echo 1 || echo 0 )
 
     if [ "\$HAS_SHORT" = "0" ] && [ "\$HAS_SINGLE" = "0" ] && [ "\$HAS_LONG" = "0" ]; then
-      echo "ASSEMBLE: no trimmed inputs found. preprocess_dir contents:"
-      ls -la preprocess_dir 2>/dev/null || true
-      echo "Need trimmed_R1/R2, trimmed_single.fastq.gz, or trimmed_long.fastq.gz from PREPROCESS."
-      exit 1
-    fi
-
-    # Determine strategy: auto-detect from inputs or use explicit setting
-    USER_STRATEGY="${params.assembly_strategy}"
-    if [ "\$USER_STRATEGY" = "auto" ] || [ -z "\$USER_STRATEGY" ]; then
-      # Auto-detect: short/single only -> short_only; long only -> long_only; both -> hybrid
-      if [ "\$HAS_LONG" = "1" ] && [ "\$HAS_SHORT" = "0" ] && [ "\$HAS_SINGLE" = "0" ]; then
-        STRATEGY="long_only"
-      elif [ "\$HAS_LONG" = "0" ]; then
-        STRATEGY="short_only"
-      else
-        STRATEGY="hybrid"
-      fi
-      echo "Auto-detected assembly strategy: \$STRATEGY (short=\$HAS_SHORT, single=\$HAS_SINGLE, long=\$HAS_LONG)"
+      echo "ASSEMBLE: no reads remaining after preprocessing/host filtering for ${sample_id} – all reads may be host. Producing empty assembly."
+      touch contigs scaffolds
     else
-      STRATEGY="\$USER_STRATEGY"
-      echo "Using user-specified assembly strategy: \$STRATEGY"
-    fi
-
-    # Determine long-read flags based on technology (nanopore vs pacbio)
-    LONG_READ_TECH="${params.long_read_tech}"
-    if [ "\$LONG_READ_TECH" = "pacbio" ]; then
-      SPADES_LONG_FLAG="--pacbio"
-      FLYE_INPUT_FLAG="--pacbio-raw"
-    else
-      SPADES_LONG_FLAG="--nanopore"
-      FLYE_INPUT_FLAG="--nano-raw"
-    fi
-
-    # Run assembler(s) based on strategy
-    if [ "\$STRATEGY" = "short_only" ] || [ "\$STRATEGY" = "hybrid" ]; then
-      if [ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]; then
-        SPADES_OPTS="-o assembly_dir/spades -t ${params.threads} -m ${mem} ${rna} ${ion} ${metaviral} ${ref}"
-        [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
-        [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
-        # Add long reads for hybrid mode (--nanopore or --pacbio)
-        [ "\$STRATEGY" = "hybrid" ] && [ "\$HAS_LONG" = "1" ] && SPADES_OPTS="\$SPADES_OPTS \$SPADES_LONG_FLAG preprocess_dir/trimmed_long.fastq.gz"
-        spades.py \$SPADES_OPTS
-        cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
-        cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
+      # Determine strategy: auto-detect from inputs or use explicit setting
+      USER_STRATEGY="${params.assembly_strategy}"
+      if [ "\$USER_STRATEGY" = "auto" ] || [ -z "\$USER_STRATEGY" ]; then
+        # Auto-detect: short/single only -> short_only; long only -> long_only; both -> hybrid
+        if [ "\$HAS_LONG" = "1" ] && [ "\$HAS_SHORT" = "0" ] && [ "\$HAS_SINGLE" = "0" ]; then
+          STRATEGY="long_only"
+        elif [ "\$HAS_LONG" = "0" ]; then
+          STRATEGY="short_only"
+        else
+          STRATEGY="hybrid"
+        fi
+        echo "Auto-detected assembly strategy: \$STRATEGY (short=\$HAS_SHORT, single=\$HAS_SINGLE, long=\$HAS_LONG)"
       else
-        echo "Warning: strategy=\$STRATEGY but no short/single reads available"
+        STRATEGY="\$USER_STRATEGY"
+        echo "Using user-specified assembly strategy: \$STRATEGY"
       fi
-    fi
 
-    if [ "\$STRATEGY" = "long_only" ]; then
-      if [ "\$HAS_LONG" = "1" ]; then
-        flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye -t ${params.threads}
-        cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
-        cp contigs scaffolds 2>/dev/null || true
+      # Determine long-read flags based on technology (nanopore vs pacbio)
+      LONG_READ_TECH="${params.long_read_tech}"
+      if [ "\$LONG_READ_TECH" = "pacbio" ]; then
+        SPADES_LONG_FLAG="--pacbio"
+        FLYE_INPUT_FLAG="--pacbio-raw"
       else
-        echo "Warning: strategy=long_only but no long reads available"
+        SPADES_LONG_FLAG="--nanopore"
+        FLYE_INPUT_FLAG="--nano-raw"
       fi
-    fi
 
-    [ -f contigs ] || ( echo "No assembly output" && exit 1 )
+      # Run assembler(s) based on strategy
+      if [ "\$STRATEGY" = "short_only" ] || [ "\$STRATEGY" = "hybrid" ]; then
+        if [ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]; then
+          SPADES_OPTS="-o assembly_dir/spades -t ${params.threads} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
+          [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
+          [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
+          # Add long reads for hybrid mode (--nanopore or --pacbio)
+          [ "\$STRATEGY" = "hybrid" ] && [ "\$HAS_LONG" = "1" ] && SPADES_OPTS="\$SPADES_OPTS \$SPADES_LONG_FLAG preprocess_dir/trimmed_long.fastq.gz"
+          spades.py \$SPADES_OPTS
+          cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
+          cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
+        else
+          echo "Warning: strategy=\$STRATEGY but no short/single reads available"
+        fi
+      fi
+
+      if [ "\$STRATEGY" = "long_only" ]; then
+        if [ "\$HAS_LONG" = "1" ]; then
+          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye -t ${params.threads}
+          cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
+          cp contigs scaffolds 2>/dev/null || true
+        else
+          echo "Warning: strategy=long_only but no long reads available"
+        fi
+      fi
+
+      [ -f contigs ] || touch contigs scaffolds
+    fi
     """
 }
 
@@ -445,16 +443,22 @@ process KAIJU {
     script:
     """
   mkdir -p kaiju_dir
-  FMI=\$(find ${kaiju_db} -name "*.fmi" 2>/dev/null | head -1)
-  [ -z "\$FMI" ] && { echo "Kaiju .fmi not found under ${kaiju_db}"; exit 1; }
-  NODES=\$(find ${kaiju_db} -name "*nodes.dmp" 2>/dev/null | head -1)
-  NAMES=\$(find ${kaiju_db} -name "*names.dmp" 2>/dev/null | head -1)
-  [ -z "\$NODES" ] && { echo "Kaiju nodes.dmp not found under ${kaiju_db}"; exit 1; }
-  [ -z "\$NAMES" ] && { echo "Kaiju names.dmp not found under ${kaiju_db}"; exit 1; }
-  kaiju -t "\$NODES" -f "\$FMI" -i contigs -o kaiju_dir/kaiju_results.tsv -z ${params.threads}
-  kaiju-addTaxonNames -t "\$NODES" -n "\$NAMES" \\
-      -i kaiju_dir/kaiju_results.tsv -o kaiju_dir/kaiju_results_with_names.tsv \\
-      -r superkingdom,phylum,class,order,family,genus,species
+  CONTIG_COUNT=\$(grep -c "^>" contigs 2>/dev/null || echo 0)
+  if [ "\$CONTIG_COUNT" -eq 0 ]; then
+    echo "KAIJU: skipping – no contigs to classify for ${sample_id}"
+    touch kaiju_dir/kaiju_results.tsv kaiju_dir/kaiju_results_with_names.tsv
+  else
+    FMI=\$(find ${kaiju_db} -name "*.fmi" 2>/dev/null | head -1)
+    [ -z "\$FMI" ] && { echo "Kaiju .fmi not found under ${kaiju_db}"; exit 1; }
+    NODES=\$(find ${kaiju_db} -name "*nodes.dmp" 2>/dev/null | head -1)
+    NAMES=\$(find ${kaiju_db} -name "*names.dmp" 2>/dev/null | head -1)
+    [ -z "\$NODES" ] && { echo "Kaiju nodes.dmp not found under ${kaiju_db}"; exit 1; }
+    [ -z "\$NAMES" ] && { echo "Kaiju names.dmp not found under ${kaiju_db}"; exit 1; }
+    kaiju -t "\$NODES" -f "\$FMI" -i contigs -o kaiju_dir/kaiju_results.tsv -z ${params.threads}
+    kaiju-addTaxonNames -t "\$NODES" -n "\$NAMES" \\
+        -i kaiju_dir/kaiju_results.tsv -o kaiju_dir/kaiju_results_with_names.tsv \\
+        -r superkingdom,phylum,class,order,family,genus,species
+  fi
     """
 }
 
