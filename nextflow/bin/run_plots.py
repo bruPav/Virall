@@ -122,17 +122,32 @@ def main():
         total_cov.to_csv(abundance_file, sep="\t", index=False)
 
     # 2. Build kaiju_summary.tsv for sunburst (contig_id, taxon_id, taxon_name, classification, lineage)
+    #    Only include contigs present in viral_contigs.fasta (i.e. those that passed FILTER_VIRAL)
     kaiju_summary_file = work_dir / "kaiju_summary.tsv"
     print(f"[run_plots] Building kaiju_summary: kaiju_file={kaiju_file}, exists={kaiju_file.exists()}, lineages={len(kaiju_lineage_by_contig)}", file=sys.stderr)
-    
+
+    # Build set of viral contig IDs from the filtered FASTA
+    viral_contig_ids = set()
+    if args.viral_contigs.exists():
+        with open(args.viral_contigs) as fasta_f:
+            for line in fasta_f:
+                if line.startswith(">"):
+                    viral_contig_ids.add(line[1:].strip().split()[0])
+    print(f"[run_plots] viral_contigs FASTA IDs: {len(viral_contig_ids)}", file=sys.stderr)
+
     if kaiju_file.exists() and kaiju_lineage_by_contig:
         rows = []
+        skipped = 0
         with open(kaiju_file) as f:
             for line in f:
                 if line.startswith("C"):
                     parts = line.strip().split("\t")
                     if len(parts) >= 4:
                         cid, taxon_id = parts[1], parts[2]
+                        # Only include contigs that passed FILTER_VIRAL
+                        if viral_contig_ids and cid.strip() not in viral_contig_ids:
+                            skipped += 1
+                            continue
                         if len(parts) >= 10:
                             lineage = ";".join(p.strip() for p in parts[3:10])
                             name = (parts[9].strip() if len(parts) > 9 else "") or "Unknown"
@@ -141,7 +156,7 @@ def main():
                             lineage_parts = [p.strip() for p in lineage.split(";") if p.strip()]
                             name = lineage_parts[-1] if lineage_parts else "Unknown"
                         rows.append({"contig_id": cid, "taxon_id": taxon_id, "taxon_name": name or "Unknown", "classification": name or "Unknown", "lineage": lineage or name or "Unknown"})
-        print(f"[run_plots] kaiju_summary: found {len(rows)} classified contigs", file=sys.stderr)
+        print(f"[run_plots] kaiju_summary: found {len(rows)} classified contigs ({skipped} skipped – not in viral_contigs.fasta)", file=sys.stderr)
         if rows:
             pd.DataFrame(rows).to_csv(kaiju_summary_file, sep="\t", index=False)
             print(f"[run_plots] Wrote {kaiju_summary_file}", file=sys.stderr)

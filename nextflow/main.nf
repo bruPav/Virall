@@ -202,18 +202,18 @@ process PREPROCESS {
     if [ -s "${read1}" ] && [ -s "${read2}" ]; then
       fastp -i ${read1} -I ${read2} -o preprocess_dir/trimmed_R1.fastq.gz -O preprocess_dir/trimmed_R2.fastq.gz \\
         --html preprocess_dir/fastp_pe.html --json preprocess_dir/fastp_pe.json \\
-        --thread ${params.threads} --qualified_quality_phred ${q} --length_required ${ml} \\
+        --thread ${task.cpus} --qualified_quality_phred ${q} --length_required ${ml} \\
         ${pe_adapter} --cut_front --cut_tail --cut_mean_quality ${q} ${ion_opts}
     fi
     if [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ]; then
       fastp -i ${single} -o preprocess_dir/trimmed_single.fastq.gz \\
         --html preprocess_dir/fastp_single.html --json preprocess_dir/fastp_single.json \\
-        --thread ${params.threads} --qualified_quality_phred ${q} --length_required ${ml} ${ion_opts}
+        --thread ${task.cpus} --qualified_quality_phred ${q} --length_required ${ml} ${ion_opts}
     fi
     if [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
       fastplong -i ${long_reads} -o preprocess_dir/trimmed_long.fastq.gz \\
         --html preprocess_dir/fastplong.html --json preprocess_dir/fastplong.json \\
-        --thread ${params.threads} --qualified_quality_phred ${params.quality_phred_long} \\
+        --thread ${task.cpus} --qualified_quality_phred ${params.quality_phred_long} \\
         --length_required ${params.min_read_len_long} \\
         --cut_front --cut_tail --cut_mean_quality ${params.quality_phred_long} --cut_window_size 10
     fi
@@ -271,7 +271,7 @@ process HOST_FILTER {
 
     # Paired-end: keep pairs where BOTH reads are unmapped (-f 12)
     if [ -s "${trimmed_r1}" ] && [ -s "${trimmed_r2}" ] && [ "${trimmed_r1.name}" != ".placeholder_r1" ]; then
-      minimap2 -ax sr -t ${params.threads} ${host_ref} ${trimmed_r1} ${trimmed_r2} 2>host_filter_dir/host_filter_pe.log | \\
+      minimap2 -ax sr -t ${task.cpus} ${host_ref} ${trimmed_r1} ${trimmed_r2} 2>host_filter_dir/host_filter_pe.log | \\
         samtools sort -n - 2>/dev/null | samtools fastq -f 12 -1 host_filter_dir/R1.fq -2 host_filter_dir/R2.fq - 2>/dev/null || true
       if [ -s host_filter_dir/R1.fq ]; then
         gzip -c host_filter_dir/R1.fq > host_filter_dir/trimmed_R1.fastq.gz
@@ -287,7 +287,7 @@ process HOST_FILTER {
 
     # Single-end short
     if [ -s "${trimmed_single}" ] && [ "${trimmed_single.name}" != ".placeholder_single" ]; then
-      minimap2 -ax sr -t ${params.threads} ${host_ref} ${trimmed_single} 2>host_filter_dir/host_filter_single.log | \\
+      minimap2 -ax sr -t ${task.cpus} ${host_ref} ${trimmed_single} 2>host_filter_dir/host_filter_single.log | \\
         samtools fastq -f 4 - > host_filter_dir/single.fq 2>/dev/null || true
       if [ -s host_filter_dir/single.fq ]; then
         gzip -c host_filter_dir/single.fq > host_filter_dir/trimmed_single.fastq.gz
@@ -301,7 +301,7 @@ process HOST_FILTER {
     # Long reads (ONT or PacBio)
     MINIMAP2_LONG_PRESET=\$( [ "${params.long_read_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
     if [ -s "${trimmed_long}" ] && [ "${trimmed_long.name}" != ".placeholder_long" ]; then
-      minimap2 -ax \$MINIMAP2_LONG_PRESET -t ${params.threads} ${host_ref} ${trimmed_long} 2>host_filter_dir/host_filter_long.log | \\
+      minimap2 -ax \$MINIMAP2_LONG_PRESET -t ${task.cpus} ${host_ref} ${trimmed_long} 2>host_filter_dir/host_filter_long.log | \\
         samtools fastq -f 4 - > host_filter_dir/long.fq 2>/dev/null || true
       if [ -s host_filter_dir/long.fq ]; then
         gzip -c host_filter_dir/long.fq > host_filter_dir/trimmed_long.fastq.gz
@@ -400,7 +400,7 @@ process ASSEMBLE {
       # Run assembler(s) based on strategy
       if [ "\$STRATEGY" = "short_only" ] || [ "\$STRATEGY" = "hybrid" ]; then
         if [ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]; then
-          SPADES_OPTS="-o assembly_dir/spades -t ${params.threads} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
+          SPADES_OPTS="-o assembly_dir/spades -t ${task.cpus} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
           [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
           [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
           # Add long reads for hybrid mode (--nanopore or --pacbio)
@@ -415,7 +415,7 @@ process ASSEMBLE {
 
       if [ "\$STRATEGY" = "long_only" ]; then
         if [ "\$HAS_LONG" = "1" ]; then
-          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye -t ${params.threads}
+          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye -t ${task.cpus}
           cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
           cp contigs scaffolds 2>/dev/null || true
         else
@@ -446,7 +446,8 @@ process KAIJU {
     script:
     """
   mkdir -p kaiju_dir
-  CONTIG_COUNT=\$(grep -c "^>" contigs 2>/dev/null || echo 0)
+  CONTIG_COUNT=\$(grep -c "^>" contigs 2>/dev/null || true)
+  CONTIG_COUNT=\${CONTIG_COUNT:-0}
   if [ "\$CONTIG_COUNT" -eq 0 ]; then
     echo "KAIJU: skipping – no contigs to classify for ${sample_id}"
     touch kaiju_dir/kaiju_results.tsv kaiju_dir/kaiju_results_with_names.tsv
@@ -457,7 +458,7 @@ process KAIJU {
     NAMES=\$(find ${kaiju_db} -name "*names.dmp" 2>/dev/null | head -1)
     [ -z "\$NODES" ] && { echo "Kaiju nodes.dmp not found under ${kaiju_db}"; exit 1; }
     [ -z "\$NAMES" ] && { echo "Kaiju names.dmp not found under ${kaiju_db}"; exit 1; }
-    kaiju -t "\$NODES" -f "\$FMI" -i contigs -o kaiju_dir/kaiju_results.tsv -z ${params.threads}
+    kaiju -t "\$NODES" -f "\$FMI" -i contigs -o kaiju_dir/kaiju_results.tsv -z ${task.cpus}
     kaiju-addTaxonNames -t "\$NODES" -n "\$NAMES" \\
         -i kaiju_dir/kaiju_results.tsv -o kaiju_dir/kaiju_results_with_names.tsv \\
         -r superkingdom,phylum,class,order,family,genus,species
@@ -527,7 +528,8 @@ process VALIDATE {
     # Guard: if contigs are empty or too short for gene prediction, CheckV's
     # hmmsearch will fail on the empty proteins file.  Produce a valid but
     # empty quality_summary.tsv so downstream steps continue gracefully.
-    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || echo 0)
+    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || true)
+    CONTIG_COUNT=\${CONTIG_COUNT:-0}
     if [ "\$CONTIG_COUNT" -eq 0 ]; then
       echo "CheckV: skipping – no viral contigs found for ${sample_id}"
       printf "contig_id\\tcontig_length\\tprovirus\\tproviral_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tmiuvig_quality\\tcompleteness\\tcompleteness_method\\tcontamination\\tkmer_freq\\twarnings\\n" > checkv_dir/quality_summary.tsv
@@ -537,7 +539,7 @@ process VALIDATE {
         echo "CheckV: skipping – viral contigs too short (\${TOTAL_BP} bp) for meaningful quality assessment"
         printf "contig_id\\tcontig_length\\tprovirus\\tproviral_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tmiuvig_quality\\tcompleteness\\tcompleteness_method\\tcontamination\\tkmer_freq\\twarnings\\n" > checkv_dir/quality_summary.tsv
       else
-        checkv end_to_end viral_contigs.fasta checkv_dir -d "\$CHECKV_D" -t 1
+        checkv end_to_end viral_contigs.fasta checkv_dir -d "\$CHECKV_D" -t ${task.cpus}
       fi
     fi
     """
@@ -572,7 +574,8 @@ process GENOMAD {
     done
 
     # Skip if no viral contigs
-    CONTIG_COUNT=\$(grep -c "^>" ${viral_contigs} 2>/dev/null || echo 0)
+    CONTIG_COUNT=\$(grep -c "^>" ${viral_contigs} 2>/dev/null || true)
+    CONTIG_COUNT=\${CONTIG_COUNT:-0}
     if [ "\$CONTIG_COUNT" -eq 0 ]; then
       echo "geNomad: skipping – no viral contigs found for ${sample_id}"
       touch genomad_out/virus_summary.tsv
@@ -585,7 +588,7 @@ process GENOMAD {
       # Run geNomad end-to-end (with neural network classification enabled)
       genomad end-to-end \\
         --cleanup \\
-        --splits ${params.threads} \\
+        --splits ${task.cpus} \\
         ${viral_contigs} \\
         genomad_out \\
         "\$GENOMAD_D"
@@ -620,279 +623,18 @@ process MERGE_QUALITY {
 
     input:
     tuple val(sample_id), path(checkv_dir), path(genomad_dir), path(viral_contigs), path(kaiju_dir), path(preprocess_dir)
+    path(merge_script)
 
     output:
     tuple val(sample_id), path("merged_quality"), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), emit: merged
 
     script:
     """
-    mkdir -p merged_quality
-
-    python3 << 'PYMERGE'
-import pandas as pd
-import sys
-from pathlib import Path
-
-# Input files
-checkv_file = Path("${checkv_dir}/quality_summary.tsv")
-genomad_file = Path("${genomad_dir}/virus_summary.tsv")
-kaiju_file = Path("${kaiju_dir}/kaiju_results_with_names.tsv")
-
-# Output file
-output_file = Path("merged_quality/quality_summary.tsv")
-
-# Read CheckV results
-checkv_df = pd.DataFrame()
-if checkv_file.exists() and checkv_file.stat().st_size > 0:
-    try:
-        checkv_df = pd.read_csv(checkv_file, sep='\\t')
-        checkv_df['quality_source'] = 'checkv'
-        print(f"Loaded {len(checkv_df)} CheckV results", file=sys.stderr)
-    except Exception as e:
-        print(f"Warning: Could not read CheckV file: {e}", file=sys.stderr)
-
-# Read geNomad results
-genomad_df = pd.DataFrame()
-if genomad_file.exists() and genomad_file.stat().st_size > 0:
-    try:
-        genomad_df = pd.read_csv(genomad_file, sep='\\t')
-        print(f"Loaded {len(genomad_df)} geNomad results", file=sys.stderr)
-    except Exception as e:
-        print(f"Warning: Could not read geNomad file: {e}", file=sys.stderr)
-
-# Read Kaiju taxonomy to determine phage vs other viruses
-kaiju_taxonomy = {}
-if kaiju_file.exists():
-    try:
-        with open(kaiju_file) as f:
-            for line in f:
-                if line.startswith('C'):
-                    parts = line.strip().split('\\t')
-                    if len(parts) >= 4:
-                        contig_id = parts[1].strip()
-                        lineage = parts[3] if len(parts) == 4 else ';'.join(parts[3:10])
-                        kaiju_taxonomy[contig_id] = lineage.lower()
-        print(f"Loaded taxonomy for {len(kaiju_taxonomy)} contigs", file=sys.stderr)
-    except Exception as e:
-        print(f"Warning: Could not read Kaiju file: {e}", file=sys.stderr)
-
-def is_phage(contig_id, lineage_str):
-    \"\"\"Determine if a contig is likely a bacteriophage based on Kaiju taxonomy.\"\"\"
-    if not lineage_str:
-        return False
-    lineage_lower = lineage_str.lower()
-    
-    # First, check for known NON-phage viral groups that might contain phage-like substrings
-    # Kitrinoviricota contains 'inovir' but is actually an RNA virus realm (Flaviviridae, etc.)
-    non_phage_indicators = [
-        'kitrinoviricota',  # RNA viruses (Flaviviridae, etc.)
-        'pisuviricota',     # RNA viruses (Picornavirales, etc.)
-        'negarnaviricota',  # RNA viruses (negative-sense)
-        'nucleocytoviricota',  # Giant DNA viruses (not phages)
-        'artverviricota',   # Retroviruses
-        'flaviviridae', 'togaviridae', 'coronaviridae', 'picornaviridae',
-        'rhabdoviridae', 'paramyxoviridae', 'orthomyxoviridae', 'bunyavirales',
-        'herpesviridae', 'poxviridae', 'adenoviridae', 'papillomaviridae',
-        'polyomaviridae', 'retroviridae', 'hepadnaviridae', 'parvoviridae',
-        'mimiviridae', 'phycodnaviridae', 'iridoviridae', 'ascoviridae',
-    ]
-    
-    if any(indicator in lineage_lower for indicator in non_phage_indicators):
-        return False
-    
-    # Now check for phage-specific indicators
-    # Use more specific patterns to avoid false positives
-    phage_indicators = [
-        'caudovir',        # Tailed phages (Caudovirales, Caudoviricetes)
-        'phage',           # Explicit "phage" in name
-        'bacteriophage',   # Explicit bacteriophage
-        'siphovir',        # Siphoviridae
-        'myovir',          # Myoviridae
-        'podovir',         # Podoviridae
-        'autographivir',   # Autographiviridae
-        'demerecvir',      # Demerecviridae
-        'herellevir',      # Herelleviridae
-        'inoviridae',      # Inoviridae (filamentous phages) - use full family name
-        'microviridae',    # Microviridae - use full family name
-        'leviviricetes',   # RNA phages
-        'cystoviridae',    # dsRNA phages
-        'tectiviridae',    # Tectiviridae
-        'corticoviridae',  # Corticoviridae
-        'plasmaviridae',   # Plasmaviridae
-        'sphaerolipoviridae',  # Sphaerolipoviridae
-        'uroviricota',     # Phage realm
-        'peduoviridae',    # Peduoviridae
-        'drexlerviridae',  # Drexlerviridae
-        'ackermannviridae',# Ackermannviridae
-    ]
-    return any(indicator in lineage_lower for indicator in phage_indicators)
-
-def genomad_to_quality_tier(row):
-    \"\"\"Convert geNomad metrics to CheckV-style quality tier.\"\"\"
-    # geNomad columns: seq_name, length, topology, coordinates, n_genes, genetic_code,
-    #                  virus_score, fdr, n_hallmarks, marker_enrichment, taxonomy
-    topology = str(row.get('topology', '')).lower()
-    n_hallmarks = int(row.get('n_hallmarks', 0)) if pd.notna(row.get('n_hallmarks')) else 0
-    virus_score = float(row.get('virus_score', 0)) if pd.notna(row.get('virus_score')) else 0
-
-    # Circular genomes with hallmarks are likely complete
-    if topology == 'circular' and n_hallmarks >= 1:
-        return 'Complete', 100.0
-    elif topology == 'circular':
-        return 'High-quality', 90.0
-    elif n_hallmarks >= 3:
-        return 'High-quality', 80.0
-    elif n_hallmarks >= 1:
-        return 'Medium-quality', 50.0
-    elif virus_score >= 0.9:
-        return 'Low-quality', 30.0
-    elif virus_score >= 0.7:
-        return 'Low-quality', 20.0
-    else:
-        return 'Not-determined', None
-
-# Create standardized output
-merged_rows = []
-
-# Get all contig IDs from CheckV (primary source)
-if not checkv_df.empty and 'contig_id' in checkv_df.columns:
-    for _, row in checkv_df.iterrows():
-        contig_id = row['contig_id']
-        lineage = kaiju_taxonomy.get(contig_id, '')
-
-        # Determine which quality source to use
-        use_checkv = is_phage(contig_id, lineage)
-
-        if use_checkv:
-            # Use CheckV results for phages
-            merged_rows.append({
-                'contig_id': contig_id,
-                'contig_length': row.get('contig_length', 0),
-                'quality_source': 'checkv',
-                'checkv_quality': row.get('checkv_quality', 'Not-determined'),
-                'completeness': row.get('completeness', None),
-                'completeness_method': row.get('completeness_method', ''),
-                'contamination': row.get('contamination', None),
-                'viral_genes': row.get('viral_genes', 0),
-                'host_genes': row.get('host_genes', 0),
-                'taxonomy_hint': 'phage' if is_phage(contig_id, lineage) else 'other',
-                'provirus': row.get('provirus', 'No'),
-            })
-        else:
-            # For non-phages: combine best data from CheckV and geNomad
-            genomad_row = None
-            if not genomad_df.empty and 'seq_name' in genomad_df.columns:
-                match = genomad_df[genomad_df['seq_name'] == contig_id]
-                if not match.empty:
-                    genomad_row = match.iloc[0]
-
-            # Get CheckV completeness if available
-            checkv_completeness = row.get('completeness', None)
-            checkv_quality = row.get('checkv_quality', 'Not-determined')
-            checkv_method = row.get('completeness_method', '')
-            
-            # Determine best completeness source:
-            # - If CheckV has AAI-based completeness, use it (more reliable for viruses in DB)
-            # - Otherwise, use geNomad's estimate
-            use_checkv_completeness = pd.notna(checkv_completeness) and checkv_completeness != ''
-            
-            if genomad_row is not None:
-                genomad_quality, genomad_completeness = genomad_to_quality_tier(genomad_row)
-                
-                # Choose best completeness
-                if use_checkv_completeness:
-                    final_completeness = checkv_completeness
-                    final_quality = checkv_quality
-                    final_method = checkv_method
-                    source = 'checkv+genomad'  # Combined: CheckV quality, geNomad identification
-                else:
-                    final_completeness = genomad_completeness
-                    final_quality = genomad_quality
-                    final_method = 'genomad_hallmarks'
-                    source = 'genomad'
-                
-                merged_rows.append({
-                    'contig_id': contig_id,
-                    'contig_length': row.get('contig_length', 0),
-                    'quality_source': source,
-                    'checkv_quality': final_quality,
-                    'completeness': final_completeness,
-                    'completeness_method': final_method,
-                    'contamination': row.get('contamination', None),
-                    'viral_genes': max(row.get('viral_genes', 0), int(genomad_row.get('n_genes', 0) or 0)),
-                    'host_genes': row.get('host_genes', 0),
-                    'taxonomy_hint': 'rna_or_eukaryotic',
-                    'provirus': row.get('provirus', 'No'),
-                    'genomad_score': genomad_row.get('virus_score', None),
-                    'genomad_topology': genomad_row.get('topology', ''),
-                    'genomad_hallmarks': genomad_row.get('n_hallmarks', 0),
-                    'genomad_taxonomy': genomad_row.get('taxonomy', ''),
-                })
-            else:
-                # Fallback to CheckV if geNomad didn't process this contig
-                merged_rows.append({
-                    'contig_id': contig_id,
-                    'contig_length': row.get('contig_length', 0),
-                    'quality_source': 'checkv_fallback',
-                    'checkv_quality': row.get('checkv_quality', 'Not-determined'),
-                    'completeness': row.get('completeness', None),
-                    'completeness_method': row.get('completeness_method', ''),
-                    'contamination': row.get('contamination', None),
-                    'viral_genes': row.get('viral_genes', 0),
-                    'host_genes': row.get('host_genes', 0),
-                    'taxonomy_hint': 'other',
-                    'provirus': row.get('provirus', 'No'),
-                })
-
-# If CheckV failed but geNomad worked, use geNomad only
-if not merged_rows and not genomad_df.empty:
-    print("Using geNomad results only (CheckV results empty)", file=sys.stderr)
-    for _, row in genomad_df.iterrows():
-        contig_id = row.get('seq_name', '')
-        quality_tier, completeness = genomad_to_quality_tier(row)
-        merged_rows.append({
-            'contig_id': contig_id,
-            'contig_length': row.get('length', 0),
-            'quality_source': 'genomad',
-            'checkv_quality': quality_tier,
-            'completeness': completeness,
-            'completeness_method': 'genomad_hallmarks',
-            'contamination': None,
-            'viral_genes': row.get('n_genes', 0),
-            'host_genes': 0,
-            'taxonomy_hint': 'unknown',
-            'provirus': 'No',
-            'genomad_score': row.get('virus_score', None),
-            'genomad_topology': row.get('topology', ''),
-            'genomad_hallmarks': row.get('n_hallmarks', 0),
-            'genomad_taxonomy': row.get('taxonomy', ''),
-        })
-
-# Create output DataFrame
-if merged_rows:
-    merged_df = pd.DataFrame(merged_rows)
-    merged_df.to_csv(output_file, sep='\\t', index=False)
-    print(f"Wrote {len(merged_df)} rows to merged quality summary", file=sys.stderr)
-
-    # Summary stats
-    source_counts = merged_df['quality_source'].value_counts()
-    quality_counts = merged_df['checkv_quality'].value_counts()
-    print(f"Quality sources: {source_counts.to_dict()}", file=sys.stderr)
-    print(f"Quality tiers: {quality_counts.to_dict()}", file=sys.stderr)
-else:
-    # Create empty file with header
-    pd.DataFrame(columns=['contig_id', 'contig_length', 'quality_source', 'checkv_quality',
-                          'completeness', 'completeness_method', 'contamination']).to_csv(output_file, sep='\\t', index=False)
-    print("No quality data to merge", file=sys.stderr)
-
-# Also copy original files to merged_quality for reference
-import shutil
-if checkv_file.exists():
-    shutil.copy(checkv_file, "merged_quality/checkv_quality_summary.tsv")
-if genomad_file.exists() and genomad_file.stat().st_size > 0:
-    shutil.copy(genomad_file, "merged_quality/genomad_virus_summary.tsv")
-
-PYMERGE
+    python ${merge_script} \\
+      --checkv-dir ${checkv_dir} \\
+      --genomad-dir ${genomad_dir} \\
+      --kaiju-dir ${kaiju_dir} \\
+      --out-dir merged_quality
     """
 }
 
@@ -914,7 +656,8 @@ process ANNOTATE {
     script:
     """
     mkdir -p annotation_dir
-    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || echo 0)
+    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || true)
+    CONTIG_COUNT=\${CONTIG_COUNT:-0}
     if [ "\$CONTIG_COUNT" -eq 0 ]; then
       echo "ANNOTATE: skipping – no viral contigs found for ${sample_id}"
       touch annotation_dir/proteins.faa
@@ -922,7 +665,7 @@ process ANNOTATE {
       prodigal -i viral_contigs.fasta -a annotation_dir/proteins.faa -p meta -q
       VOG_HMM=\$(find ${vog_db} -maxdepth 1 \\( -name 'vog_all.hmm' -o -name 'vog.hmm' \\) 2>/dev/null | head -1)
       if [ -n "\$VOG_HMM" ] && [ -f "\$VOG_HMM" ]; then
-        hmmscan --cpu ${params.threads} -o annotation_dir/vog_out.txt --domtblout annotation_dir/vog_domains.txt "\$VOG_HMM" annotation_dir/proteins.faa
+        hmmscan --cpu ${task.cpus} -o annotation_dir/vog_out.txt --domtblout annotation_dir/vog_domains.txt "\$VOG_HMM" annotation_dir/proteins.faa
       fi
     fi
     """
@@ -975,7 +718,8 @@ process QUANTIFY {
     script:
     """
     mkdir -p quant_dir
-    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || echo 0)
+    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || true)
+    CONTIG_COUNT=\${CONTIG_COUNT:-0}
     if [ "\$CONTIG_COUNT" -eq 0 ]; then
       echo "QUANTIFY: skipping – no viral contigs found for ${sample_id}"
       touch quant_dir/mapped.bam quant_dir/mapped.bam.bai quant_dir/depth.txt
@@ -984,12 +728,12 @@ process QUANTIFY {
       # Use -s (non-empty file) instead of -f to avoid matching 0-byte placeholders
       # In single-cell mode, R1/R2 are empty placeholders; actual data is in trimmed_single
       if [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ]; then
-        bwa mem -t ${params.threads} quant_dir/idx preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz | samtools sort -o quant_dir/mapped.bam -
+        bwa mem -t ${task.cpus} quant_dir/idx preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz | samtools sort -o quant_dir/mapped.bam -
       elif [ -s preprocess_dir/trimmed_single.fastq.gz ]; then
-        bwa mem -t ${params.threads} quant_dir/idx preprocess_dir/trimmed_single.fastq.gz | samtools sort -o quant_dir/mapped.bam -
+        bwa mem -t ${task.cpus} quant_dir/idx preprocess_dir/trimmed_single.fastq.gz | samtools sort -o quant_dir/mapped.bam -
       elif [ -s preprocess_dir/trimmed_long.fastq.gz ]; then
         MINIMAP2_LONG_PRESET=\$( [ "${params.long_read_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
-        minimap2 -t ${params.threads} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta preprocess_dir/trimmed_long.fastq.gz | samtools sort -o quant_dir/mapped.bam -
+        minimap2 -t ${task.cpus} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta preprocess_dir/trimmed_long.fastq.gz | samtools sort -o quant_dir/mapped.bam -
       fi
       samtools index quant_dir/mapped.bam
       samtools depth -a quant_dir/mapped.bam > quant_dir/depth.txt 2>/dev/null || true
@@ -1035,7 +779,7 @@ process REFERENCE_CHECK {
     TOTAL_READS=0
 
     if [ -s "${trimmed_r1}" ] && [ -s "${trimmed_r2}" ] && [ "${trimmed_r1.name}" != ".placeholder_r1" ]; then
-      bwa mem -t ${params.threads} ref_check_dir/ref_idx ${trimmed_r1} ${trimmed_r2} 2>/dev/null | \\
+      bwa mem -t ${task.cpus} ref_check_dir/ref_idx ${trimmed_r1} ${trimmed_r2} 2>/dev/null | \\
         samtools sort -o ref_check_dir/mapped_pe.bam - 2>/dev/null
       samtools index ref_check_dir/mapped_pe.bam 2>/dev/null || true
       PE_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_pe.bam 2>/dev/null || echo 0)
@@ -1045,7 +789,7 @@ process REFERENCE_CHECK {
     fi
 
     if [ -s "${trimmed_single}" ] && [ "${trimmed_single.name}" != ".placeholder_single" ]; then
-      bwa mem -t ${params.threads} ref_check_dir/ref_idx ${trimmed_single} 2>/dev/null | \\
+      bwa mem -t ${task.cpus} ref_check_dir/ref_idx ${trimmed_single} 2>/dev/null | \\
         samtools sort -o ref_check_dir/mapped_single.bam - 2>/dev/null
       samtools index ref_check_dir/mapped_single.bam 2>/dev/null || true
       SINGLE_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_single.bam 2>/dev/null || echo 0)
@@ -1055,7 +799,7 @@ process REFERENCE_CHECK {
     fi
 
     if [ -s "${trimmed_long}" ] && [ "${trimmed_long.name}" != ".placeholder_long" ]; then
-      minimap2 -t ${params.threads} -ax ${minimap2_preset} ${reference} ${trimmed_long} 2>/dev/null | \\
+      minimap2 -t ${task.cpus} -ax ${minimap2_preset} ${reference} ${trimmed_long} 2>/dev/null | \\
         samtools sort -o ref_check_dir/mapped_long.bam - 2>/dev/null
       samtools index ref_check_dir/mapped_long.bam 2>/dev/null || true
       LONG_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_long.bam 2>/dev/null || echo 0)
@@ -1204,7 +948,8 @@ process PLOT {
     def viral_fasta = viral_contigs.name
     """
     mkdir -p plots_dir
-    CONTIG_COUNT=\$(grep -c "^>" ${viral_fasta} 2>/dev/null || echo 0)
+    CONTIG_COUNT=\$(grep -c "^>" ${viral_fasta} 2>/dev/null || true)
+    CONTIG_COUNT=\${CONTIG_COUNT:-0}
     if [ "\$CONTIG_COUNT" -eq 0 ]; then
       echo "PLOT: skipping – no viral contigs found for ${sample_id}"
       echo "No viral contigs >= ${params.min_contig_len} bp were found in this sample." > plots_dir/NO_VIRAL_SEQUENCES.txt
@@ -1241,9 +986,9 @@ process SC_MAP_VIRAL {
 
     # Map barcoded reads (R2 = cDNA with barcode in read name) to viral contigs
     # Read names contain cell barcode and UMI from umi_tools extract
-    bwa mem -t ${params.threads} ${viral_contigs} ${tagged_r2} | \\
+    bwa mem -t ${task.cpus} ${viral_contigs} ${tagged_r2} | \\
         samtools view -bS -F 4 - | \\
-        samtools sort -@ ${params.threads} -o viral_aligned.bam -
+        samtools sort -@ ${task.cpus} -o viral_aligned.bam -
 
     samtools index viral_aligned.bam
 
@@ -1357,6 +1102,7 @@ workflow {
     def c_db = params.checkv_db ?: (db_dir ? "${db_dir}/checkv_db" : "${container_db}/checkv_db")
     def v_db = params.vog_db ?: (db_dir ? "${db_dir}/vog_db" : "${container_db}/vog_db")
     def extract_script = file("${projectDir}/bin/extract_fasta_by_ids.py")
+    def merge_script  = file("${projectDir}/bin/merge_quality.py")
     def plot_script   = file("${projectDir}/bin/run_plots.py")
 
     def g_db = params.genomad_db ?: (db_dir ? "${db_dir}/genomad_db" : "${container_db}/genomad_db")
@@ -1440,7 +1186,7 @@ workflow {
         .map { t -> tuple(t[0], t[1], t[2], t[3], t[4], t[5]) }
         // Result: (sample_id, checkv_dir, genomad_out, viral_contigs, kaiju_dir, preprocess_dir)
 
-    MERGE_QUALITY(ch_merge_input)
+    MERGE_QUALITY(ch_merge_input, merge_script)
 
     if (v_db) {
         ANNOTATE(FILTER_VIRAL.out.viral, ch_vog_db)
@@ -1465,10 +1211,6 @@ workflow {
     // =========================================================================
     if (params.single_cell_mode) {
         // Join barcoded reads with viral contigs
-        // SC_EXTRACT_BARCODES.out.tagged: (sample_id, tagged_R1, tagged_R2)
-        // FILTER_VIRAL.out.viral: (sample_id, viral_contigs, kaiju_dir, preprocess_dir)
-        // SC_EXTRACT_BARCODES.out.tagged: (sample_id, tagged_R1, tagged_R2)
-        // FILTER_VIRAL.out.viral: (sample_id, viral_contigs, kaiju_dir, preprocess_dir)
         // For 10x, we only use R2 (cDNA) for mapping - R1 is just barcode/UMI
         ch_sc_map_input = SC_EXTRACT_BARCODES.out.tagged
             .join(FILTER_VIRAL.out.viral)

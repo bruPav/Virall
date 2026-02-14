@@ -12,7 +12,7 @@
 samples: "nextflow/samples.csv"
 
 # Output directory for all results
-outdir: "media/bruno/ADdrive/AD/vir_results"
+outdir: "/media/bruno/ADdrive/AD/testres"
 
 # -----------------------------------------------------------------------------
 # Databases (required for full pipeline; or set env VIRALL_DATABASE_DIR)
@@ -78,7 +78,7 @@ memory: "24G"
 # -----------------------------------------------------------------------------
 # Optional minimum contig length
 # -----------------------------------------------------------------------------
-min_contig_len: 1000
+min_contig_len: 500
 
 # -----------------------------------------------------------------------------
 # Single-Cell Sequencing (10x Genomics)
