@@ -424,6 +424,17 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Changelog
 
+### v0.3.0
+- Added Nextflow support
+- Fix HPC scheduling: replace params.threads with task.cpus in all processes
+  so SLURM/SGE allocate the correct number of CPUs
+- Add resource directives (cpus/memory/time) to processes that were missing
+  them (HOST_FILTER, GENOMAD, REFERENCE_CHECK, SC_*, etc.)
+- Fix CheckV running on single thread regardless of configuration
+- Extract MERGE_QUALITY inline Python (~260 lines) into standalone
+  bin/merge_quality.py for testability and maintainability
+- Add genomad_db path to Docker/Singularity profiles
+
 ### v0.2.2
 - Added configurable assembly parameters for Flye (min-overlap, iterations)
 - Added configurable assembly parameters for SPAdes (k-mers, cov-cutoff, careful mode)
