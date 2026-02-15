@@ -50,13 +50,19 @@ Or build locally from the repository:
 docker build -t pavle17/virall .
 ```
 
-**Singularity / Apptainer** -- build from the definition file:
+**Singularity / Apptainer** -- pull the pre-built image from Sylabs Cloud:
+
+```bash
+singularity pull virall.sif library://brupav/virall/virall:latest
+```
+
+Or build locally from the definition file:
 
 ```bash
 singularity build --fakeroot virall.sif virall.def
 ```
 
-> The container includes all bioinformatics tools and pre-indexed databases (~21 GB). Building from source only needs to be done once.
+> The container includes all bioinformatics tools and pre-indexed databases (~6 GB compressed, ~21 GB on disk). Building from source only needs to be done once.
 
 ### 2. Prepare your sample sheet
 
@@ -425,7 +431,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Changelog
 
 ### v0.3.0
-- Added Nextflow support
 - Fix HPC scheduling: replace params.threads with task.cpus in all processes
   so SLURM/SGE allocate the correct number of CPUs
 - Add resource directives (cpus/memory/time) to processes that were missing
@@ -433,7 +438,9 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - Fix CheckV running on single thread regardless of configuration
 - Extract MERGE_QUALITY inline Python (~260 lines) into standalone
   bin/merge_quality.py for testability and maintainability
+- Add Medaka polishing for Nanopore long-only assemblies (PacBio HiFi skipped as already high-accuracy)
 - Add genomad_db path to Docker/Singularity profiles
+- Singularity image now available on Sylabs Cloud (`library://brupav/virall/virall`)
 
 ### v0.2.2
 - Added configurable assembly parameters for Flye (min-overlap, iterations)

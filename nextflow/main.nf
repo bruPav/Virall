@@ -417,6 +417,15 @@ process ASSEMBLE {
         if [ "\$HAS_LONG" = "1" ]; then
           flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye -t ${task.cpus}
           cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
+
+          # Polish Nanopore assemblies with Medaka (PacBio HiFi is already high-accuracy)
+          if [ "\$LONG_READ_TECH" = "nanopore" ] && [ -s contigs ]; then
+            echo "Polishing Nanopore assembly with Medaka..."
+            medaka_polish -i preprocess_dir/trimmed_long.fastq.gz -d contigs -o assembly_dir/medaka -t ${task.cpus} \
+              && cp assembly_dir/medaka/consensus.fasta contigs \
+              || echo "WARNING: Medaka polishing failed, using unpolished Flye assembly"
+          fi
+
           cp contigs scaffolds 2>/dev/null || true
         else
           echo "Warning: strategy=long_only but no long reads available"

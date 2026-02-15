@@ -262,6 +262,10 @@ From: ubuntu:22.04
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y umi_tools" || echo "Warning: umi_tools installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
+    echo "Installing medaka (for Nanopore assembly polishing)..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y medaka" || echo "Warning: medaka installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
     # Try to install minimap2 and fastqc with conda (they failed with mamba)
     echo "Retrying minimap2 with conda..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y minimap2" || echo "Warning: minimap2 installation failed, continuing..."
@@ -453,7 +457,7 @@ From: ubuntu:22.04
     echo ""
     echo "Available tools:"
     echo "  - samtools, bwa, minimap2 (mapping)"
-    echo "  - spades, flye (assembly)"
+    echo "  - spades, flye, medaka (assembly + polishing)"
     echo "  - fastp, fastplong, fastqc (QC)"
     echo "  - checkv, genomad (quality assessment)"
     echo "  - bcftools, pilon, hmmer, prodigal, kaiju"
@@ -478,7 +482,7 @@ From: ubuntu:22.04
     
     Installed Tools:
     - Mapping: samtools, bwa, minimap2
-    - Assembly: SPAdes, Flye
+    - Assembly: SPAdes, Flye, Medaka (Nanopore polishing)
     - QC: fastp, fastplong, fastqc
     - Quality: checkv (phages), genomad (RNA/eukaryotic viruses)
     - Annotation: prodigal, hmmer (VOG)

@@ -68,6 +68,7 @@ RUN mamba install -n virall -c bioconda -c conda-forge -y \
     kaiju \
     genomad \
     umi_tools \
+    medaka \
     && mamba clean -afy
 
 # Note: virall Python package is NOT installed in the container
