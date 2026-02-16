@@ -383,6 +383,16 @@ From: ubuntu:22.04
             ( [ -f vog.hmm ] && hmmpress vog.hmm ) || true
         cd - >/dev/null
     fi
+
+    # Download VOG annotation metadata (functional categories, virus-only flags)
+    if [ ! -f "$VOG_DB_DIR/vog.annotations.tsv" ]; then
+        echo "Downloading VOG annotation metadata..."
+        cd "$VOG_DB_DIR" && \
+            wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.annotations.tsv.gz && gunzip vog.annotations.tsv.gz && \
+            wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.virusonly.tsv.gz && gunzip vog.virusonly.tsv.gz && \
+            wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vogdb.functional_categories.txt
+        cd - >/dev/null
+    fi
     
     echo "Setting up Kaiju viral database..."
     KAIJU_DB_DIR="/opt/virall/databases/kaiju_db"

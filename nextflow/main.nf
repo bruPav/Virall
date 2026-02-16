@@ -505,6 +505,39 @@ process FILTER_VIRAL {
 }
 
 // ---------------------------------------------------------------------------
+// RENAME_CONTIGS – Rename viral contigs by lowest Kaiju taxonomy level
+// ---------------------------------------------------------------------------
+process RENAME_CONTIGS {
+    tag "${sample_id}"
+    label "rename_contigs"
+    publishDir "${params.outdir}/${sample_id}/02_viral_contigs", mode: "copy", pattern: "{viral_contigs.fasta,name_mapping.tsv}"
+
+    input:
+    tuple val(sample_id), path("input_viral_contigs.fasta"), path("input_kaiju_dir"), path(preprocess_dir)
+
+    output:
+    tuple val(sample_id), path("viral_contigs.fasta"), path("kaiju_dir"), path(preprocess_dir), emit: renamed
+
+    script:
+    """
+    mkdir -p kaiju_dir
+    if [ -s input_viral_contigs.fasta ]; then
+      rename_contigs.py \\
+        --fasta input_viral_contigs.fasta \\
+        --kaiju-dir input_kaiju_dir \\
+        --out-fasta viral_contigs.fasta \\
+        --out-kaiju-dir kaiju_dir \\
+        --out-mapping name_mapping.tsv
+    else
+      echo "RENAME_CONTIGS: no viral contigs to rename for ${sample_id}"
+      touch viral_contigs.fasta name_mapping.tsv
+      cp input_kaiju_dir/kaiju_results_with_names.tsv kaiju_dir/ 2>/dev/null || touch kaiju_dir/kaiju_results_with_names.tsv
+      cp input_kaiju_dir/kaiju_results.tsv kaiju_dir/ 2>/dev/null || touch kaiju_dir/kaiju_results.tsv
+    fi
+    """
+}
+
+// ---------------------------------------------------------------------------
 // VALIDATE – CheckV on viral contigs
 // ---------------------------------------------------------------------------
 process VALIDATE {
@@ -681,7 +714,7 @@ process ANNOTATE {
 }
 
 // ---------------------------------------------------------------------------
-// ORGANIZE_GENES – Organize genes by Kaiju taxonomy
+// ORGANIZE_GENES – Organize genes by Kaiju taxonomy + VOG functional annotation
 // ---------------------------------------------------------------------------
 process ORGANIZE_GENES {
     tag "${sample_id}"
@@ -690,6 +723,7 @@ process ORGANIZE_GENES {
 
     input:
     tuple val(sample_id), path(annotation_dir), path(viral_contigs), path(kaiju_dir)
+    val(vog_db)
 
     output:
     tuple val(sample_id), path("by_taxonomy"), emit: organized_genes
@@ -698,14 +732,31 @@ process ORGANIZE_GENES {
     """
     mkdir -p by_taxonomy
     if [ -s ${annotation_dir}/proteins.faa ] && [ -s ${viral_contigs} ]; then
+      # Build VOG annotation flags if metadata files exist
+      VOG_FLAGS=""
+      if [ -f "${annotation_dir}/vog_domains.txt" ] && [ -s "${annotation_dir}/vog_domains.txt" ]; then
+        VOG_FLAGS="--vog-domains ${annotation_dir}/vog_domains.txt"
+      fi
+      if [ -f "${vog_db}/vog.annotations.tsv" ]; then
+        VOG_FLAGS="\$VOG_FLAGS --vog-annotations ${vog_db}/vog.annotations.tsv"
+      fi
+      if [ -f "${vog_db}/vog.virusonly.tsv" ]; then
+        VOG_FLAGS="\$VOG_FLAGS --vog-virusonly ${vog_db}/vog.virusonly.tsv"
+      fi
+      if [ -f "${vog_db}/vogdb.functional_categories.txt" ]; then
+        VOG_FLAGS="\$VOG_FLAGS --vog-categories ${vog_db}/vogdb.functional_categories.txt"
+      fi
+
       organize_genes_by_taxonomy.py \
           --proteins ${annotation_dir}/proteins.faa \
           --contigs ${viral_contigs} \
           --kaiju ${kaiju_dir}/kaiju_results_with_names.tsv \
+          \$VOG_FLAGS \
           --outdir by_taxonomy
     else
       echo "ORGANIZE_GENES: skipping – no viral contigs or proteins found for ${sample_id}"
-      touch by_taxonomy/gene_taxonomy_mapping.tsv
+      touch by_taxonomy/gene_annotation.tsv
+      ln -sf gene_annotation.tsv by_taxonomy/gene_taxonomy_mapping.tsv
     fi
     """
 }
@@ -1177,17 +1228,18 @@ workflow {
 
     KAIJU(ASSEMBLE.out.assembled, ch_kaiju_db)
     FILTER_VIRAL(KAIJU.out.kaiju_done, extract_script)
+    RENAME_CONTIGS(FILTER_VIRAL.out.viral)
 
     // Run CheckV and geNomad in parallel on viral contigs
-    VALIDATE(FILTER_VIRAL.out.viral, ch_checkv_db)
-    GENOMAD(FILTER_VIRAL.out.viral, ch_genomad_db)
+    VALIDATE(RENAME_CONTIGS.out.renamed, ch_checkv_db)
+    GENOMAD(RENAME_CONTIGS.out.renamed, ch_genomad_db)
 
     // Merge quality assessments: CheckV for phages, geNomad for RNA/eukaryotic viruses
     // Join by sample_id: VALIDATE output is (sample_id, checkv_dir, viral_contigs, kaiju_dir, preprocess_dir)
     //                    GENOMAD output is (sample_id, genomad_out, viral_contigs, kaiju_dir, preprocess_dir)
     ch_checkv = VALIDATE.out.validated.map { t -> tuple(t[0], t[1]) }  // (sample_id, checkv_dir)
     ch_genomad = GENOMAD.out.genomad_done.map { t -> tuple(t[0], t[1]) }  // (sample_id, genomad_out)
-    ch_viral_meta = FILTER_VIRAL.out.viral.map { t -> tuple(t[0], t[1], t[2], t[3]) }  // (sample_id, viral_contigs, kaiju_dir, preprocess_dir)
+    ch_viral_meta = RENAME_CONTIGS.out.renamed.map { t -> tuple(t[0], t[1], t[2], t[3]) }  // (sample_id, viral_contigs, kaiju_dir, preprocess_dir)
 
     ch_merge_input = ch_checkv
         .join(ch_genomad)
@@ -1198,18 +1250,18 @@ workflow {
     MERGE_QUALITY(ch_merge_input, merge_script)
 
     if (v_db) {
-        ANNOTATE(FILTER_VIRAL.out.viral, ch_vog_db)
+        ANNOTATE(RENAME_CONTIGS.out.renamed, ch_vog_db)
         
         // Organize genes by taxonomy
-        // Join ANNOTATE output with FILTER_VIRAL output to get viral_contigs and kaiju_dir
+        // Join ANNOTATE output with RENAME_CONTIGS output to get viral_contigs and kaiju_dir
         ch_organize_input = ANNOTATE.out.annotated
-            .join(FILTER_VIRAL.out.viral)
+            .join(RENAME_CONTIGS.out.renamed)
             .map { sample_id, annotation_dir, viral_contigs, kaiju_dir, preprocess_dir ->
                 tuple(sample_id, annotation_dir, viral_contigs, kaiju_dir)
             }
-        ORGANIZE_GENES(ch_organize_input)
+        ORGANIZE_GENES(ch_organize_input, ch_vog_db)
     }
-    QUANTIFY(FILTER_VIRAL.out.viral)
+    QUANTIFY(RENAME_CONTIGS.out.renamed)
 
     // Use merged quality for plotting
     ch_plot_input = QUANTIFY.out.quantified.join(MERGE_QUALITY.out.merged)
@@ -1222,7 +1274,7 @@ workflow {
         // Join barcoded reads with viral contigs
         // For 10x, we only use R2 (cDNA) for mapping - R1 is just barcode/UMI
         ch_sc_map_input = SC_EXTRACT_BARCODES.out.tagged
-            .join(FILTER_VIRAL.out.viral)
+            .join(RENAME_CONTIGS.out.renamed)
             .map { t -> tuple(t[0], t[2], t[3]) }
             // (sample_id, tagged_R2, viral_contigs)
         
@@ -1232,7 +1284,7 @@ workflow {
         
         // Join counts with viral contigs and kaiju for matrix building
         ch_matrix_input = SC_COUNT_CELLS.out.counts
-            .join(FILTER_VIRAL.out.viral)
+            .join(RENAME_CONTIGS.out.renamed)
             .map { t -> tuple(t[0], t[1], t[2], t[3]) }
             // (sample_id, umi_counts, viral_contigs, kaiju_dir)
         

@@ -93,6 +93,12 @@ RUN cd ${VOG_DB_DIR} && \
     ( [ -f AllVOG.hmm ] && cat AllVOG.hmm > vog_all.hmm ) || find . -name '*.hmm' -exec cat {} + > vog_all.hmm && \
     hmmpress vog_all.hmm
 
+# Download VOG annotation metadata (functional categories, virus-only flags)
+RUN cd ${VOG_DB_DIR} && \
+    wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.annotations.tsv.gz && gunzip vog.annotations.tsv.gz && \
+    wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.virusonly.tsv.gz && gunzip vog.virusonly.tsv.gz && \
+    wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vogdb.functional_categories.txt
+
 # Download Kaiju database (viruses subset)
 # Tarball may extract flat or into a subdir; flatten so .fmi and .dmp are in KAIJU_DB_DIR
 RUN cd ${KAIJU_DB_DIR} && \
