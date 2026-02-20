@@ -398,24 +398,91 @@ process ASSEMBLE {
       fi
 
       # Run assembler(s) based on strategy
-      if [ "\$STRATEGY" = "short_only" ] || [ "\$STRATEGY" = "hybrid" ]; then
+      if [ "\$STRATEGY" = "short_only" ]; then
         if [ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]; then
           SPADES_OPTS="-o assembly_dir/spades -t ${task.cpus} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
           [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
           [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
-          # Add long reads for hybrid mode (--nanopore or --pacbio)
-          [ "\$STRATEGY" = "hybrid" ] && [ "\$HAS_LONG" = "1" ] && SPADES_OPTS="\$SPADES_OPTS \$SPADES_LONG_FLAG preprocess_dir/trimmed_long.fastq.gz"
           spades.py \$SPADES_OPTS
           cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
           cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
         else
-          echo "Warning: strategy=\$STRATEGY but no short/single reads available"
+          echo "Warning: strategy=short_only but no short/single reads available"
+        fi
+      fi
+
+      if [ "\$STRATEGY" = "hybrid" ]; then
+        if [ "\$HAS_LONG" = "1" ]; then
+          echo "Hybrid assembly: Flye --meta → Medaka (Nanopore only) → Polypolish → Pypolca"
+          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye --meta -t ${task.cpus}
+          cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
+
+          # LR polishing: Medaka fixes systematic Nanopore errors (skip for PacBio)
+          if [ "\$LONG_READ_TECH" = "nanopore" ] && [ -s contigs ]; then
+            echo "Polishing Nanopore assembly with Medaka..."
+            medaka_polish -i preprocess_dir/trimmed_long.fastq.gz -d contigs -o assembly_dir/medaka -t ${task.cpus} \
+              && cp assembly_dir/medaka/consensus.fasta contigs \
+              || echo "WARNING: Medaka polishing failed, continuing with unpolished assembly"
+          fi
+
+          # SR polishing: Polypolish (repeat-aware, uses all BWA alignments)
+          if [ -s contigs ] && ([ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]); then
+            if command -v polypolish &>/dev/null; then
+              echo "Polishing assembly with short reads (Polypolish)..."
+              bwa index contigs
+              if [ "\$HAS_SHORT" = "1" ]; then
+                bwa mem -t ${task.cpus} -a contigs preprocess_dir/trimmed_R1.fastq.gz > assembly_dir/alignments_1.sam
+                bwa mem -t ${task.cpus} -a contigs preprocess_dir/trimmed_R2.fastq.gz > assembly_dir/alignments_2.sam
+                polypolish polish contigs assembly_dir/alignments_1.sam assembly_dir/alignments_2.sam > assembly_dir/polished.fasta \
+                  && cp assembly_dir/polished.fasta contigs \
+                  || echo "WARNING: Polypolish failed, using previous assembly"
+                rm -f assembly_dir/alignments_1.sam assembly_dir/alignments_2.sam
+              elif [ "\$HAS_SINGLE" = "1" ]; then
+                bwa mem -t ${task.cpus} -a contigs preprocess_dir/trimmed_single.fastq.gz > assembly_dir/alignments.sam
+                polypolish polish contigs assembly_dir/alignments.sam > assembly_dir/polished.fasta \
+                  && cp assembly_dir/polished.fasta contigs \
+                  || echo "WARNING: Polypolish failed, using previous assembly"
+                rm -f assembly_dir/alignments.sam
+              fi
+            else
+              echo "WARNING: Polypolish not found – skipping. Install with: conda install -c bioconda polypolish"
+            fi
+          fi
+
+          # Final polish: Pypolca (k-mer-based cleanup of residual SNPs/indels)
+          if [ -s contigs ] && [ "\$HAS_SHORT" = "1" ]; then
+            if command -v pypolca &>/dev/null; then
+              echo "Final polishing with Pypolca..."
+              pypolca run -a contigs \
+                -1 preprocess_dir/trimmed_R1.fastq.gz \
+                -2 preprocess_dir/trimmed_R2.fastq.gz \
+                -t ${task.cpus} --careful \
+                -o assembly_dir/pypolca 2>&1 \
+                && { PYPOLCA_OUT=\$(ls assembly_dir/pypolca/*corrected*.fasta 2>/dev/null | head -1); \
+                     [ -s "\$PYPOLCA_OUT" ] && cp "\$PYPOLCA_OUT" contigs; } \
+                || echo "WARNING: Pypolca failed, using Polypolish-polished assembly"
+            else
+              echo "WARNING: Pypolca not found – skipping final polish. Install with: pip install pypolca"
+            fi
+          fi
+
+          cp contigs scaffolds 2>/dev/null || true
+        else
+          echo "Warning: strategy=hybrid but no long reads available, falling back to short-read assembly"
+          if [ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]; then
+            SPADES_OPTS="-o assembly_dir/spades -t ${task.cpus} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
+            [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
+            [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
+            spades.py \$SPADES_OPTS
+            cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
+            cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
+          fi
         fi
       fi
 
       if [ "\$STRATEGY" = "long_only" ]; then
         if [ "\$HAS_LONG" = "1" ]; then
-          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye -t ${task.cpus}
+          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye --meta -t ${task.cpus}
           cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
 
           # Polish Nanopore assemblies with Medaka (PacBio HiFi is already high-accuracy)
@@ -785,15 +852,28 @@ process QUANTIFY {
       touch quant_dir/mapped.bam quant_dir/mapped.bam.bai quant_dir/depth.txt
     else
       bwa index -p quant_dir/idx viral_contigs.fasta
-      # Use -s (non-empty file) instead of -f to avoid matching 0-byte placeholders
-      # In single-cell mode, R1/R2 are empty placeholders; actual data is in trimmed_single
+      BAMS_TO_MERGE=""
       if [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ]; then
-        bwa mem -t ${task.cpus} quant_dir/idx preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz | samtools sort -o quant_dir/mapped.bam -
-      elif [ -s preprocess_dir/trimmed_single.fastq.gz ]; then
-        bwa mem -t ${task.cpus} quant_dir/idx preprocess_dir/trimmed_single.fastq.gz | samtools sort -o quant_dir/mapped.bam -
-      elif [ -s preprocess_dir/trimmed_long.fastq.gz ]; then
+        bwa mem -t ${task.cpus} quant_dir/idx preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz | samtools sort -o quant_dir/mapped_pe.bam -
+        BAMS_TO_MERGE="\$BAMS_TO_MERGE quant_dir/mapped_pe.bam"
+      fi
+      if [ -s preprocess_dir/trimmed_single.fastq.gz ]; then
+        bwa mem -t ${task.cpus} quant_dir/idx preprocess_dir/trimmed_single.fastq.gz | samtools sort -o quant_dir/mapped_single.bam -
+        BAMS_TO_MERGE="\$BAMS_TO_MERGE quant_dir/mapped_single.bam"
+      fi
+      HAS_SHORT=\$([ -n "\$BAMS_TO_MERGE" ] && echo "1" || echo "0")
+      if [ "\$HAS_SHORT" = "0" ] && [ -s preprocess_dir/trimmed_long.fastq.gz ]; then
         MINIMAP2_LONG_PRESET=\$( [ "${params.long_read_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
-        minimap2 -t ${task.cpus} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta preprocess_dir/trimmed_long.fastq.gz | samtools sort -o quant_dir/mapped.bam -
+        minimap2 -t ${task.cpus} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta preprocess_dir/trimmed_long.fastq.gz | samtools sort -o quant_dir/mapped_long.bam -
+        BAMS_TO_MERGE="\$BAMS_TO_MERGE quant_dir/mapped_long.bam"
+      fi
+      BAM_COUNT=\$(echo \$BAMS_TO_MERGE | wc -w)
+      if [ "\$BAM_COUNT" -gt 1 ]; then
+        samtools merge -f quant_dir/mapped.bam \$BAMS_TO_MERGE
+      elif [ "\$BAM_COUNT" -eq 1 ]; then
+        mv \$BAMS_TO_MERGE quant_dir/mapped.bam
+      else
+        touch quant_dir/mapped.bam
       fi
       samtools index quant_dir/mapped.bam
       samtools depth -a quant_dir/mapped.bam > quant_dir/depth.txt 2>/dev/null || true

@@ -230,7 +230,7 @@ From: ubuntu:22.04
     # Other bioinformatics tools - install individually using conda instead of mamba
     # (mamba has GLIBCXX compatibility issues after libstdcxx upgrade)
     echo "Installing bcftools..."
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y bcftools gsl=2.6" || echo "Warning: bcftools installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y bcftools" || echo "Warning: bcftools installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     echo "Installing hmmer..."
@@ -241,8 +241,16 @@ From: ubuntu:22.04
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y prodigal" || echo "Warning: prodigal installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
-    echo "Installing pilon..."
-    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y pilon" || echo "Warning: pilon installation failed, continuing..."
+    echo "Installing seqtk..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y seqtk" || echo "Warning: seqtk installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing polypolish (repeat-aware short-read polishing for hybrid assembly)..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y polypolish" || echo "Warning: polypolish installation failed, continuing..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
+    
+    echo "Installing pypolca (final SNP/indel polishing for hybrid assembly)..."
+    bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda install -c bioconda -c conda-forge -y pypolca" || echo "Warning: pypolca installation failed, continuing..."
     bash -c ". /opt/conda/etc/profile.d/conda.sh && conda activate virall && conda clean -afy" || true
     
     echo "Installing checkv and diamond (CheckV v1.2+ builds .dmnd from .faa)..."
@@ -377,10 +385,14 @@ From: ubuntu:22.04
         echo "Downloading and setting up VOG database (this may take 5-10 minutes)..."
         export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
         cd "$VOG_DB_DIR" && \
-            wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.hmm.tar.gz && \
+            wget -q https://fileshare.csb.univie.ac.at/vog/latest/vog.hmm.tar.gz && \
             tar -xzf vog.hmm.tar.gz && rm -f vog.hmm.tar.gz && \
-            ( [ -f AllVOG.hmm ] && cat AllVOG.hmm > vog.hmm && rm -f AllVOG.hmm ) || true && \
-            ( [ -f vog.hmm ] && hmmpress vog.hmm ) || true
+            if [ -f AllVOG.hmm ]; then \
+                mv AllVOG.hmm vog_all.hmm; \
+            else \
+                find . -name 'VOG*.hmm' -exec cat {} + > vog_all.hmm; \
+            fi && \
+            hmmpress vog_all.hmm
         cd - >/dev/null
     fi
 
@@ -388,9 +400,9 @@ From: ubuntu:22.04
     if [ ! -f "$VOG_DB_DIR/vog.annotations.tsv" ]; then
         echo "Downloading VOG annotation metadata..."
         cd "$VOG_DB_DIR" && \
-            wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.annotations.tsv.gz && gunzip vog.annotations.tsv.gz && \
-            wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.virusonly.tsv.gz && gunzip vog.virusonly.tsv.gz && \
-            wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vogdb.functional_categories.txt
+            wget -q https://fileshare.csb.univie.ac.at/vog/latest/vog.annotations.tsv.gz && gunzip vog.annotations.tsv.gz && \
+            wget -q https://fileshare.csb.univie.ac.at/vog/latest/vog.virusonly.tsv.gz && gunzip vog.virusonly.tsv.gz && \
+            wget -q https://fileshare.csb.univie.ac.at/vog/latest/vogdb.functional_categories.txt
         cd - >/dev/null
     fi
     
@@ -467,10 +479,10 @@ From: ubuntu:22.04
     echo ""
     echo "Available tools:"
     echo "  - samtools, bwa, minimap2 (mapping)"
-    echo "  - spades, flye, medaka (assembly + polishing)"
+    echo "  - spades, flye, medaka, polypolish, pypolca (assembly + polishing)"
     echo "  - fastp, fastplong, fastqc (QC)"
     echo "  - checkv, genomad (quality assessment)"
-    echo "  - bcftools, pilon, hmmer, prodigal, kaiju"
+    echo "  - bcftools, hmmer, prodigal, kaiju"
     echo "  - umi_tools (single-cell sequencing)"
     echo ""
     echo "Databases at /opt/virall/databases/:"
@@ -492,12 +504,12 @@ From: ubuntu:22.04
     
     Installed Tools:
     - Mapping: samtools, bwa, minimap2
-    - Assembly: SPAdes, Flye, Medaka (Nanopore polishing)
+    - Assembly: SPAdes, Flye, Medaka (Nanopore polishing), Polypolish, Pypolca (hybrid polishing)
     - QC: fastp, fastplong, fastqc
     - Quality: checkv (phages), genomad (RNA/eukaryotic viruses)
     - Annotation: prodigal, hmmer (VOG)
     - Classification: kaiju
-    - Other: bcftools, pilon
+    - Other: bcftools
     
     Python Packages (for plotting):
     - numpy, pandas, matplotlib, plotly, biopython

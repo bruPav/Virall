@@ -71,8 +71,20 @@ def is_phage(lineage_str: str) -> bool:
 
 # ── geNomad → quality tier mapping ──────────────────────────────────────────
 
-def genomad_to_quality_tier(row: pd.Series) -> tuple:
-    """Convert geNomad metrics to a (quality_tier, completeness%) tuple."""
+# Expected hallmark density (hallmarks per kb) for a "complete" genome.
+# Typical dsDNA viruses encode ~1-1.5 hallmark genes per kb.  We use 1.0 as
+# a conservative baseline so the heuristic never overestimates completeness.
+_HALLMARK_DENSITY_PER_KB = 1.0
+
+
+def genomad_to_quality_tier(row: pd.Series, *,
+                            contig_length: int = 0) -> tuple:
+    """Convert geNomad metrics to a (quality_tier, completeness%) tuple.
+
+    When *contig_length* is provided (in bp), the hallmark count is normalised
+    by genome size so that a 200 kb virus with 3 hallmarks is not rated the
+    same as a 5 kb phage with 3 hallmarks.
+    """
     topology = str(row.get("topology", "")).lower()
     n_hallmarks = int(row.get("n_hallmarks", 0)) if pd.notna(row.get("n_hallmarks")) else 0
     virus_score = float(row.get("virus_score", 0)) if pd.notna(row.get("virus_score")) else 0
@@ -81,6 +93,22 @@ def genomad_to_quality_tier(row: pd.Series) -> tuple:
         return "Complete", 100.0
     if topology == "circular":
         return "High-quality", 90.0
+
+    # Length-normalised hallmark density (hallmarks per kb)
+    length_kb = contig_length / 1000.0 if contig_length > 0 else 0.0
+    if length_kb > 0 and n_hallmarks > 0:
+        density = n_hallmarks / length_kb
+        estimated_pct = min((density / _HALLMARK_DENSITY_PER_KB) * 100.0, 100.0)
+
+        if estimated_pct >= 80.0:
+            return "High-quality", round(estimated_pct, 1)
+        if estimated_pct >= 40.0:
+            return "Medium-quality", round(estimated_pct, 1)
+        if estimated_pct >= 10.0:
+            return "Low-quality", round(estimated_pct, 1)
+        return "Low-quality", round(estimated_pct, 1)
+
+    # Fallback when length is unavailable: use original fixed thresholds
     if n_hallmarks >= 3:
         return "High-quality", 80.0
     if n_hallmarks >= 1:
@@ -130,6 +158,27 @@ def load_tsv(path: Path, label: str) -> pd.DataFrame:
 
 # ── Merge logic ──────────────────────────────────────────────────────────────
 
+def _taxonomy_confidence(lineage: str) -> str:
+    """Classify how trustworthy the Kaiju taxonomy call is.
+
+    Returns one of:
+      - "high"          – Kaiju returned a lineage that matched a known
+                          phage or non-phage indicator.
+      - "low_unclassified" – Kaiju returned no lineage at all; the routing
+                          decision (phage vs non-phage) is essentially a guess.
+      - "low_ambiguous"  – Kaiju returned a lineage but it matched neither
+                          the phage nor the non-phage indicator lists.
+    """
+    if not lineage:
+        return "low_unclassified"
+    lineage_lower = lineage.lower()
+    has_non_phage = any(ind in lineage_lower for ind in NON_PHAGE_INDICATORS)
+    has_phage = any(ind in lineage_lower for ind in PHAGE_INDICATORS)
+    if has_non_phage or has_phage:
+        return "high"
+    return "low_ambiguous"
+
+
 def merge(checkv_df: pd.DataFrame,
           genomad_df: pd.DataFrame,
           kaiju_taxonomy: dict) -> list[dict]:
@@ -141,12 +190,14 @@ def merge(checkv_df: pd.DataFrame,
             cid = row["contig_id"]
             lineage = kaiju_taxonomy.get(cid, "")
             use_checkv = is_phage(lineage)
+            confidence = _taxonomy_confidence(lineage)
 
             if use_checkv:
                 rows.append({
                     "contig_id": cid,
                     "contig_length": row.get("contig_length", 0),
                     "quality_source": "checkv",
+                    "taxonomy_confidence": confidence,
                     "checkv_quality": row.get("checkv_quality", "Not-determined"),
                     "completeness": row.get("completeness", None),
                     "completeness_method": row.get("completeness_method", ""),
@@ -159,12 +210,15 @@ def merge(checkv_df: pd.DataFrame,
             else:
                 genomad_row = _match_genomad(genomad_df, cid)
                 if genomad_row is not None:
-                    rows.append(_combined_row(row, genomad_row))
+                    entry = _combined_row(row, genomad_row)
+                    entry["taxonomy_confidence"] = confidence
+                    rows.append(entry)
                 else:
                     rows.append({
                         "contig_id": cid,
                         "contig_length": row.get("contig_length", 0),
                         "quality_source": "checkv_fallback",
+                        "taxonomy_confidence": confidence,
                         "checkv_quality": row.get("checkv_quality", "Not-determined"),
                         "completeness": row.get("completeness", None),
                         "completeness_method": row.get("completeness_method", ""),
@@ -179,11 +233,15 @@ def merge(checkv_df: pd.DataFrame,
     if not rows and not genomad_df.empty:
         print("Using geNomad results only (CheckV results empty)", file=sys.stderr)
         for _, grow in genomad_df.iterrows():
-            quality_tier, completeness = genomad_to_quality_tier(grow)
+            contig_length = int(grow.get("length", 0) or 0)
+            quality_tier, completeness = genomad_to_quality_tier(
+                grow, contig_length=contig_length,
+            )
             rows.append({
                 "contig_id": grow.get("seq_name", ""),
-                "contig_length": grow.get("length", 0),
+                "contig_length": contig_length,
                 "quality_source": "genomad",
+                "taxonomy_confidence": "low_unclassified",
                 "checkv_quality": quality_tier,
                 "completeness": completeness,
                 "completeness_method": "genomad_hallmarks",
@@ -210,21 +268,35 @@ def _match_genomad(genomad_df: pd.DataFrame, contig_id: str):
 
 
 def _combined_row(checkv_row, genomad_row) -> dict:
-    """Merge a CheckV row with a matching geNomad row for non-phage contigs."""
+    """Merge a CheckV row with a matching geNomad row for non-phage contigs.
+
+    For non-phage viruses, geNomad's length-normalised hallmark assessment is
+    preferred over CheckV (whose reference DB is phage-centric).  CheckV's
+    completeness is kept as a secondary column for reference, and its
+    contamination estimate is always retained (geNomad does not provide one).
+    """
     checkv_completeness = checkv_row.get("completeness", None)
-    use_checkv_compl = pd.notna(checkv_completeness) and checkv_completeness != ""
+    has_checkv_compl = pd.notna(checkv_completeness) and checkv_completeness != ""
 
-    genomad_quality, genomad_completeness = genomad_to_quality_tier(genomad_row)
+    contig_length = int(genomad_row.get("length", 0) or 0)
+    genomad_quality, genomad_completeness = genomad_to_quality_tier(
+        genomad_row, contig_length=contig_length,
+    )
 
-    if use_checkv_compl:
+    if genomad_completeness is not None:
+        final_completeness = genomad_completeness
+        final_quality = genomad_quality
+        final_method = "genomad_hallmarks"
+        source = "checkv+genomad"
+    elif has_checkv_compl:
         final_completeness = checkv_completeness
         final_quality = checkv_row.get("checkv_quality", "Not-determined")
         final_method = checkv_row.get("completeness_method", "")
         source = "checkv+genomad"
     else:
-        final_completeness = genomad_completeness
-        final_quality = genomad_quality
-        final_method = "genomad_hallmarks"
+        final_completeness = None
+        final_quality = "Not-determined"
+        final_method = ""
         source = "genomad"
 
     return {
@@ -234,6 +306,7 @@ def _combined_row(checkv_row, genomad_row) -> dict:
         "checkv_quality": final_quality,
         "completeness": final_completeness,
         "completeness_method": final_method,
+        "checkv_completeness": checkv_completeness if has_checkv_compl else None,
         "contamination": checkv_row.get("contamination", None),
         "viral_genes": max(
             checkv_row.get("viral_genes", 0),
@@ -289,11 +362,14 @@ def main():
               file=sys.stderr)
         print(f"Quality tiers: {merged_df['checkv_quality'].value_counts().to_dict()}",
               file=sys.stderr)
+        if "taxonomy_confidence" in merged_df.columns:
+            print(f"Taxonomy confidence: {merged_df['taxonomy_confidence'].value_counts().to_dict()}",
+                  file=sys.stderr)
     else:
         empty_cols = [
             "contig_id", "contig_length", "quality_source",
-            "checkv_quality", "completeness", "completeness_method",
-            "contamination",
+            "taxonomy_confidence", "checkv_quality", "completeness",
+            "completeness_method", "contamination",
         ]
         pd.DataFrame(columns=empty_cols).to_csv(output_file, sep="\t",
                                                   index=False)

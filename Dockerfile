@@ -62,7 +62,8 @@ RUN mamba install -n virall -c bioconda -c conda-forge -y \
     checkv \
     diamond \
     bcftools \
-    pilon \
+    polypolish \
+    pypolca \
     hmmer \
     prodigal \
     kaiju \
@@ -87,17 +88,21 @@ RUN mkdir -p ${VOG_DB_DIR} ${KAIJU_DB_DIR} ${CHECKV_DB_DIR} ${GENOMAD_DB_DIR}
 
 # Download VOG database (tarball may have AllVOG.hmm or individual VOG*.hmm files)
 RUN cd ${VOG_DB_DIR} && \
-    wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.hmm.tar.gz && \
+    wget -q https://fileshare.csb.univie.ac.at/vog/latest/vog.hmm.tar.gz && \
     tar -xzf vog.hmm.tar.gz && \
     rm -f vog.hmm.tar.gz && \
-    ( [ -f AllVOG.hmm ] && cat AllVOG.hmm > vog_all.hmm ) || find . -name '*.hmm' -exec cat {} + > vog_all.hmm && \
+    if [ -f AllVOG.hmm ]; then \
+        mv AllVOG.hmm vog_all.hmm; \
+    else \
+        find . -name 'VOG*.hmm' -exec cat {} + > vog_all.hmm; \
+    fi && \
     hmmpress vog_all.hmm
 
 # Download VOG annotation metadata (functional categories, virus-only flags)
 RUN cd ${VOG_DB_DIR} && \
-    wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.annotations.tsv.gz && gunzip vog.annotations.tsv.gz && \
-    wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vog.virusonly.tsv.gz && gunzip vog.virusonly.tsv.gz && \
-    wget -q https://fileshare.lisc.univie.ac.at/vog/vog227/vogdb.functional_categories.txt
+    wget -q https://fileshare.csb.univie.ac.at/vog/latest/vog.annotations.tsv.gz && gunzip vog.annotations.tsv.gz && \
+    wget -q https://fileshare.csb.univie.ac.at/vog/latest/vog.virusonly.tsv.gz && gunzip vog.virusonly.tsv.gz && \
+    wget -q https://fileshare.csb.univie.ac.at/vog/latest/vogdb.functional_categories.txt
 
 # Download Kaiju database (viruses subset)
 # Tarball may extract flat or into a subdir; flatten so .fmi and .dmp are in KAIJU_DB_DIR
