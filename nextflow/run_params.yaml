@@ -8,11 +8,11 @@
 # -----------------------------------------------------------------------------
 # Path to sample sheet CSV
 # Bulk mode columns: sample_id, read1, read2, single, long
-# Single-cell mode columns: sample_id, read1, read2, single, long, sc_read1, sc_read2
+# Single-cell mode columns: sample_id, sc_read1, sc_read2
 samples: "nextflow/samples.csv"
 
 # Output directory for all results
-outdir: "/media/bruno/ADdrive/AD/testres"
+outdir: "/full/path/to/output/directory/"
 
 # -----------------------------------------------------------------------------
 # Databases (required for full pipeline; or set env VIRALL_DATABASE_DIR)
@@ -36,7 +36,7 @@ vog_db: null
 assembly_strategy: "auto"
 
 # Set true for RNA-seq (SPAdes --rnaviral)
-rna_mode: true
+rna_mode: false
 
 # Optional reference genome (e.g. viral reference FASTA)
 # When set: 1) SPAdes uses --trusted-contigs for guided assembly
@@ -46,7 +46,7 @@ reference: null
 
 # Optional host genome FASTA to filter out host reads (like Virall --filter)
 # When set, reads mapping to the host are removed before assembly (minimap2 + samtools).
-host_genome: /home/bruno/analysis/paper/HumanGenome_GRCh38_genomic.fna
+host_genome: /full/path/to/fatsa/file/with/sequences/to/filter/out
 
 # -----------------------------------------------------------------------------
 # Preprocessing
@@ -59,7 +59,17 @@ min_read_len_long: 1000     # long reads (fastplong)
 
 # Long-read sequencing technology: "nanopore" or "pacbio". This parameter is ignored if only short reads are present
 # Affects SPAdes (--nanopore vs --pacbio), Flye (--nano-raw vs --pacbio-raw), minimap2 presets
-long_read_tech: "nanopore"
+long_read_tech: "pacbio"
+
+# Flye assembler tuning (used in hybrid and long_only strategies)
+# --meta is always enabled (metagenome mode for uneven coverage)
+# Minimum overlap between long reads for Flye assembly graph construction
+# Lower values help recover shorter viral genomes; increase for less fragmented assemblies
+flye_min_overlap: 1000
+# Expected genome size hint for Flye (e.g. "10k", "30k", "150k")
+# Leave null to let Flye auto-estimate (recommended for diverse metagenomes)
+# Set a value if targeting a specific virus size range (e.g. "30k" for coronaviruses)
+flye_genome_size: null
 
 # Set true for Ion Torrent short reads (adds --iontorrent to SPAdes for homopolymer error correction)
 iontorrent: false
@@ -78,7 +88,7 @@ memory: "24G"
 # -----------------------------------------------------------------------------
 # Optional minimum contig length
 # -----------------------------------------------------------------------------
-min_contig_len: 500
+min_contig_len: 1000
 
 # -----------------------------------------------------------------------------
 # Single-Cell Sequencing (10x Genomics)

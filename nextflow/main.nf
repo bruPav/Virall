@@ -23,6 +23,8 @@ params.quality_phred_long = 7     // long reads (fastplong); Virall default (low
 params.min_read_len    = 50       // short reads (fastp)
 params.min_read_len_long = 1000   // long reads (fastplong); Virall default
 params.long_read_tech  = "nanopore"  // "nanopore" or "pacbio" – affects SPAdes, Flye, minimap2 presets
+params.flye_min_overlap = 1000       // Flye --min-overlap; lower values recover shorter viral genomes
+params.flye_genome_size = null       // Flye --genome-size (e.g. "30k"); null = let Flye auto-estimate
 params.iontorrent      = false       // set true for Ion Torrent short reads (adds --iontorrent to SPAdes)
 params.metaviral_mode  = false       // set true to use metaviralSPAdes (--metaviral) instead of regular SPAdes; note: disables --trusted-contigs
 // Database paths (set via -params-file or env VIRALL_DATABASE_DIR)
@@ -414,7 +416,9 @@ process ASSEMBLE {
       if [ "\$STRATEGY" = "hybrid" ]; then
         if [ "\$HAS_LONG" = "1" ]; then
           echo "Hybrid assembly: Flye --meta → Medaka (Nanopore only) → Polypolish → Pypolca"
-          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye --meta -t ${task.cpus}
+          FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
+          [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
+          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
           cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
 
           # LR polishing: Medaka fixes systematic Nanopore errors (skip for PacBio)
@@ -482,7 +486,9 @@ process ASSEMBLE {
 
       if [ "\$STRATEGY" = "long_only" ]; then
         if [ "\$HAS_LONG" = "1" ]; then
-          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye --meta -t ${task.cpus}
+          FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
+          [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
+          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
           cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
 
           # Polish Nanopore assemblies with Medaka (PacBio HiFi is already high-accuracy)
