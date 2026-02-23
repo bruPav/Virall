@@ -324,6 +324,7 @@ process ASSEMBLE {
     tag "${sample_id}"
     label "assemble"
     publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "contigs*"
+    publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "scaffolds"
 
     input:
     tuple val(sample_id),
@@ -341,6 +342,7 @@ process ASSEMBLE {
 
     output:
     tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), emit: assembled
+    path("contigs_ref_guided.fasta"), optional: true
 
     script:
     def mem = task.memory ? task.memory.toGiga().toString() : params.memory.replaceAll(/[Gg]/, '')
@@ -352,6 +354,7 @@ process ASSEMBLE {
     def ref = has_ref ? "--trusted-contigs ${ref_fasta}" : ''
     def rna = (params.rna_mode && !has_ref) ? '--rnaviral' : ''
     def metaviral = (params.metaviral_mode && !has_ref) ? '--metaviral' : ''
+    def minimap2_lr_preset = params.long_read_tech == "pacbio" ? "map-pb" : "map-ont"
     """
     mkdir -p assembly_dir preprocess_dir
     if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
@@ -477,6 +480,35 @@ process ASSEMBLE {
             fi
           fi
 
+          # Reference-guided consensus from long reads
+          if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
+            echo "Reference-guided long-read consensus assembly..."
+            minimap2 -t ${task.cpus} -ax ${minimap2_lr_preset} ${ref_fasta} \
+              preprocess_dir/trimmed_long.fastq.gz 2>/dev/null | \
+              samtools sort -@ ${task.cpus} -o assembly_dir/ref_aligned.bam -
+            samtools index assembly_dir/ref_aligned.bam
+
+            if [ "\$LONG_READ_TECH" = "nanopore" ]; then
+              medaka_polish -i preprocess_dir/trimmed_long.fastq.gz \
+                -d ${ref_fasta} -o assembly_dir/ref_medaka -t ${task.cpus} \
+                && cp assembly_dir/ref_medaka/consensus.fasta assembly_dir/ref_consensus.fasta \
+                || samtools consensus assembly_dir/ref_aligned.bam \
+                     -o assembly_dir/ref_consensus.fasta --show-ins no -a
+            else
+              samtools consensus assembly_dir/ref_aligned.bam \
+                -o assembly_dir/ref_consensus.fasta --show-ins no -a
+            fi
+
+            if [ -s assembly_dir/ref_consensus.fasta ] && [ -s contigs ]; then
+              cat contigs assembly_dir/ref_consensus.fasta > assembly_dir/combined.fasta
+              cp assembly_dir/combined.fasta contigs
+            elif [ -s assembly_dir/ref_consensus.fasta ]; then
+              cp assembly_dir/ref_consensus.fasta contigs
+            fi
+
+            cp assembly_dir/ref_consensus.fasta contigs_ref_guided.fasta 2>/dev/null || true
+          fi
+
           cp contigs scaffolds 2>/dev/null || true
         else
           echo "Warning: strategy=hybrid but no long reads available, falling back to short-read assembly"
@@ -504,6 +536,35 @@ process ASSEMBLE {
             medaka_polish -i preprocess_dir/trimmed_long.fastq.gz -d contigs -o assembly_dir/medaka -t ${task.cpus} \
               && cp assembly_dir/medaka/consensus.fasta contigs \
               || echo "WARNING: Medaka polishing failed, using unpolished Flye assembly"
+          fi
+
+          # Reference-guided consensus from long reads
+          if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
+            echo "Reference-guided long-read consensus assembly..."
+            minimap2 -t ${task.cpus} -ax ${minimap2_lr_preset} ${ref_fasta} \
+              preprocess_dir/trimmed_long.fastq.gz 2>/dev/null | \
+              samtools sort -@ ${task.cpus} -o assembly_dir/ref_aligned.bam -
+            samtools index assembly_dir/ref_aligned.bam
+
+            if [ "\$LONG_READ_TECH" = "nanopore" ]; then
+              medaka_polish -i preprocess_dir/trimmed_long.fastq.gz \
+                -d ${ref_fasta} -o assembly_dir/ref_medaka -t ${task.cpus} \
+                && cp assembly_dir/ref_medaka/consensus.fasta assembly_dir/ref_consensus.fasta \
+                || samtools consensus assembly_dir/ref_aligned.bam \
+                     -o assembly_dir/ref_consensus.fasta --show-ins no -a
+            else
+              samtools consensus assembly_dir/ref_aligned.bam \
+                -o assembly_dir/ref_consensus.fasta --show-ins no -a
+            fi
+
+            if [ -s assembly_dir/ref_consensus.fasta ] && [ -s contigs ]; then
+              cat contigs assembly_dir/ref_consensus.fasta > assembly_dir/combined.fasta
+              cp assembly_dir/combined.fasta contigs
+            elif [ -s assembly_dir/ref_consensus.fasta ]; then
+              cp assembly_dir/ref_consensus.fasta contigs
+            fi
+
+            cp assembly_dir/ref_consensus.fasta contigs_ref_guided.fasta 2>/dev/null || true
           fi
 
           cp contigs scaffolds 2>/dev/null || true
