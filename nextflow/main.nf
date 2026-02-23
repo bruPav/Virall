@@ -337,25 +337,32 @@ process ASSEMBLE {
           path(qc_single_json),
           path(qc_long_html),
           path(qc_long_json)
+    path(reference_file)
 
     output:
     tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), emit: assembled
 
     script:
     def mem = task.memory ? task.memory.toGiga().toString() : params.memory.replaceAll(/[Gg]/, '')
-    def rna = params.rna_mode ? '--rnaviral' : ''
     def ion = params.iontorrent ? '--iontorrent' : ''
-    def metaviral = params.metaviral_mode ? '--metaviral' : ''
-    // Note: --metaviral and --trusted-contigs may conflict; when metaviral_mode is on, skip trusted-contigs
-    def ref = (params.reference && !params.metaviral_mode) ? "--trusted-contigs ${file(params.reference)}" : ''
+    // --trusted-contigs is incompatible with --metaviral and --rnaviral; reference takes priority
+    def has_ref = reference_file.name != '.placeholder_ref'
+    // SPAdes only accepts .fa/.fasta extensions for --trusted-contigs; symlink if needed
+    def ref_fasta = has_ref ? "reference.fasta" : ''
+    def ref = has_ref ? "--trusted-contigs ${ref_fasta}" : ''
+    def rna = (params.rna_mode && !has_ref) ? '--rnaviral' : ''
+    def metaviral = (params.metaviral_mode && !has_ref) ? '--metaviral' : ''
     """
     mkdir -p assembly_dir preprocess_dir
-    
-    # Warn if metaviral mode is enabled but reference is also provided
-    if [ -n "${metaviral}" ] && [ -n "${params.reference ?: ''}" ]; then
-      echo "WARNING: metaviral_mode is enabled, but a reference genome is also provided."
-      echo "         --trusted-contigs is disabled when using --metaviral to avoid potential conflicts."
-      echo "         The reference genome will still be used for REFERENCE_CHECK if enabled."
+    if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
+      ln -sf "${reference_file}" "${ref_fasta}"
+    fi
+
+    if [ -n "${ref}" ]; then
+      echo "NOTE: Reference genome provided — using --trusted-contigs for reference-guided assembly."
+      if [ "${params.rna_mode}" = "true" ] || [ "${params.metaviral_mode}" = "true" ]; then
+        echo "      Skipping --rnaviral/--metaviral (incompatible with --trusted-contigs)."
+      fi
     fi
     
     cp "${trimmed_r1}" preprocess_dir/trimmed_R1.fastq.gz 2>/dev/null || true
@@ -754,7 +761,7 @@ process MERGE_QUALITY {
 }
 
 // ---------------------------------------------------------------------------
-// ANNOTATE – Prodigal + hmmscan (VOG)
+// ANNOTATE – prodigal-gv + hmmscan (VOG)
 // ---------------------------------------------------------------------------
 process ANNOTATE {
     tag "${sample_id}"
@@ -777,7 +784,7 @@ process ANNOTATE {
       echo "ANNOTATE: skipping – no viral contigs found for ${sample_id}"
       touch annotation_dir/proteins.faa
     else
-      prodigal -i viral_contigs.fasta -a annotation_dir/proteins.faa -p meta -q
+      prodigal-gv -i viral_contigs.fasta -a annotation_dir/proteins.faa -p meta -q
       VOG_HMM=\$(find ${vog_db} -maxdepth 1 \\( -name 'vog_all.hmm' -o -name 'vog.hmm' \\) 2>/dev/null | head -1)
       if [ -n "\$VOG_HMM" ] && [ -f "\$VOG_HMM" ]; then
         hmmscan --cpu ${task.cpus} -o annotation_dir/vog_out.txt --domtblout annotation_dir/vog_domains.txt "\$VOG_HMM" annotation_dir/proteins.faa
@@ -966,9 +973,9 @@ process REFERENCE_CHECK {
       samtools depth -a ref_check_dir/merged.bam > ref_check_dir/reference_depth.txt 2>/dev/null || true
     fi
 
-    # Calculate mapping rate and coverage
+    # Calculate mapping rate and coverage (awk instead of bc for container compatibility)
     if [ "\$TOTAL_READS" -gt 0 ]; then
-      MAPPING_RATE=\$(echo "scale=4; \$MAPPED_READS / \$TOTAL_READS * 100" | bc)
+      MAPPING_RATE=\$(awk -v m="\$MAPPED_READS" -v t="\$TOTAL_READS" 'BEGIN {printf "%.4f", m / t * 100}')
     else
       MAPPING_RATE="0.0000"
     fi
@@ -978,7 +985,7 @@ process REFERENCE_CHECK {
     if [ -f ref_check_dir/reference_depth.txt ]; then
       COVERED_BASES=\$(awk '\$3 > 0 {count++} END {print count+0}' ref_check_dir/reference_depth.txt)
       if [ "\$REF_LENGTH" -gt 0 ]; then
-        COVERAGE_BREADTH=\$(echo "scale=4; \$COVERED_BASES / \$REF_LENGTH * 100" | bc)
+        COVERAGE_BREADTH=\$(awk -v c="\$COVERED_BASES" -v r="\$REF_LENGTH" 'BEGIN {printf "%.4f", c / r * 100}')
       else
         COVERAGE_BREADTH="0.0000"
       fi
@@ -990,9 +997,9 @@ process REFERENCE_CHECK {
     fi
 
     # Determine detection status
-    if [ "\$(echo "\$MAPPING_RATE > 1" | bc)" -eq 1 ] && [ "\$(echo "\$COVERAGE_BREADTH > 10" | bc)" -eq 1 ]; then
+    if [ "\$(awk -v mr="\$MAPPING_RATE" -v cb="\$COVERAGE_BREADTH" 'BEGIN {print (mr > 1 && cb > 10) ? 1 : 0}')" -eq 1 ]; then
       DETECTION_STATUS="DETECTED"
-    elif [ "\$(echo "\$MAPPING_RATE > 0.1" | bc)" -eq 1 ] || [ "\$(echo "\$COVERAGE_BREADTH > 1" | bc)" -eq 1 ]; then
+    elif [ "\$(awk -v mr="\$MAPPING_RATE" -v cb="\$COVERAGE_BREADTH" 'BEGIN {print (mr > 0.1 || cb > 1) ? 1 : 0}')" -eq 1 ]; then
       DETECTION_STATUS="LOW_SIGNAL"
     else
       DETECTION_STATUS="NOT_DETECTED"
@@ -1023,7 +1030,7 @@ EOF
 
     if [ "\$DETECTION_STATUS" = "DETECTED" ]; then
       echo "  The reference genome was DETECTED in this sample." >> ref_check_dir/reference_report.txt
-      echo "  Mapping rate >\$1% and coverage breadth >10% indicate presence." >> ref_check_dir/reference_report.txt
+      echo "  Mapping rate >1% and coverage breadth >10% indicate presence." >> ref_check_dir/reference_report.txt
     elif [ "\$DETECTION_STATUS" = "LOW_SIGNAL" ]; then
       echo "  LOW SIGNAL: Some reads map to reference but coverage is limited." >> ref_check_dir/reference_report.txt
       echo "  This may indicate low viral load or partial genome presence." >> ref_check_dir/reference_report.txt
@@ -1033,9 +1040,8 @@ EOF
     fi
 
     echo "" >> ref_check_dir/reference_report.txt
-    echo "Generated by Virall Nextflow pipeline" >> ref_check_dir/reference_report.txt
 
-    # Generate coverage plot (simple text-based if no python, or use python if available)
+    # Generate coverage plot and per-segment stats
     if command -v python3 &>/dev/null && [ -f ref_check_dir/reference_depth.txt ] && [ -s ref_check_dir/reference_depth.txt ]; then
       python3 << 'PYEOF'
 import sys
@@ -1046,24 +1052,70 @@ try:
     import pandas as pd
 
     depth_file = "ref_check_dir/reference_depth.txt"
-    df = pd.read_csv(depth_file, sep='\\t', header=None, names=['contig', 'pos', 'depth'])
+    df = pd.read_csv(depth_file, sep='\t', header=None, names=['contig', 'pos', 'depth'])
 
     if not df.empty:
-        fig, ax = plt.subplots(figsize=(12, 4))
-        ax.fill_between(df['pos'], df['depth'], alpha=0.7, color='steelblue')
-        ax.set_xlabel('Position (bp)')
-        ax.set_ylabel('Coverage Depth')
-        ax.set_title('Reference Genome Coverage')
-        ax.set_xlim(0, df['pos'].max())
-        ax.set_ylim(0, None)
+        contigs = df['contig'].unique()
+        n = len(contigs)
+
+        if n > 1:
+            fig, axes = plt.subplots(n, 1, figsize=(12, 2.5 * n), sharex=False)
+            if n == 1:
+                axes = [axes]
+            colors = plt.cm.tab10.colors
+            for i, (ctg, ax) in enumerate(zip(contigs, axes)):
+                sub = df[df['contig'] == ctg]
+                c = colors[i % len(colors)]
+                ax.fill_between(sub['pos'], sub['depth'], alpha=0.7, color=c)
+                ax.set_xlim(0, sub['pos'].max())
+                ax.set_ylim(0, None)
+                ax.set_ylabel('Depth')
+                label = ctg if len(ctg) <= 60 else ctg[:57] + '...'
+                ax.set_title(label, fontsize=9, loc='left')
+            axes[-1].set_xlabel('Position (bp)')
+            fig.suptitle('Reference Genome Coverage (per segment)', fontsize=11, y=1.0)
+        else:
+            fig, ax = plt.subplots(figsize=(12, 4))
+            ax.fill_between(df['pos'], df['depth'], alpha=0.7, color='steelblue')
+            ax.set_xlabel('Position (bp)')
+            ax.set_ylabel('Coverage Depth')
+            ax.set_title('Reference Genome Coverage')
+            ax.set_xlim(0, df['pos'].max())
+            ax.set_ylim(0, None)
+
         plt.tight_layout()
-        plt.savefig('ref_check_dir/reference_coverage.png', dpi=150)
+        plt.savefig('ref_check_dir/reference_coverage.png', dpi=150, bbox_inches='tight')
         plt.close()
-        print("Coverage plot generated", file=sys.stderr)
+
+        # Write per-segment stats
+        with open('ref_check_dir/per_segment_stats.tsv', 'w') as f:
+            f.write('segment\\tlength\\tcovered_bases\\tbreadth_%\\tmean_depth\\n')
+            for ctg in contigs:
+                sub = df[df['contig'] == ctg]
+                seg_len = int(sub['pos'].max())
+                covered = int((sub['depth'] > 0).sum())
+                breadth = covered / seg_len * 100 if seg_len > 0 else 0
+                mean_d = sub['depth'].mean()
+                f.write(f'{ctg}\\t{seg_len}\\t{covered}\\t{breadth:.2f}\\t{mean_d:.2f}\\n')
+        print(f"Coverage plot generated ({n} segment{'s' if n > 1 else ''})", file=sys.stderr)
 except Exception as e:
     print(f"Could not generate coverage plot: {e}", file=sys.stderr)
 PYEOF
     fi
+
+    # Append per-segment stats to report if available
+    if [ -f ref_check_dir/per_segment_stats.tsv ]; then
+      SEG_COUNT=\$(tail -n +2 ref_check_dir/per_segment_stats.tsv | wc -l)
+      if [ "\$SEG_COUNT" -gt 1 ]; then
+        echo "Per-Segment Statistics:" >> ref_check_dir/reference_report.txt
+        echo "  Segment                Length   Covered  Breadth%  MeanDepth" >> ref_check_dir/reference_report.txt
+        tail -n +2 ref_check_dir/per_segment_stats.tsv | while IFS=\$'\\t' read -r seg slen cov br md; do
+          printf "  %-22s %6s   %6s   %7s   %8s\\n" "\$seg" "\$slen" "\$cov" "\$br" "\$md" >> ref_check_dir/reference_report.txt
+        done
+        echo "" >> ref_check_dir/reference_report.txt
+      fi
+    fi
+    echo "Generated by Virall Nextflow pipeline" >> ref_check_dir/reference_report.txt
 
     # Print summary to stdout for Nextflow log
     echo "=========================================="
@@ -1303,12 +1355,12 @@ workflow {
         ch_for_assemble = PREPROCESS.out.preprocessed
     }
 
-    ASSEMBLE(ch_for_assemble)
+    def ref_file = params.reference ? file(expand_path(params.reference)) : file("${projectDir}/.placeholder_ref")
+    ASSEMBLE(ch_for_assemble, ref_file)
 
     // Optional reference check: when reference is set, map reads to reference and report detection
     // Uses host-filtered reads if host_genome was provided, otherwise uses preprocessed reads
     if (params.reference) {
-        def ref_file = file(expand_path(params.reference))
         REFERENCE_CHECK(ch_for_assemble, ref_file)
     }
 
