@@ -14,6 +14,7 @@ params.outdir          = "results"
 params.threads         = 8
 params.memory          = "16G"
 params.reference       = null
+params.reference_only  = false  // skip de novo assembly; use reference-guided consensus only
 params.host_genome     = null   // optional: FASTA of host genome to filter out host reads (like Virall --filter)
 params.rna_mode        = false
 params.assembly_strategy = "auto"     // auto (detect from input), hybrid, short_only, long_only
@@ -480,7 +481,7 @@ process ASSEMBLE {
             fi
           fi
 
-          # Reference-guided consensus from long reads
+          # Reference-guided consensus from long reads (separate output, not merged into de novo contigs)
           if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
             echo "Reference-guided long-read consensus assembly..."
             minimap2 -t ${task.cpus} -ax ${minimap2_lr_preset} ${ref_fasta} \
@@ -497,13 +498,6 @@ process ASSEMBLE {
             else
               samtools consensus assembly_dir/ref_aligned.bam \
                 -o assembly_dir/ref_consensus.fasta --show-ins no -a
-            fi
-
-            if [ -s assembly_dir/ref_consensus.fasta ] && [ -s contigs ]; then
-              cat contigs assembly_dir/ref_consensus.fasta > assembly_dir/combined.fasta
-              cp assembly_dir/combined.fasta contigs
-            elif [ -s assembly_dir/ref_consensus.fasta ]; then
-              cp assembly_dir/ref_consensus.fasta contigs
             fi
 
             cp assembly_dir/ref_consensus.fasta contigs_ref_guided.fasta 2>/dev/null || true
@@ -538,7 +532,7 @@ process ASSEMBLE {
               || echo "WARNING: Medaka polishing failed, using unpolished Flye assembly"
           fi
 
-          # Reference-guided consensus from long reads
+          # Reference-guided consensus from long reads (separate output, not merged into de novo contigs)
           if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
             echo "Reference-guided long-read consensus assembly..."
             minimap2 -t ${task.cpus} -ax ${minimap2_lr_preset} ${ref_fasta} \
@@ -557,13 +551,6 @@ process ASSEMBLE {
                 -o assembly_dir/ref_consensus.fasta --show-ins no -a
             fi
 
-            if [ -s assembly_dir/ref_consensus.fasta ] && [ -s contigs ]; then
-              cat contigs assembly_dir/ref_consensus.fasta > assembly_dir/combined.fasta
-              cp assembly_dir/combined.fasta contigs
-            elif [ -s assembly_dir/ref_consensus.fasta ]; then
-              cp assembly_dir/ref_consensus.fasta contigs
-            fi
-
             cp assembly_dir/ref_consensus.fasta contigs_ref_guided.fasta 2>/dev/null || true
           fi
 
@@ -575,6 +562,108 @@ process ASSEMBLE {
 
       [ -f contigs ] || touch contigs scaffolds
     fi
+    """
+}
+
+// ---------------------------------------------------------------------------
+// REF_ASSEMBLE – reference-guided consensus only (no de novo assembly)
+// ---------------------------------------------------------------------------
+process REF_ASSEMBLE {
+    tag "${sample_id}"
+    label "assemble"
+    publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "contigs*"
+    publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "scaffolds"
+
+    input:
+    tuple val(sample_id),
+          path(trimmed_r1),
+          path(trimmed_r2),
+          path(trimmed_single),
+          path(trimmed_long),
+          path(qc_pe_html),
+          path(qc_pe_json),
+          path(qc_single_html),
+          path(qc_single_json),
+          path(qc_long_html),
+          path(qc_long_json)
+    path(reference_file)
+
+    output:
+    tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), emit: assembled
+
+    script:
+    def minimap2_lr_preset = params.long_read_tech == "pacbio" ? "map-pb" : "map-ont"
+    """
+    mkdir -p assembly_dir preprocess_dir
+
+    ln -sf "${reference_file}" reference.fasta
+
+    cp "${trimmed_r1}" preprocess_dir/trimmed_R1.fastq.gz 2>/dev/null || true
+    cp "${trimmed_r2}" preprocess_dir/trimmed_R2.fastq.gz 2>/dev/null || true
+    cp "${trimmed_single}" preprocess_dir/trimmed_single.fastq.gz 2>/dev/null || true
+    cp "${trimmed_long}" preprocess_dir/trimmed_long.fastq.gz 2>/dev/null || true
+
+    HAS_SHORT=\$( [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ] && echo 1 || echo 0 )
+    HAS_SINGLE=\$( [ -s preprocess_dir/trimmed_single.fastq.gz ] && echo 1 || echo 0 )
+    HAS_LONG=\$( [ -s preprocess_dir/trimmed_long.fastq.gz ] && echo 1 || echo 0 )
+
+    echo "Reference-only mode: generating consensus from reference alignment..."
+
+    # Align reads to reference
+    if [ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]; then
+      bwa index reference.fasta
+      if [ "\$HAS_SHORT" = "1" ]; then
+        bwa mem -t ${task.cpus} reference.fasta \
+          preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz 2>/dev/null | \
+          samtools sort -@ ${task.cpus} -o assembly_dir/ref_short_pe.bam -
+      fi
+      if [ "\$HAS_SINGLE" = "1" ]; then
+        bwa mem -t ${task.cpus} reference.fasta \
+          preprocess_dir/trimmed_single.fastq.gz 2>/dev/null | \
+          samtools sort -@ ${task.cpus} -o assembly_dir/ref_short_single.bam -
+      fi
+    fi
+
+    if [ "\$HAS_LONG" = "1" ]; then
+      minimap2 -t ${task.cpus} -ax ${minimap2_lr_preset} reference.fasta \
+        preprocess_dir/trimmed_long.fastq.gz 2>/dev/null | \
+        samtools sort -@ ${task.cpus} -o assembly_dir/ref_long.bam -
+    fi
+
+    # Merge all BAMs
+    BAMS=""
+    [ -f assembly_dir/ref_short_pe.bam ] && BAMS="\$BAMS assembly_dir/ref_short_pe.bam"
+    [ -f assembly_dir/ref_short_single.bam ] && BAMS="\$BAMS assembly_dir/ref_short_single.bam"
+    [ -f assembly_dir/ref_long.bam ] && BAMS="\$BAMS assembly_dir/ref_long.bam"
+
+    BAM_COUNT=\$(echo \$BAMS | wc -w)
+    if [ "\$BAM_COUNT" -gt 1 ]; then
+      samtools merge -f assembly_dir/ref_merged.bam \$BAMS
+    elif [ "\$BAM_COUNT" -eq 1 ]; then
+      mv \$BAMS assembly_dir/ref_merged.bam
+    else
+      echo "REF_ASSEMBLE: no reads aligned to reference for ${sample_id}"
+      touch contigs scaffolds
+      exit 0
+    fi
+    samtools index assembly_dir/ref_merged.bam
+
+    # Generate consensus
+    LONG_READ_TECH="${params.long_read_tech}"
+    if [ "\$HAS_LONG" = "1" ] && [ "\$LONG_READ_TECH" = "nanopore" ]; then
+      medaka_polish -i preprocess_dir/trimmed_long.fastq.gz \
+        -d reference.fasta -o assembly_dir/ref_medaka -t ${task.cpus} \
+        && cp assembly_dir/ref_medaka/consensus.fasta contigs \
+        || { echo "WARNING: Medaka failed, falling back to samtools consensus"; \
+             samtools consensus assembly_dir/ref_merged.bam -o contigs --show-ins no -a; }
+    else
+      samtools consensus assembly_dir/ref_merged.bam -o contigs --show-ins no -a
+    fi
+
+    cp contigs scaffolds 2>/dev/null || touch contigs scaffolds
+    touch preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz preprocess_dir/trimmed_single.fastq.gz preprocess_dir/trimmed_long.fastq.gz
+
+    echo "Reference-only assembly complete for ${sample_id}"
     """
 }
 
@@ -1355,6 +1444,10 @@ process SC_BUILD_MATRIX {
 // Workflow
 // ---------------------------------------------------------------------------
 workflow {
+    if (params.reference_only && !params.reference) {
+        error "ERROR: reference_only=true requires a reference genome. Set 'reference' in your params file."
+    }
+
     // Default DB base dir: in-container path so -profile docker/singularity works without extra config
     def container_db = "/opt/virall/databases"
     def k_db = params.kaiju_db ?: (db_dir ? "${db_dir}/kaiju_db" : "${container_db}/kaiju_db")
@@ -1417,7 +1510,14 @@ workflow {
     }
 
     def ref_file = params.reference ? file(expand_path(params.reference)) : file("${projectDir}/.placeholder_ref")
-    ASSEMBLE(ch_for_assemble, ref_file)
+
+    if (params.reference_only && params.reference) {
+        REF_ASSEMBLE(ch_for_assemble, ref_file)
+        ch_assembled = REF_ASSEMBLE.out.assembled
+    } else {
+        ASSEMBLE(ch_for_assemble, ref_file)
+        ch_assembled = ASSEMBLE.out.assembled
+    }
 
     // Optional reference check: when reference is set, map reads to reference and report detection
     // Uses host-filtered reads if host_genome was provided, otherwise uses preprocessed reads
@@ -1425,7 +1525,7 @@ workflow {
         REFERENCE_CHECK(ch_for_assemble, ref_file)
     }
 
-    KAIJU(ASSEMBLE.out.assembled, ch_kaiju_db)
+    KAIJU(ch_assembled, ch_kaiju_db)
     FILTER_VIRAL(KAIJU.out.kaiju_done, extract_script)
     RENAME_CONTIGS(FILTER_VIRAL.out.viral)
 

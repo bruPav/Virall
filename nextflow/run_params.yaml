@@ -39,14 +39,24 @@ assembly_strategy: "auto"
 rna_mode: false
 
 # Optional reference genome (e.g. viral reference FASTA)
-# When set: 1) SPAdes uses --trusted-contigs for guided assembly
+# When set: 1) SPAdes uses --trusted-contigs for reference-guided assembly
+#              (automatically overrides --rnaviral / --metaviral since those are incompatible)
 #           2) REFERENCE_CHECK process runs to detect if reference is present in sample
 #              (maps reads to reference, reports detection status, generates coverage plot)
 reference: null
 
+# Reference-only mode: skip de novo assembly (SPAdes/Flye), use reference-guided consensus only
+# When true (requires 'reference' above), the pipeline:
+#   - Aligns reads to reference (bwa for short, minimap2 for long)
+#   - Generates polished consensus (medaka for Nanopore, samtools consensus otherwise)
+#   - Feeds consensus contigs into the full downstream pipeline (KAIJU, CheckV, annotation, etc.)
+# Much faster than de novo assembly; use when you only care about a specific target virus
+# Default (false): full de novo assembly + optional reference-guided output on the side
+reference_only: true
+
 # Optional host genome FASTA to filter out host reads (like Virall --filter)
 # When set, reads mapping to the host are removed before assembly (minimap2 + samtools).
-host_genome: /full/path/to/fatsa/file/with/sequences/to/filter/out
+host_genome: "/full/path/to/fatsa/file/with/sequences/to/filter/out"
 
 # -----------------------------------------------------------------------------
 # Preprocessing
@@ -59,7 +69,7 @@ min_read_len_long: 1000     # long reads (fastplong)
 
 # Long-read sequencing technology: "nanopore" or "pacbio". This parameter is ignored if only short reads are present
 # Affects SPAdes (--nanopore vs --pacbio), Flye (--nano-raw vs --pacbio-raw), minimap2 presets
-long_read_tech: "pacbio"
+long_read_tech: "nanopore"
 
 # Flye assembler tuning (used in hybrid and long_only strategies)
 # --meta is always enabled (metagenome mode for uneven coverage)
@@ -75,8 +85,8 @@ flye_genome_size: null
 iontorrent: false
 
 # Set true to use metaviralSPAdes (--metaviral) instead of regular SPAdes
-# Note: When enabled, --trusted-contigs is automatically disabled (metaviralSPAdes handles reference differently)
-# The reference genome will still be used for REFERENCE_CHECK if provided
+# Note: If a reference genome is also provided, --trusted-contigs takes priority
+# and --metaviral is skipped (they are incompatible in SPAdes)
 metaviral_mode: false
 
 # -----------------------------------------------------------------------------
