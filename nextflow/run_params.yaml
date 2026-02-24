@@ -101,6 +101,17 @@ memory: "24G"
 min_contig_len: 1000
 
 # -----------------------------------------------------------------------------
+# Quantification and abundance estimation
+# -----------------------------------------------------------------------------
+# MAPQ threshold for high-confidence abundance estimation.
+# Keeps alignments with MAPQ >= quant_mapq and excludes secondary/supplementary alignments.
+quant_mapq: 20
+
+# Minimum contig coverage breadth (fraction 0-1) required to include contig in abundance tables/plots.
+# Example: 0.10 means at least 10% of contig positions must have depth > 0.
+quant_min_breadth: 0.10
+
+# -----------------------------------------------------------------------------
 # Single-Cell Sequencing (10x Genomics)
 # -----------------------------------------------------------------------------
 # Enable single-cell mode for 10x Genomics data

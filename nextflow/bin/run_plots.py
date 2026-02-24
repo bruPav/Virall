@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--viral-contigs", type=Path, required=True, help="Viral contigs FASTA")
     parser.add_argument("--kaiju-dir", type=Path, required=True, help="03_classifications directory (kaiju_results_with_names.tsv)")
     parser.add_argument("--checkv-dir", type=Path, required=True, help="04_quality_assessment directory")
+    parser.add_argument("--min-breadth", type=float, default=0.10, help="Minimum contig coverage breadth (fraction 0-1) used for abundance estimation")
     parser.add_argument("--out-dir", type=Path, required=True, help="07_plots output directory")
     args = parser.parse_args()
 
@@ -28,7 +29,9 @@ def main():
     work_dir.mkdir(parents=True, exist_ok=True)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    depth_file = args.quant_dir / "depth.txt"
+    depth_primary_candidates = sorted(args.quant_dir.glob("depth_primary_mapq*.txt"))
+    depth_file = depth_primary_candidates[0] if depth_primary_candidates else (args.quant_dir / "depth.txt")
+    print(f"[run_plots] using depth file: {depth_file}", file=sys.stderr)
     kaiju_file = args.kaiju_dir / "kaiju_results_with_names.tsv"
 
     # 1. Build contig_abundance.tsv from depth.txt + viral_contigs + kaiju
@@ -101,6 +104,7 @@ def main():
             print(f"[run_plots] sample Kaiju IDs->species: {sample}", file=sys.stderr)
 
     abundance_file = work_dir / "contig_abundance.tsv"
+    species_abundance_file = work_dir / "species_abundance.tsv"
     if depth_file.exists() and contig_lengths:
         depth_df = pd.read_csv(depth_file, sep="\t", header=None, names=["contig_id", "pos", "depth"])
         depth_ids = depth_df["contig_id"].unique().tolist()
@@ -110,16 +114,40 @@ def main():
             mapped_positions=("depth", lambda x: (x > 0).sum()),
         ).reset_index()
         total_cov["contig_length"] = total_cov["contig_id"].map(contig_lengths).fillna(0).astype(int)
+        total_cov["contig_length_kb"] = total_cov["contig_length"].replace(0, 1) / 1000.0
         total_cov["mean_coverage"] = (total_cov["total_coverage"] / total_cov["contig_length"].replace(0, 1)).round(2)
         total_cov["max_coverage"] = depth_df.groupby("contig_id")["depth"].max().reindex(total_cov["contig_id"]).values
         total_cov["coverage_breadth"] = (total_cov["mapped_positions"] / total_cov["contig_length"].replace(0, 1)).round(4)
+        min_breadth = min(max(float(args.min_breadth), 0.0), 1.0)
+        before_filter = len(total_cov)
+        total_cov = total_cov[total_cov["coverage_breadth"] >= min_breadth].copy()
+        print(f"[run_plots] breadth filter >= {min_breadth:.4f}: kept {len(total_cov)}/{before_filter} contigs", file=sys.stderr)
+
         sum_all = total_cov["total_coverage"].sum()
-        total_cov["relative_abundance"] = (total_cov["total_coverage"] / sum_all).round(6) if sum_all > 0 else 0.0
+        total_cov["relative_abundance_coverage"] = (total_cov["total_coverage"] / sum_all).round(6) if sum_all > 0 else 0.0
+        total_cov["rpk"] = total_cov["total_coverage"] / total_cov["contig_length_kb"].replace(0, 1)
+        rpk_sum = total_cov["rpk"].sum()
+        total_cov["tpm"] = (total_cov["rpk"] / rpk_sum * 1_000_000).round(3) if rpk_sum > 0 else 0.0
+        total_cov["relative_abundance"] = (total_cov["tpm"] / 1_000_000).round(6)
         total_cov["species"] = total_cov["contig_id"].map(species_for_contig)
         matched = (total_cov["species"] != "Unknown").sum()
         print(f"[run_plots] abundance rows: {len(total_cov)} species matched: {matched} unknown: {(total_cov['species'] == 'Unknown').sum()}", file=sys.stderr)
         total_cov = total_cov.sort_values("relative_abundance", ascending=False)
         total_cov.to_csv(abundance_file, sep="\t", index=False)
+        shutil.copy2(abundance_file, args.out_dir / "contig_abundance.tsv")
+
+        species_cov = total_cov.groupby("species", dropna=False).agg(
+            contig_count=("contig_id", "count"),
+            total_coverage=("total_coverage", "sum"),
+            total_contig_length=("contig_length", "sum"),
+            rpk=("rpk", "sum"),
+        ).reset_index()
+        species_rpk_sum = species_cov["rpk"].sum()
+        species_cov["tpm"] = (species_cov["rpk"] / species_rpk_sum * 1_000_000).round(3) if species_rpk_sum > 0 else 0.0
+        species_cov["relative_abundance"] = (species_cov["tpm"] / 1_000_000).round(6)
+        species_cov = species_cov.sort_values("tpm", ascending=False)
+        species_cov.to_csv(species_abundance_file, sep="\t", index=False)
+        shutil.copy2(species_abundance_file, args.out_dir / "species_abundance.tsv")
 
     # 2. Build kaiju_summary.tsv for sunburst (contig_id, taxon_id, taxon_name, classification, lineage)
     #    Only include contigs present in viral_contigs.fasta (i.e. those that passed FILTER_VIRAL)
@@ -213,16 +241,28 @@ def main():
     # =========================================================================
     if abundance_file.exists():
         df = pd.read_csv(abundance_file, sep="\t")
-        if not df.empty and "relative_abundance" in df.columns:
-            # Group by species and sum abundance (like plotter.py)
+        if species_abundance_file.exists():
+            sdf = pd.read_csv(species_abundance_file, sep="\t")
+        else:
+            sdf = pd.DataFrame()
+        if not sdf.empty and "tpm" in sdf.columns and "species" in sdf.columns:
+            top_species = sdf.sort_values("tpm", ascending=False).head(20).set_index("species")["tpm"]
+            abundance_title = "Top 20 Most Abundant Viral Species (TPM-like)"
+            abundance_xlabel = "TPM (length-normalized)"
+        elif not df.empty and "relative_abundance" in df.columns:
+            # Fallback: derive from contig-level table
             if "species" in df.columns:
                 species_abundance = df.groupby("species")["relative_abundance"].sum().sort_values(ascending=False)
                 top_species = species_abundance.head(20)
             else:
                 top = df.head(20)
-                top_species = pd.Series(top["relative_abundance"].values, 
-                                       index=top.get("contig_id", range(len(top))))
+                top_species = pd.Series(top["relative_abundance"].values, index=top.get("contig_id", range(len(top))))
+            abundance_title = "Top 20 Most Abundant Viral Species"
+            abundance_xlabel = "Relative Abundance"
+        else:
+            top_species = pd.Series(dtype=float)
             
+        if not top_species.empty:
             plt.figure(figsize=(10, 8))
             if HAS_SEABORN:
                 sns.barplot(x=top_species.values, y=top_species.index, 
@@ -231,8 +271,8 @@ def main():
                 plt.barh(range(len(top_species)), top_species.values, color="steelblue")
                 plt.yticks(range(len(top_species)), top_species.index.tolist(), fontsize=8)
             
-            plt.title("Top 20 Most Abundant Viral Species", fontsize=16)
-            plt.xlabel("Relative Abundance", fontsize=12)
+            plt.title(abundance_title, fontsize=16)
+            plt.xlabel(abundance_xlabel, fontsize=12)
             plt.ylabel("Species", fontsize=12)
             plt.tight_layout()
             plt.savefig(args.out_dir / "viral_abundance.png", dpi=300, bbox_inches="tight")
