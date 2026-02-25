@@ -88,7 +88,6 @@ def main():
         return "Unknown"
 
     # Debug: report Kaiju parsing and ID matching (stderr)
-    import sys
     print(f"[run_plots] kaiju_file={kaiju_file} exists={kaiju_file.exists()}", file=sys.stderr)
     if kaiju_file.exists():
         with open(kaiju_file) as f:
