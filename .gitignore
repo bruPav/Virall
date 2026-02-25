@@ -201,3 +201,12 @@ work/
 
 # Singularity/Apptainer images
 *.sif
+
+# Legacy Python CLI (kept locally, not tracked in git)
+virall/
+configs/
+setup.py
+requirements.txt
+environment.yml
+install.sh
+galaxy/

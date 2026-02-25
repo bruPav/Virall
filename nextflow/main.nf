@@ -437,7 +437,7 @@ process ASSEMBLE {
           # LR polishing: Medaka fixes systematic Nanopore errors (skip for PacBio)
           if [ "\$LONG_READ_TECH" = "nanopore" ] && [ -s contigs ]; then
             echo "Polishing Nanopore assembly with Medaka..."
-            medaka_polish -i preprocess_dir/trimmed_long.fastq.gz -d contigs -o assembly_dir/medaka -t ${task.cpus} \
+            medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz -d contigs -o assembly_dir/medaka -t ${task.cpus} \
               && cp assembly_dir/medaka/consensus.fasta contigs \
               || echo "WARNING: Medaka polishing failed, continuing with unpolished assembly"
           fi
@@ -492,7 +492,7 @@ process ASSEMBLE {
             samtools index assembly_dir/ref_aligned.bam
 
             if [ "\$LONG_READ_TECH" = "nanopore" ]; then
-              medaka_polish -i preprocess_dir/trimmed_long.fastq.gz \
+              medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz \
                 -d ${ref_fasta} -o assembly_dir/ref_medaka -t ${task.cpus} \
                 && cp assembly_dir/ref_medaka/consensus.fasta assembly_dir/ref_consensus.fasta \
                 || samtools consensus assembly_dir/ref_aligned.bam \
@@ -529,7 +529,7 @@ process ASSEMBLE {
           # Polish Nanopore assemblies with Medaka (PacBio HiFi is already high-accuracy)
           if [ "\$LONG_READ_TECH" = "nanopore" ] && [ -s contigs ]; then
             echo "Polishing Nanopore assembly with Medaka..."
-            medaka_polish -i preprocess_dir/trimmed_long.fastq.gz -d contigs -o assembly_dir/medaka -t ${task.cpus} \
+            medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz -d contigs -o assembly_dir/medaka -t ${task.cpus} \
               && cp assembly_dir/medaka/consensus.fasta contigs \
               || echo "WARNING: Medaka polishing failed, using unpolished Flye assembly"
           fi
@@ -543,7 +543,7 @@ process ASSEMBLE {
             samtools index assembly_dir/ref_aligned.bam
 
             if [ "\$LONG_READ_TECH" = "nanopore" ]; then
-              medaka_polish -i preprocess_dir/trimmed_long.fastq.gz \
+              medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz \
                 -d ${ref_fasta} -o assembly_dir/ref_medaka -t ${task.cpus} \
                 && cp assembly_dir/ref_medaka/consensus.fasta assembly_dir/ref_consensus.fasta \
                 || samtools consensus assembly_dir/ref_aligned.bam \
@@ -653,7 +653,7 @@ process REF_ASSEMBLE {
     # Generate consensus
     LONG_READ_TECH="${params.long_read_tech}"
     if [ "\$HAS_LONG" = "1" ] && [ "\$LONG_READ_TECH" = "nanopore" ]; then
-      medaka_polish -i preprocess_dir/trimmed_long.fastq.gz \
+      medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz \
         -d reference.fasta -o assembly_dir/ref_medaka -t ${task.cpus} \
         && cp assembly_dir/ref_medaka/consensus.fasta contigs \
         || { echo "WARNING: Medaka failed, falling back to samtools consensus"; \
