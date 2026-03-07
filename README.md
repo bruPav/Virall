@@ -125,6 +125,11 @@ rna_mode: false
 # Resources
 threads: 8
 memory: "16G"
+
+# ASSEMBLE memory tuning (critical for large pooled scRNA runs)
+assemble_memory_gb: 24
+assemble_memory_max_gb: 192
+assemble_memory_per_input_gb: 3.0
 ```
 
 See [run_params.yaml](nextflow/run_params.yaml) for the full parameter reference including single-cell, Ion Torrent, metaviral mode, Flye tuning, and quantification thresholds.
@@ -195,6 +200,9 @@ results/
 | `outdir` | `results` | Output directory |
 | `threads` | `8` | CPUs per process |
 | `memory` | `16G` | Memory hint |
+| `assemble_memory_gb` | `24` | Minimum ASSEMBLE memory request (GB) |
+| `assemble_memory_max_gb` | `192` | Max ASSEMBLE memory request cap (GB) |
+| `assemble_memory_per_input_gb` | `3.0` | Auto-scale factor: requested GB per 1 GB staged input reads |
 | `assembly_strategy` | `auto` | `auto` / `hybrid` / `short_only` / `long_only` |
 | `long_read_tech` | `nanopore` | `nanopore` or `pacbio` |
 | `reference` | `null` | Reference FASTA (optional) |
@@ -214,6 +222,8 @@ results/
 | `quant_min_breadth` | `0.10` | Min coverage breadth fraction for abundance plots |
 | `single_cell_mode` | `false` | Enable 10x single-cell mode |
 | `sc_chemistry` | `10x_v3` | 10x chemistry version |
+| `sc_min_viral_umis` | `1` | Minimum viral UMIs to call cell "infected" |
+| `sc_matrix_contig_source` | `all` | Contig source for SC matrix: `all` / `genomad_virus` / `checkv_pass` / `intersect` |
 | `kaiju_db` | `null` | Kaiju database path (auto-set in Docker/Singularity) |
 | `checkv_db` | `null` | CheckV database path |
 | `genomad_db` | `null` | geNomad database path |
@@ -232,10 +242,14 @@ Kaiju classifies against the virus-subset database. If no contigs are classified
 Check `00_preprocess/host_filtered/` for read counts. If all reads map to the host genome, assembly is intentionally skipped with a warning.
 
 **CheckV / geNomad database not found**
-When running outside a container, set `kaiju_db`, `checkv_db`, `genomad_db`, and `vog_db` in your params file, or export `VIRALL_DATABASE_DIR` pointing to a directory containing `kaiju_db/`, `checkv_db/`, `genomad_db/`, and `vog_db/` subdirectories.
+When running outside a container, set `kaiju_db`, `checkv_db`, `genomad_db`, and `vog_db` in your params file, or export `VIRALL_DATABASE_DIR` pointing to a directory containing `kaiju_db/`, `checkv_db/`, `genomad_db/`, and `vog_db/` subdirectories. The CheckV database is not bundled in the container. Download it with `checkv download_database /path/to/checkv_db` and set `checkv_db` in your params file.
+
+**Database permission errors (geNomad on HPC/Singularity)**
+If you see `PermissionError` for geNomad database files inside the container, fix file permissions on the host: `chmod -R a+rX /path/to/genomad_db`.
 
 **Out of memory during assembly**
-Increase `memory` in your params file and ensure your `nextflow.config` process block for `ASSEMBLE` reflects the new value. For very large metagenomes, consider `flye_genome_size` to help Flye pre-allocate correctly.
+Virall auto-scales ASSEMBLE memory from staged FASTQ size. For large pooled single-cell data, raise `assemble_memory_gb` and `assemble_memory_max_gb` in your params file (typical range: `80-128` GB for large samples). In HPC runs, ensure the scheduler memory request (e.g. Slurm `--mem`) is at least as high as the Nextflow ASSEMBLE request. If SPAdes reports required/free RAM mismatch, set memory to at least the reported requirement and re-run with `-resume`.
+See [HPC_MEMORY_TUNING.md](HPC_MEMORY_TUNING.md) for practical HPC/manual examples.
 
 ---
 
