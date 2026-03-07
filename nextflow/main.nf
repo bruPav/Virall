@@ -30,6 +30,9 @@ params.flye_min_overlap = 1000       // Flye --min-overlap; lower values recover
 params.flye_genome_size = null       // Flye --genome-size (e.g. "30k"); null = let Flye auto-estimate
 params.iontorrent      = false       // set true for Ion Torrent short reads (adds --iontorrent to SPAdes)
 params.metaviral_mode  = false       // set true to use metaviralSPAdes (--metaviral) instead of regular SPAdes; note: disables --trusted-contigs
+params.assemble_memory_gb = 24       // minimum memory request for ASSEMBLE (GB)
+params.assemble_memory_max_gb = 192  // upper cap for auto-scaled ASSEMBLE memory (GB)
+params.assemble_memory_per_input_gb = 3.0 // requested GB per 1 GB of input FASTQ
 // Database paths (set via -params-file or env VIRALL_DATABASE_DIR)
 params.kaiju_db        = null
 params.checkv_db       = null
@@ -42,6 +45,7 @@ params.sc_chemistry     = "10x_v3"  // 10x chemistry: "10x_v3" (default), "10x_v
 params.sc_barcode_whitelist = null    // Optional: custom barcode whitelist file
 params.sc_min_reads_per_cell = 100    // Minimum reads to keep a cell
 params.sc_min_viral_umis = 1          // Minimum viral UMIs to call cell "infected"
+params.sc_matrix_contig_source = "all" // "all" | "genomad_virus" | "checkv_pass" | "intersect"
 
 // Resolve DB paths from env if not set (params.xxx are read-only; resolve in workflow)
 def db_dir = System.getenv("VIRALL_DATABASE_DIR") ?: ""
@@ -75,6 +79,7 @@ def stub_sc_r2  = file("${projectDir}/.placeholder_sc_r2")
 Channel
     .fromPath(params.samples, checkIfExists: true)
     .splitCsv(header: true, strip: true)
+    .filter { row -> row.sample_id && !row.sample_id.toString().trim().startsWith('#') }
     | map { row -> tuple(
         row.sample_id,
         to_file(row.read1, stub_r1),
@@ -141,8 +146,9 @@ process SC_EXTRACT_BARCODES {
         ${whitelist_opt} \
         --extract-method=string
 
-    # Count barcodes for QC
-    zcat tagged_R1.fastq.gz | awk 'NR%4==1 {split(\$1,a,"_"); print a[2]}' | sort | uniq -c | sort -rn > barcode_counts.tsv
+    # Count barcodes for QC. Keep parsing consistent with downstream single-cell
+    # steps where CB is stored in the second-to-last underscore-separated token.
+    zcat tagged_R1.fastq.gz | awk 'NR%4==1 {n=split(\$1,a,"_"); if (n>1) print a[n-1]}' | sort | uniq -c | sort -rn > barcode_counts.tsv
     """
 }
 
@@ -328,6 +334,23 @@ process ASSEMBLE {
     label "assemble"
     publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "contigs*"
     publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "scaffolds"
+    // Auto-scale memory for large samples (especially pooled single-cell reads).
+    // This value is what Nextflow asks from the executor (e.g. Slurm --mem).
+    memory {
+        def minGb = (params.assemble_memory_gb ?: 24) as int
+        def maxGb = (params.assemble_memory_max_gb ?: 192) as int
+        def perInputGb = (params.assemble_memory_per_input_gb ?: 3.0) as double
+        long totalBytes = 0L
+        [trimmed_r1, trimmed_r2, trimmed_single, trimmed_long].each { p ->
+            if (p?.exists()) totalBytes += p.size()
+        }
+        def inputGb = Math.ceil(totalBytes / (1024d * 1024d * 1024d))
+        def estimatedGb = Math.max(minGb, (int) Math.ceil(inputGb * perInputGb))
+        if (task.attempt > 1) {
+            estimatedGb = (int) Math.ceil(estimatedGb * Math.pow(1.25d, task.attempt - 1))
+        }
+        Math.min(maxGb, estimatedGb).GB
+    }
 
     input:
     tuple val(sample_id),
@@ -360,6 +383,21 @@ process ASSEMBLE {
     def minimap2_lr_preset = params.long_read_tech == "pacbio" ? "map-pb" : "map-ont"
     """
     mkdir -p assembly_dir preprocess_dir
+    echo "ASSEMBLE resources: requested memory=${task.memory} cpus=${task.cpus}; SPAdes -m ${mem}"
+
+    run_spades() {
+      spades.py "\$@" 2> assembly_dir/spades.stderr.log
+      local rc=\$?
+      if [ "\$rc" -ne 0 ]; then
+        cat assembly_dir/spades.stderr.log >&2 || true
+        if grep -Eqi "not enough memory|insufficient memory|cannot allocate memory|need [0-9]+([.][0-9]+)? ?g" assembly_dir/spades.stderr.log; then
+          echo "SPAdes likely failed due to memory pressure." >&2
+          echo "Increase Nextflow ASSEMBLE memory (assemble_memory_gb / assemble_memory_max_gb) and Slurm --mem." >&2
+        fi
+      fi
+      return \$rc
+    }
+
     if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
       ln -sf "${reference_file}" "${ref_fasta}"
     fi
@@ -418,7 +456,7 @@ process ASSEMBLE {
           SPADES_OPTS="-o assembly_dir/spades -t ${task.cpus} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
           [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
           [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
-          spades.py \$SPADES_OPTS
+          run_spades \$SPADES_OPTS
           cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
           cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
         else
@@ -512,7 +550,7 @@ process ASSEMBLE {
             SPADES_OPTS="-o assembly_dir/spades -t ${task.cpus} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
             [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
             [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
-            spades.py \$SPADES_OPTS
+            run_spades \$SPADES_OPTS
             cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
             cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
           fi
@@ -787,6 +825,17 @@ process VALIDATE {
     script:
     """
     mkdir -p checkv_dir
+    # Guard: if contigs are empty or too short for gene prediction, CheckV's
+    # hmmsearch will fail on the empty proteins file.  Produce a valid but
+    # empty quality_summary.tsv so downstream steps continue gracefully.
+    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || true)
+    CONTIG_COUNT=\${CONTIG_COUNT:-0}
+    if [ "\$CONTIG_COUNT" -eq 0 ]; then
+      echo "CheckV: skipping – no viral contigs found for ${sample_id}"
+      printf "contig_id\\tcontig_length\\tprovirus\\tproviral_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tmiuvig_quality\\tcompleteness\\tcompleteness_method\\tcontamination\\tkmer_freq\\twarnings\\n" > checkv_dir/quality_summary.tsv
+      exit 0
+    fi
+
     CHECKV_D=""
     for cand in "${checkv_db}/checkv-db-v1.5" "${checkv_db}/checkv-db-v1.0" "${checkv_db}"; do
       if [ -d "\$cand/genome_db" ] && [ -f "\$cand/genome_db/checkv_reps.dmnd" ]; then
@@ -799,22 +848,12 @@ process VALIDATE {
       echo "Rebuild the container so the CheckV DB download completes, or set checkv_db in run_params to a path with the DB."
       exit 1
     fi
-    # Guard: if contigs are empty or too short for gene prediction, CheckV's
-    # hmmsearch will fail on the empty proteins file.  Produce a valid but
-    # empty quality_summary.tsv so downstream steps continue gracefully.
-    CONTIG_COUNT=\$(grep -c "^>" viral_contigs.fasta 2>/dev/null || true)
-    CONTIG_COUNT=\${CONTIG_COUNT:-0}
-    if [ "\$CONTIG_COUNT" -eq 0 ]; then
-      echo "CheckV: skipping – no viral contigs found for ${sample_id}"
+    TOTAL_BP=\$(grep -v "^>" viral_contigs.fasta | tr -d '\\n' | wc -c)
+    if [ "\$TOTAL_BP" -lt 200 ]; then
+      echo "CheckV: skipping – viral contigs too short (\${TOTAL_BP} bp) for meaningful quality assessment"
       printf "contig_id\\tcontig_length\\tprovirus\\tproviral_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tmiuvig_quality\\tcompleteness\\tcompleteness_method\\tcontamination\\tkmer_freq\\twarnings\\n" > checkv_dir/quality_summary.tsv
     else
-      TOTAL_BP=\$(grep -v "^>" viral_contigs.fasta | tr -d '\\n' | wc -c)
-      if [ "\$TOTAL_BP" -lt 200 ]; then
-        echo "CheckV: skipping – viral contigs too short (\${TOTAL_BP} bp) for meaningful quality assessment"
-        printf "contig_id\\tcontig_length\\tprovirus\\tproviral_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tmiuvig_quality\\tcompleteness\\tcompleteness_method\\tcontamination\\tkmer_freq\\twarnings\\n" > checkv_dir/quality_summary.tsv
-      else
-        checkv end_to_end viral_contigs.fasta checkv_dir -d "\$CHECKV_D" -t ${task.cpus}
-      fi
+      checkv end_to_end viral_contigs.fasta checkv_dir -d "\$CHECKV_D" -t ${task.cpus}
     fi
     """
 }
@@ -1040,8 +1079,12 @@ process QUANTIFY {
       else
         touch quant_dir/mapped.bam
       fi
-      samtools index quant_dir/mapped.bam
-      samtools depth -a quant_dir/mapped.bam > quant_dir/depth.txt 2>/dev/null || true
+      if [ -s quant_dir/mapped.bam ]; then
+        samtools index quant_dir/mapped.bam
+        samtools depth -a quant_dir/mapped.bam > quant_dir/depth.txt 2>/dev/null || true
+      else
+        touch quant_dir/mapped.bam.bai quant_dir/depth.txt
+      fi
 
       # High-confidence subset for abundance estimation:
       # -q: keep alignments with MAPQ >= params.quant_mapq
@@ -1205,6 +1248,8 @@ EOF
     echo "" >> ref_check_dir/reference_report.txt
 
     # Generate coverage plot and per-segment stats
+    export MPLCONFIGDIR=\${PWD}/.mplcache
+    mkdir -p \$MPLCONFIGDIR
     if command -v python3 &>/dev/null && [ -f ref_check_dir/reference_depth.txt ] && [ -s ref_check_dir/reference_depth.txt ]; then
       python3 << 'PYEOF'
 import sys
@@ -1309,6 +1354,8 @@ process PLOT {
     def viral_fasta = viral_contigs.name
     """
     mkdir -p plots_dir
+    export MPLCONFIGDIR=\${PWD}/.mplcache
+    mkdir -p \$MPLCONFIGDIR
     CONTIG_COUNT=\$(grep -c "^>" ${viral_fasta} 2>/dev/null || true)
     CONTIG_COUNT=\${CONTIG_COUNT:-0}
     if [ "\$CONTIG_COUNT" -eq 0 ]; then
@@ -1335,7 +1382,7 @@ process SC_MAP_VIRAL {
     publishDir "${params.outdir}/${sample_id}/08_single_cell/viral_mapping", mode: "copy"
 
     input:
-    tuple val(sample_id), path(tagged_r2), path(viral_contigs)
+    tuple val(sample_id), path(tagged_r2), path(viral_contigs), path(barcode_counts)
 
     output:
     tuple val(sample_id), path("viral_aligned.bam"), path("viral_aligned.bam.bai"), emit: bam
@@ -1343,6 +1390,14 @@ process SC_MAP_VIRAL {
 
     script:
     """
+    CONTIG_COUNT=\$(grep -c "^>" ${viral_contigs} 2>/dev/null || true)
+    CONTIG_COUNT=\${CONTIG_COUNT:-0}
+    if [ "\$CONTIG_COUNT" -eq 0 ]; then
+      echo "SC_MAP_VIRAL: no viral contigs for ${sample_id}; skipping alignment." > mapping_stats.txt
+      touch viral_aligned.bam viral_aligned.bam.bai
+      exit 0
+    fi
+
     # Index viral contigs
     bwa index ${viral_contigs}
 
@@ -1356,9 +1411,20 @@ process SC_MAP_VIRAL {
 
     # Generate mapping stats
     samtools flagstat viral_aligned.bam > mapping_stats.txt
-    echo "Unique cell barcodes with viral reads:" >> mapping_stats.txt
-    # Barcode is the second-to-last underscore-separated field in read name
-    samtools view viral_aligned.bam | awk -F'\\t' '{n=split(\$1,a,"_"); print a[n-1]}' | sort -u | wc -l >> mapping_stats.txt
+    echo "" >> mapping_stats.txt
+    echo "=== Barcode QC ===" >> mapping_stats.txt
+    # Raw unique barcodes in BAM
+    samtools view viral_aligned.bam | awk -F'\\t' '{n=split(\$1,a,"_"); print a[n-1]}' | sort -u > .bam_bc.tmp
+    N_RAW_BC=\$(wc -l < .bam_bc.tmp | tr -d ' ')
+    echo "n_raw_barcodes_in_bam: \${N_RAW_BC}" >> mapping_stats.txt
+    # Called cells from barcode counts (from SC_EXTRACT_BARCODES)
+    N_CALLED=\$(wc -l < ${barcode_counts} | tr -d ' ')
+    echo "n_called_cells: \${N_CALLED}" >> mapping_stats.txt
+    # Overlap: called cells that have reads in the BAM
+    awk '{print \$2}' ${barcode_counts} | sort -u > .called_bc.tmp
+    N_OVERLAP=\$(comm -12 .bam_bc.tmp .called_bc.tmp | wc -l | tr -d ' ')
+    echo "n_called_cells_with_viral_reads: \${N_OVERLAP}" >> mapping_stats.txt
+    rm -f .bam_bc.tmp .called_bc.tmp
     """
 }
 
@@ -1379,6 +1445,12 @@ process SC_COUNT_CELLS {
 
     script:
     """
+    if [ ! -s "${bam}" ]; then
+      echo "SC_COUNT_CELLS: empty BAM for ${sample_id}; no viral mappings." > count_stats.log
+      echo "cell\tgene\tcount" > umi_counts.tsv
+      exit 0
+    fi
+
     # umi_tools count requires CB, UB, and XT tags in BAM
     # umi_tools extract appends barcode and UMI to read name as:
     #   ORIGINALREADNAME_BARCODE_UMI
@@ -1441,6 +1513,7 @@ process SC_BUILD_MATRIX {
     output:
     tuple val(sample_id), path("matrix.mtx"), path("barcodes.tsv"), path("features.tsv"), emit: matrix
     tuple val(sample_id), path("sc_viral_summary.tsv"), emit: summary
+    tuple val(sample_id), path("sc_qc_stats.tsv"), emit: qc_stats
 
     script:
     """
@@ -1451,6 +1524,59 @@ process SC_BUILD_MATRIX {
         --min-reads ${params.sc_min_reads_per_cell} \
         --min-viral-umis ${params.sc_min_viral_umis} \
         --output-dir .
+    """
+}
+
+// ---------------------------------------------------------------------------
+// SINGLE-CELL: FILTER_HC_CONTIGS – Keep only high-confidence viral contigs
+// ---------------------------------------------------------------------------
+process FILTER_HC_CONTIGS {
+    tag "${sample_id}"
+    label "single_cell"
+
+    input:
+    tuple val(sample_id), path(viral_contigs), path(genomad_dir), path(checkv_dir)
+
+    output:
+    tuple val(sample_id), path("hc_viral_contigs.fasta"), emit: filtered
+
+    script:
+    """
+    touch genomad_ids.txt checkv_ids.txt
+
+    if [ "${params.sc_matrix_contig_source}" = "genomad_virus" ] || [ "${params.sc_matrix_contig_source}" = "intersect" ]; then
+      if [ -s ${genomad_dir}/virus_summary.tsv ]; then
+        tail -n +2 ${genomad_dir}/virus_summary.tsv | cut -f1 | sed 's/|provirus.*//' | sort -u > genomad_ids.txt
+      fi
+    fi
+
+    if [ "${params.sc_matrix_contig_source}" = "checkv_pass" ] || [ "${params.sc_matrix_contig_source}" = "intersect" ]; then
+      if [ -s ${checkv_dir}/quality_summary.tsv ]; then
+        awk -F'\\t' 'NR>1 && \$8 != "Not-determined" {print \$1}' ${checkv_dir}/quality_summary.tsv | sort -u > checkv_ids.txt
+      fi
+    fi
+
+    if [ "${params.sc_matrix_contig_source}" = "intersect" ]; then
+      comm -12 genomad_ids.txt checkv_ids.txt > keep_ids.txt
+    elif [ "${params.sc_matrix_contig_source}" = "genomad_virus" ]; then
+      cp genomad_ids.txt keep_ids.txt
+    else
+      cp checkv_ids.txt keep_ids.txt
+    fi
+
+    python3 -c "
+ids = set(open('keep_ids.txt').read().split())
+writing = False
+with open('hc_viral_contigs.fasta', 'w') as out:
+    for line in open('${viral_contigs}'):
+        if line.startswith('>'):
+            cid = line[1:].split()[0]
+            writing = cid in ids
+        if writing:
+            out.write(line)
+"
+    N=\$(grep -c '^>' hc_viral_contigs.fasta 2>/dev/null || echo 0)
+    echo "FILTER_HC_CONTIGS: ${params.sc_matrix_contig_source} filter kept \$N contigs"
     """
 }
 
@@ -1584,23 +1710,42 @@ workflow {
     // SINGLE-CELL: Map barcoded reads back to viral contigs, count, build matrix
     // =========================================================================
     if (params.single_cell_mode) {
-        // Join barcoded reads with viral contigs
-        // For 10x, we only use R2 (cDNA) for mapping - R1 is just barcode/UMI
+        // Default: use all viral contigs for SC mapping
+        ch_sc_contigs = RENAME_CONTIGS.out.renamed.map { t -> tuple(t[0], t[1]) }
+            // (sample_id, viral_contigs)
+
+        // Optional: filter to high-confidence contigs only
+        if (params.sc_matrix_contig_source != "all") {
+            ch_hc_input = RENAME_CONTIGS.out.renamed
+                .map { t -> tuple(t[0], t[1]) }   // (sample_id, viral_contigs)
+                .join(ch_genomad)                   // + genomad_out
+                .join(ch_checkv)                    // + checkv_dir
+                // Result: (sample_id, viral_contigs, genomad_out, checkv_dir)
+            FILTER_HC_CONTIGS(ch_hc_input)
+            ch_sc_contigs = FILTER_HC_CONTIGS.out.filtered
+        }
+
+        // Join barcoded reads with (possibly filtered) viral contigs + barcode counts
+        // tagged emits: (sample_id, tagged_R1, tagged_R2)
+        // ch_sc_contigs: (sample_id, viral_contigs)
+        // barcode_counts emits: (sample_id, barcode_counts.tsv)
         ch_sc_map_input = SC_EXTRACT_BARCODES.out.tagged
-            .join(RENAME_CONTIGS.out.renamed)
-            .map { t -> tuple(t[0], t[2], t[3]) }
-            // (sample_id, tagged_R2, viral_contigs)
-        
+            .join(ch_sc_contigs)
+            .join(SC_EXTRACT_BARCODES.out.barcode_counts)
+            .map { t -> tuple(t[0], t[2], t[3], t[4]) }
+            // (sample_id, tagged_R2, viral_contigs, barcode_counts)
+
         SC_MAP_VIRAL(ch_sc_map_input)
-        
+
         SC_COUNT_CELLS(SC_MAP_VIRAL.out.bam)
-        
+
         // Join counts with viral contigs and kaiju for matrix building
         ch_matrix_input = SC_COUNT_CELLS.out.counts
-            .join(RENAME_CONTIGS.out.renamed)
+            .join(ch_sc_contigs)
+            .join(RENAME_CONTIGS.out.renamed.map { t -> tuple(t[0], t[2]) })
             .map { t -> tuple(t[0], t[1], t[2], t[3]) }
             // (sample_id, umi_counts, viral_contigs, kaiju_dir)
-        
+
         SC_BUILD_MATRIX(ch_matrix_input)
     }
 }

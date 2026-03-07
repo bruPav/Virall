@@ -63,7 +63,13 @@ def parse_kaiju_taxonomy(kaiju_file):
             parts = line.split('\t')
             if len(parts) >= 4 and parts[0] == 'C':
                 contig_id = parts[1].strip()
-                lineage = parts[3].strip()
+                # kaiju-addTaxonNames output can be either:
+                # - 4 columns (single lineage string in column 4), or
+                # - 10+ columns (rank columns from superkingdom..species in 4..10)
+                if len(parts) >= 10:
+                    lineage = ";".join(p.strip() for p in parts[3:10] if p.strip())
+                else:
+                    lineage = parts[3].strip()
                 taxonomy[contig_id] = lineage
 
     return taxonomy

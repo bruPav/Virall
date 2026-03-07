@@ -52,11 +52,11 @@ reference: null
 #   - Feeds consensus contigs into the full downstream pipeline (KAIJU, CheckV, annotation, etc.)
 # Much faster than de novo assembly; use when you only care about a specific target virus
 # Default (false): full de novo assembly + optional reference-guided output on the side
-reference_only: true
+reference_only: false
 
 # Optional host genome FASTA to filter out host reads (like Virall --filter)
 # When set, reads mapping to the host are removed before assembly (minimap2 + samtools).
-host_genome: "/full/path/to/fatsa/file/with/sequences/to/filter/out"
+host_genome: null
 
 # -----------------------------------------------------------------------------
 # Preprocessing
@@ -94,6 +94,16 @@ metaviral_mode: false
 # -----------------------------------------------------------------------------
 threads: 12
 memory: "24G"
+
+# ASSEMBLE (SPAdes/Flye) memory tuning
+# For large pooled single-cell data, SPAdes can require much more RAM than defaults.
+# The pipeline auto-scales ASSEMBLE memory from input FASTQ size:
+#   requested_gb = max(assemble_memory_gb, ceil(input_fastq_gb * assemble_memory_per_input_gb))
+# capped at assemble_memory_max_gb.
+# Keep Slurm/job memory at or above this request.
+assemble_memory_gb: 24
+assemble_memory_max_gb: 192
+assemble_memory_per_input_gb: 3.0
 
 # -----------------------------------------------------------------------------
 # Optional minimum contig length
@@ -139,3 +149,10 @@ sc_min_reads_per_cell: 100
 
 # Minimum viral UMIs to classify a cell as "infected"
 sc_min_viral_umis: 1
+
+# Contig source for single-cell matrix construction:
+#   "all"           - use all viral contigs passing min_contig_len (default)
+#   "genomad_virus" - only contigs identified as viral by geNomad
+#   "checkv_pass"   - only contigs with CheckV quality != "Not-determined"
+#   "intersect"     - only contigs passing BOTH geNomad and CheckV
+sc_matrix_contig_source: "all"

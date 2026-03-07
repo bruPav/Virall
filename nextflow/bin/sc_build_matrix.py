@@ -36,7 +36,13 @@ def parse_kaiju_taxonomy(kaiju_dir):
             parts = line.strip().split('\t')
             if len(parts) >= 4 and parts[0] == 'C':
                 contig_id = parts[1]
-                lineage = parts[3] if len(parts) > 3 else ''
+                # kaiju-addTaxonNames output can be either:
+                # - 4 columns (single lineage string in column 4), or
+                # - 10+ columns (rank columns from superkingdom..species in 4..10)
+                if len(parts) >= 10:
+                    lineage = ";".join(p.strip() for p in parts[3:10] if p.strip())
+                else:
+                    lineage = parts[3] if len(parts) > 3 else ''
                 # Extract species/genus name from lineage
                 levels = [l.strip() for l in lineage.split(';') if l.strip() and l.strip() != 'NA']
                 name = levels[-1] if levels else contig_id
@@ -188,6 +194,14 @@ def main():
             pass
         with open(output_dir / "sc_viral_summary.tsv", 'w') as f:
             f.write("cell_barcode\ttotal_viral_umis\tn_viral_contigs\tinfected\ttop_virus\ttop_virus_umis\n")
+        with open(output_dir / "sc_qc_stats.tsv", 'w') as f:
+            f.write("metric\tvalue\n")
+            f.write("n_cells_in_matrix\t0\n")
+            f.write("n_viral_features\t0\n")
+            f.write("n_nonzero_entries\t0\n")
+            f.write("n_cells_with_any_viral_umis\t0\n")
+            f.write("n_infected_cells\t0\n")
+            f.write(f"min_viral_umis_threshold\t{args.min_viral_umis}\n")
         return
     
     # Build sorted cell list
@@ -255,11 +269,25 @@ def main():
     
     # Print summary
     n_infected = sum(1 for c in barcodes if sum(filtered_cells[c].values()) >= args.min_viral_umis)
+    n_with_any = sum(1 for c in barcodes if sum(filtered_cells[c].values()) > 0)
     print(f"[sc_build_matrix] Output summary:", file=sys.stderr)
     print(f"  - {len(barcodes)} cells", file=sys.stderr)
     print(f"  - {len(features)} viral features", file=sys.stderr)
     print(f"  - {len(data)} non-zero entries", file=sys.stderr)
+    print(f"  - {n_with_any} cells with any viral UMIs", file=sys.stderr)
     print(f"  - {n_infected} infected cells (>= {args.min_viral_umis} viral UMIs)", file=sys.stderr)
+
+    # Write machine-readable QC stats
+    qc_path = output_dir / "sc_qc_stats.tsv"
+    with open(qc_path, 'w') as f:
+        f.write("metric\tvalue\n")
+        f.write(f"n_cells_in_matrix\t{len(barcodes)}\n")
+        f.write(f"n_viral_features\t{len(features)}\n")
+        f.write(f"n_nonzero_entries\t{len(data)}\n")
+        f.write(f"n_cells_with_any_viral_umis\t{n_with_any}\n")
+        f.write(f"n_infected_cells\t{n_infected}\n")
+        f.write(f"min_viral_umis_threshold\t{args.min_viral_umis}\n")
+    print(f"  - QC stats written to {qc_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -88,7 +88,13 @@ def parse_kaiju_results(kaiju_file):
             
             if status == "C" and len(parts) >= 4:
                 taxon_id = parts[2]
-                lineage = parts[3]
+                # kaiju-addTaxonNames output can be either:
+                # - 4 columns (single lineage string in column 4), or
+                # - 10+ columns (rank columns from superkingdom..species in 4..10)
+                if len(parts) >= 10:
+                    lineage = ";".join(p.strip() for p in parts[3:10] if p.strip())
+                else:
+                    lineage = parts[3]
                 
                 # Parse lineage: "Viruses; Nucleocytoviricota; Megaviricetes; ..."
                 levels = [p.strip() for p in lineage.split(";") if p.strip()]
