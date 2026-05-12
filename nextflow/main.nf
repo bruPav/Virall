@@ -53,7 +53,7 @@ if (params.outdir?.toString()?.trim()?.startsWith('~')) {
 }
 
 // ---------------------------------------------------------------------------
-// Sample sheet
+// Sample sheet with tech-specific column support
 // ---------------------------------------------------------------------------
 def expand_path = { String s ->
     if (!s?.trim()) return ''
@@ -75,17 +75,80 @@ def stub_sc_r2  = file("${projectDir}/.placeholder_sc_r2")
 Channel
     .fromPath(params.samples, checkIfExists: true)
     .splitCsv(header: true, strip: true)
-    | map { row -> tuple(
-        row.sample_id,
-        to_file(row.read1, stub_r1),
-        to_file(row.read2, stub_r2),
-        to_file(row.single, stub_single),
-        to_file(row.long, stub_long),
-        to_file(row.sc_read1, stub_sc_r1),
-        to_file(row.sc_read2, stub_sc_r2)
-      )
+    .map { row ->
+        // Map short-read columns to unified format with tech detection
+        def read1, read2, single, short_tech
+        if (row.illumina_r1?.trim()) {
+            read1 = row.illumina_r1
+            read2 = row.illumina_r2 ?: ""
+            single = row.illumina_single ?: ""
+            short_tech = "illumina"
+        } else if (row.iontorrent_r1?.trim()) {
+            read1 = row.iontorrent_r1
+            read2 = row.iontorrent_r2 ?: ""
+            single = row.iontorrent_single ?: ""
+            short_tech = "iontorrent"
+        } else if (row.read1?.trim()) {
+            // Backward compatibility: fall back to generic columns
+            log.warn "Sample ${row.sample_id}: Using legacy read1/read2/single columns. Consider migrating to tech-specific columns (illumina_r1, iontorrent_r1, etc.)"
+            read1 = row.read1
+            read2 = row.read2 ?: ""
+            single = row.single ?: ""
+            short_tech = params.iontorrent ? "iontorrent" : "illumina"
+        } else if (row.illumina_single?.trim()) {
+            read1 = ""
+            read2 = ""
+            single = row.illumina_single
+            short_tech = "illumina"
+        } else if (row.iontorrent_single?.trim()) {
+            read1 = ""
+            read2 = ""
+            single = row.iontorrent_single
+            short_tech = "iontorrent"
+        } else if (row.single?.trim()) {
+            log.warn "Sample ${row.sample_id}: Using legacy single column. Consider migrating to tech-specific columns."
+            read1 = ""
+            read2 = ""
+            single = row.single
+            short_tech = params.iontorrent ? "iontorrent" : "illumina"
+        } else {
+            read1 = ""
+            read2 = ""
+            single = ""
+            short_tech = "illumina"
+        }
+        
+        // Map long-read columns to unified format with tech detection
+        def long_reads, long_tech
+        if (row.nanopore_reads?.trim()) {
+            long_reads = row.nanopore_reads
+            long_tech = "nanopore"
+        } else if (row.pacbio_reads?.trim()) {
+            long_reads = row.pacbio_reads
+            long_tech = "pacbio"
+        } else if (row.long?.trim()) {
+            // Backward compatibility: fall back to generic column
+            log.warn "Sample ${row.sample_id}: Using legacy long column. Consider migrating to tech-specific columns (nanopore_reads, pacbio_reads)."
+            long_reads = row.long
+            long_tech = params.long_read_tech ?: "nanopore"
+        } else {
+            long_reads = ""
+            long_tech = ""
+        }
+        
+        tuple(
+            row.sample_id,
+            to_file(read1, stub_r1),
+            to_file(read2, stub_r2),
+            to_file(single, stub_single),
+            to_file(long_reads, stub_long),
+            to_file(row.sc_read1, stub_sc_r1),
+            to_file(row.sc_read2, stub_sc_r2),
+            short_tech,
+            long_tech
+        )
     }
-    | set { ch_samples }
+    .set { ch_samples }
 
 // ---------------------------------------------------------------------------
 // SINGLE-CELL: SC_EXTRACT_BARCODES – Extract cell barcodes and UMIs from 10x data
@@ -178,7 +241,15 @@ process PREPROCESS {
     publishDir "${params.outdir}/${sample_id}/00_preprocess", mode: "copy"
 
     input:
-    tuple val(sample_id), path(read1), path(read2), path(single), path(long_reads), path(sc_read1), path(sc_read2)
+    tuple val(sample_id), 
+          path(read1, stageAs: "input_r1/*"), 
+          path(read2, stageAs: "input_r2/*"), 
+          path(single, stageAs: "input_single/*"), 
+          path(long_reads, stageAs: "input_long/*"), 
+          path(sc_read1, stageAs: "input_sc_r1/*"), 
+          path(sc_read2, stageAs: "input_sc_r2/*"),
+          val(short_tech), 
+          val(long_tech)
 
     output:
     tuple val(sample_id),
@@ -192,6 +263,8 @@ process PREPROCESS {
           path("preprocess_dir/fastp_single.json"),
           path("preprocess_dir/fastplong.html"),
           path("preprocess_dir/fastplong.json"),
+          val(short_tech),
+          val(long_tech),
           emit: preprocessed
 
     script:
@@ -200,8 +273,8 @@ process PREPROCESS {
     def q = params.quality_phred
     def ml = params.min_read_len
     // Ion Torrent: skip poly-G trimming (Illumina artifact) and adapter detection (already stripped by Torrent Suite)
-    def ion_opts = params.iontorrent ? "--disable_adapter_trimming --disable_trim_poly_g" : "--trim_poly_g"
-    def pe_adapter = params.iontorrent ? "" : "--detect_adapter_for_pe"
+    def ion_opts = (short_tech == "iontorrent") ? "--disable_adapter_trimming --disable_trim_poly_g" : "--trim_poly_g"
+    def pe_adapter = (short_tech == "iontorrent") ? "" : "--detect_adapter_for_pe"
     """
     mkdir -p preprocess_dir
     if [ -s "${read1}" ] && [ -s "${read2}" ]; then
@@ -247,6 +320,8 @@ process HOST_FILTER {
           path(qc_single_json),
           path(qc_long_html),
           path(qc_long_json),
+          val(short_tech),
+          val(long_tech),
           path(host_ref)
 
     output:
@@ -261,6 +336,8 @@ process HOST_FILTER {
           path("host_filter_dir/fastp_single.json"),
           path("host_filter_dir/fastplong.html"),
           path("host_filter_dir/fastplong.json"),
+          val(short_tech),
+          val(long_tech),
           emit: host_filtered
 
     script:
@@ -304,7 +381,7 @@ process HOST_FILTER {
     fi
 
     # Long reads (ONT or PacBio)
-    MINIMAP2_LONG_PRESET=\$( [ "${params.long_read_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
+    MINIMAP2_LONG_PRESET=\$( [ "${long_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
     if [ -s "${trimmed_long}" ] && [ "${trimmed_long.name}" != ".placeholder_long" ]; then
       minimap2 -ax \$MINIMAP2_LONG_PRESET -t ${task.cpus} ${host_ref} ${trimmed_long} 2>host_filter_dir/host_filter_long.log | \\
         samtools fastq -f 4 - > host_filter_dir/long.fq 2>/dev/null || true
@@ -340,16 +417,18 @@ process ASSEMBLE {
           path(qc_single_html),
           path(qc_single_json),
           path(qc_long_html),
-          path(qc_long_json)
+          path(qc_long_json),
+          val(short_tech),
+          val(long_tech)
     path(reference_file)
 
     output:
-    tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), emit: assembled
+    tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), val(short_tech), val(long_tech), emit: assembled
     path("contigs_ref_guided.fasta"), optional: true
 
     script:
     def mem = task.memory ? task.memory.toGiga().toString() : params.memory.replaceAll(/[Gg]/, '')
-    def ion = params.iontorrent ? '--iontorrent' : ''
+    def ion = (short_tech == "iontorrent") ? '--iontorrent' : ''
     // --trusted-contigs is incompatible with --metaviral and --rnaviral; reference takes priority
     def has_ref = reference_file.name != '.placeholder_ref'
     // SPAdes only accepts .fa/.fasta extensions for --trusted-contigs; symlink if needed
@@ -357,7 +436,7 @@ process ASSEMBLE {
     def ref = has_ref ? "--trusted-contigs ${ref_fasta}" : ''
     def rna = (params.rna_mode && !has_ref) ? '--rnaviral' : ''
     def metaviral = (params.metaviral_mode && !has_ref) ? '--metaviral' : ''
-    def minimap2_lr_preset = params.long_read_tech == "pacbio" ? "map-pb" : "map-ont"
+    def minimap2_lr_preset = (long_tech == "pacbio") ? "map-pb" : "map-ont"
     """
     mkdir -p assembly_dir preprocess_dir
     if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
@@ -402,15 +481,15 @@ process ASSEMBLE {
         echo "Using user-specified assembly strategy: \$STRATEGY"
       fi
 
-      # Determine long-read flags based on technology (nanopore vs pacbio)
-      LONG_READ_TECH="${params.long_read_tech}"
-      if [ "\$LONG_READ_TECH" = "pacbio" ]; then
-        SPADES_LONG_FLAG="--pacbio"
-        FLYE_INPUT_FLAG="--pacbio-raw"
-      else
-        SPADES_LONG_FLAG="--nanopore"
-        FLYE_INPUT_FLAG="--nano-raw"
-      fi
+    # Determine long-read flags based on technology (nanopore vs pacbio)
+    LONG_READ_TECH="${long_tech}"
+    if [ "\$LONG_READ_TECH" = "pacbio" ]; then
+      SPADES_LONG_FLAG="--pacbio"
+      FLYE_INPUT_FLAG="--pacbio-raw"
+    else
+      SPADES_LONG_FLAG="--nanopore"
+      FLYE_INPUT_FLAG="--nano-raw"
+    fi
 
       # Run assembler(s) based on strategy
       if [ "\$STRATEGY" = "short_only" ]; then
@@ -587,14 +666,16 @@ process REF_ASSEMBLE {
           path(qc_single_html),
           path(qc_single_json),
           path(qc_long_html),
-          path(qc_long_json)
+          path(qc_long_json),
+          val(short_tech),
+          val(long_tech)
     path(reference_file)
 
     output:
-    tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), emit: assembled
+    tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), val(short_tech), val(long_tech), emit: assembled
 
     script:
-    def minimap2_lr_preset = params.long_read_tech == "pacbio" ? "map-pb" : "map-ont"
+    def minimap2_lr_preset = (long_tech == "pacbio") ? "map-pb" : "map-ont"
     """
     mkdir -p assembly_dir preprocess_dir
 
@@ -651,7 +732,7 @@ process REF_ASSEMBLE {
     samtools index assembly_dir/ref_merged.bam
 
     # Generate consensus
-    LONG_READ_TECH="${params.long_read_tech}"
+    LONG_READ_TECH="${long_tech}"
     if [ "\$HAS_LONG" = "1" ] && [ "\$LONG_READ_TECH" = "nanopore" ]; then
       medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz \
         -d reference.fasta -o assembly_dir/ref_medaka -t ${task.cpus} \
@@ -678,11 +759,11 @@ process KAIJU {
     publishDir "${params.outdir}/${sample_id}/03_classifications", mode: "copy"
 
     input:
-    tuple val(sample_id), path(contigs), path(scaffolds), path(preprocess_dir)
+    tuple val(sample_id), path(contigs), path(scaffolds), path(preprocess_dir), val(short_tech), val(long_tech)
     val(kaiju_db)
 
     output:
-    tuple val(sample_id), path("kaiju_dir"), path(contigs), path(scaffolds), path(preprocess_dir), emit: kaiju_done
+    tuple val(sample_id), path("kaiju_dir"), path(contigs), path(scaffolds), path(preprocess_dir), val(short_tech), val(long_tech), emit: kaiju_done
 
     script:
     """
@@ -716,11 +797,11 @@ process FILTER_VIRAL {
     publishDir "${params.outdir}/${sample_id}/02_viral_contigs", mode: "copy"
 
     input:
-    tuple val(sample_id), path(kaiju_dir), path(contigs), path(scaffolds), path(preprocess_dir)
+    tuple val(sample_id), path(kaiju_dir), path(contigs), path(scaffolds), path(preprocess_dir), val(short_tech), val(long_tech)
     path(extract_script)
 
     output:
-    tuple val(sample_id), path("viral_contigs.fasta"), path(kaiju_dir), path(preprocess_dir), emit: viral
+    tuple val(sample_id), path("viral_contigs.fasta"), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech), emit: viral
 
     script:
     """
@@ -745,10 +826,10 @@ process RENAME_CONTIGS {
     publishDir "${params.outdir}/${sample_id}/02_viral_contigs", mode: "copy", pattern: "{viral_contigs.fasta,name_mapping.tsv}"
 
     input:
-    tuple val(sample_id), path("input_viral_contigs.fasta"), path("input_kaiju_dir"), path(preprocess_dir)
+    tuple val(sample_id), path("input_viral_contigs.fasta"), path("input_kaiju_dir"), path(preprocess_dir), val(short_tech), val(long_tech)
 
     output:
-    tuple val(sample_id), path("viral_contigs.fasta"), path("kaiju_dir"), path(preprocess_dir), emit: renamed
+    tuple val(sample_id), path("viral_contigs.fasta"), path("kaiju_dir"), path(preprocess_dir), val(short_tech), val(long_tech), emit: renamed
 
     script:
     """
@@ -778,7 +859,7 @@ process VALIDATE {
     publishDir "${params.outdir}/${sample_id}/04_quality_assessment", mode: "copy"
 
     input:
-    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir)
+    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
     val(checkv_db)
 
     output:
@@ -828,7 +909,7 @@ process GENOMAD {
     publishDir "${params.outdir}/${sample_id}/04_quality_assessment/genomad", mode: "copy"
 
     input:
-    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir)
+    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
     val(genomad_db)
 
     output:
@@ -921,7 +1002,7 @@ process ANNOTATE {
     publishDir "${params.outdir}/${sample_id}/05_gene_predictions", mode: "copy"
 
     input:
-    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir)
+    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
     val(vog_db)
 
     output:
@@ -939,7 +1020,7 @@ process ANNOTATE {
       prodigal-gv -i viral_contigs.fasta -a annotation_dir/proteins.faa -p meta -q
       VOG_HMM=\$(find ${vog_db} -maxdepth 1 \\( -name 'vog_all.hmm' -o -name 'vog.hmm' \\) 2>/dev/null | head -1)
       if [ -n "\$VOG_HMM" ] && [ -f "\$VOG_HMM" ]; then
-        hmmscan --cpu ${task.cpus} -o annotation_dir/vog_out.txt --domtblout annotation_dir/vog_domains.txt "\$VOG_HMM" annotation_dir/proteins.faa
+        hmmsearch --cpu ${task.cpus} -o annotation_dir/vog_out.txt --domtblout annotation_dir/vog_domains.txt "\$VOG_HMM" annotation_dir/proteins.faa
       fi
     fi
     """
@@ -1002,7 +1083,7 @@ process QUANTIFY {
     publishDir "${params.outdir}/${sample_id}/06_quantification", mode: "copy"
 
     input:
-    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir)
+    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
 
     output:
     tuple val(sample_id), path("quant_dir"), emit: quantified
@@ -1028,7 +1109,7 @@ process QUANTIFY {
       fi
       HAS_SHORT=\$([ -n "\$BAMS_TO_MERGE" ] && echo "1" || echo "0")
       if [ "\$HAS_SHORT" = "0" ] && [ -s preprocess_dir/trimmed_long.fastq.gz ]; then
-        MINIMAP2_LONG_PRESET=\$( [ "${params.long_read_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
+        MINIMAP2_LONG_PRESET=\$( [ "${long_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
         minimap2 -t ${task.cpus} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta preprocess_dir/trimmed_long.fastq.gz | samtools sort -o quant_dir/mapped_long.bam -
         BAMS_TO_MERGE="\$BAMS_TO_MERGE quant_dir/mapped_long.bam"
       fi
@@ -1076,14 +1157,16 @@ process REFERENCE_CHECK {
           path(qc_single_html),
           path(qc_single_json),
           path(qc_long_html),
-          path(qc_long_json)
+          path(qc_long_json),
+          val(short_tech),
+          val(long_tech)
     path(reference)
 
     output:
     tuple val(sample_id), path("ref_check_dir"), emit: ref_checked
 
     script:
-    def minimap2_preset = params.long_read_tech == "pacbio" ? "map-pb" : "map-ont"
+    def minimap2_preset = (long_tech == "pacbio") ? "map-pb" : "map-ont"
     """
     mkdir -p ref_check_dir
 
@@ -1469,7 +1552,7 @@ workflow {
     def v_db = params.vog_db ?: (db_dir ? "${db_dir}/vog_db" : "${container_db}/vog_db")
     def extract_script = file("${projectDir}/bin/extract_fasta_by_ids.py")
     def merge_script  = file("${projectDir}/bin/merge_quality.py")
-    def plot_script   = file("${projectDir}/bin/run_plots.py")
+    def plot_script   = file("${projectDir}/bin/run_plots_genome_corrected.py")
 
     def g_db = params.genomad_db ?: (db_dir ? "${db_dir}/genomad_db" : "${container_db}/genomad_db")
 
@@ -1516,7 +1599,9 @@ workflow {
     if (params.host_genome) {
         def host_file = file(expand_path(params.host_genome))
         HOST_FILTER(
-            PREPROCESS.out.preprocessed.map { t -> tuple(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], host_file) }
+            PREPROCESS.out.preprocessed.map { t -> 
+                tuple(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], t[11], t[12], host_file) 
+            }
         )
         ch_for_assemble = HOST_FILTER.out.host_filtered
     } else {
@@ -1569,7 +1654,7 @@ workflow {
         // Join ANNOTATE output with RENAME_CONTIGS output to get viral_contigs and kaiju_dir
         ch_organize_input = ANNOTATE.out.annotated
             .join(RENAME_CONTIGS.out.renamed)
-            .map { sample_id, annotation_dir, viral_contigs, kaiju_dir, preprocess_dir ->
+            .map { sample_id, annotation_dir, viral_contigs, kaiju_dir, preprocess_dir, short_tech, long_tech ->
                 tuple(sample_id, annotation_dir, viral_contigs, kaiju_dir)
             }
         ORGANIZE_GENES(ch_organize_input, ch_vog_db)

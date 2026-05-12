@@ -271,8 +271,16 @@ def parse_hmmscan_domtblout(domtblout_file, evalue_threshold=1e-5):
             if len(fields) < 8:
                 continue
 
-            vog_id = fields[0]
-            gene_id = fields[3]
+            if fields[0].startswith("VOG"):
+                vog_id = fields[0]      # target = HMM (hmmscan)
+                gene_id = fields[3]     # query  = seq
+            elif fields[3].startswith("VOG"):
+                vog_id = fields[3]      # query  = HMM (hmmsearch)
+                gene_id = fields[0]     # target = seq
+            else:
+                # Fallback to old hmmscan convention
+                vog_id = fields[0]
+                gene_id = fields[3]
             try:
                 evalue = float(fields[6])
                 score = float(fields[7])

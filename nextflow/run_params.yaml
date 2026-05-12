@@ -12,7 +12,7 @@
 samples: "nextflow/samples.csv"
 
 # Output directory for all results
-outdir: "/full/path/to/output/directory/"
+outdir: "/home/bruno/analysis/paper/InSilicoMock/DNAviruses/virall_analysis"
 
 # -----------------------------------------------------------------------------
 # Databases (required for full pipeline; or set env VIRALL_DATABASE_DIR)
@@ -52,24 +52,25 @@ reference: null
 #   - Feeds consensus contigs into the full downstream pipeline (KAIJU, CheckV, annotation, etc.)
 # Much faster than de novo assembly; use when you only care about a specific target virus
 # Default (false): full de novo assembly + optional reference-guided output on the side
-reference_only: true
+reference_only: false
 
 # Optional host genome FASTA to filter out host reads (like Virall --filter)
 # When set, reads mapping to the host are removed before assembly (minimap2 + samtools).
-host_genome: "/full/path/to/fatsa/file/with/sequences/to/filter/out"
+host_genome: "/home/bruno/analysis/paper/Human_bacteria.fasta"
 
 # -----------------------------------------------------------------------------
 # Preprocessing
 # -----------------------------------------------------------------------------
 # PHRED quality threshold and minimum read length after trimming
-quality_phred: 30           # short reads (fastp)
+quality_phred: 20           # short reads (fastp)
 quality_phred_long: 7       # long reads (fastplong)
 min_read_len: 50            # short reads (fastp)
 min_read_len_long: 1000     # long reads (fastplong)
 
-# Long-read sequencing technology: "nanopore" or "pacbio". This parameter is ignored if only short reads are present
-# Affects SPAdes (--nanopore vs --pacbio), Flye (--nano-raw vs --pacbio-raw), minimap2 presets
-long_read_tech: "nanopore"
+# DEPRECATED: long_read_tech is now auto-detected per sample from samples.csv tech-specific columns
+# For backward compatibility with old sample sheets, this provides a fallback default
+# Use nanopore_reads or pacbio_reads columns in samples.csv instead
+# long_read_tech: "nanopore"
 
 # Flye assembler tuning (used in hybrid and long_only strategies)
 # --meta is always enabled (metagenome mode for uneven coverage)
@@ -81,8 +82,10 @@ flye_min_overlap: 1000
 # Set a value if targeting a specific virus size range (e.g. "30k" for coronaviruses)
 flye_genome_size: null
 
-# Set true for Ion Torrent short reads (adds --iontorrent to SPAdes for homopolymer error correction)
-iontorrent: false
+# DEPRECATED: iontorrent is now auto-detected per sample from samples.csv tech-specific columns  
+# For backward compatibility with old sample sheets, this provides a fallback default
+# Use illumina_r1/illumina_r2 or iontorrent_r1/iontorrent_r2 columns in samples.csv instead
+# iontorrent: false
 
 # Set true to use metaviralSPAdes (--metaviral) instead of regular SPAdes
 # Note: If a reference genome is also provided, --trusted-contigs takes priority
@@ -93,7 +96,7 @@ metaviral_mode: false
 # Resources
 # -----------------------------------------------------------------------------
 threads: 12
-memory: "24G"
+memory: "26G"
 
 # -----------------------------------------------------------------------------
 # Optional minimum contig length
