@@ -9,10 +9,10 @@
 # Path to sample sheet CSV
 # Bulk mode columns: sample_id, read1, read2, single, long
 # Single-cell mode columns: sample_id, sc_read1, sc_read2
-samples: "nextflow/samples.csv"
+samples: "nextflow/sr-samples.csv"
 
 # Output directory for all results
-outdir: "/home/bruno/analysis/paper/InSilicoMock/DNAviruses/virall_analysis"
+outdir: "/home/bruno/analysis/paper/InSilicoMock/DNAviruses/virall_analysis_sr"
 
 # -----------------------------------------------------------------------------
 # Databases (required for full pipeline; or set env VIRALL_DATABASE_DIR)

@@ -119,13 +119,18 @@ if the entire viral genome were assembled.
             print(f"[run_plots] Loaded quality data from {quality_file}", file=sys.stderr)
             for _, row in qdf.iterrows():
                 cid = str(row["contig_id"]).strip()
-                # Use the higher of completeness or checkv_completeness
-                completeness = max(
-                    float(row.get("completeness", 0) or 0),
-                    float(row.get("checkv_completeness", 0) or 0)
-                )
-                # Convert to fraction (0-1)
-                genome_fraction = completeness / 100.0 if completeness > 0 else 0.01  # Avoid division by zero
+                # Prefer CheckV's checkv_completeness (AAI-based genome fraction).
+                # geNomad's completeness measures hallmark gene presence, not genome
+                # fraction — a 2 kb fragment with a marker gene is not 100% complete.
+                checkv_val = float(row.get("checkv_completeness", 0) or 0)
+                genomad_val = float(row.get("completeness", 0) or 0)
+                if pd.notna(checkv_val) and checkv_val > 0:
+                    completeness = checkv_val
+                elif genomad_val > 0:
+                    completeness = genomad_val
+                else:
+                    completeness = 0
+                genome_fraction = completeness / 100.0 if completeness > 0 else 0.01
                 genome_fraction_by_contig[cid] = genome_fraction
                 print(f"[run_plots] {cid}: completeness={completeness}%, genome_fraction={genome_fraction:.3f}", file=sys.stderr)
         except Exception as e:

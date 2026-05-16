@@ -498,6 +498,21 @@ process ASSEMBLE {
           [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
           [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
           spades.py \$SPADES_OPTS
+          # --- Coverage gate: warn if SPAdes reports low depth ---
+          if [ -f assembly_dir/spades/spades.log ]; then
+            SPADES_COV=\$(grep -a "Average coverage =" assembly_dir/spades/spades.log | tail -1 | sed 's/.*Average coverage = //' | awk '{print \$1}' | tr -d ',')
+            if [ -n "\$SPADES_COV" ]; then
+              COV_OK=\$(echo "\$SPADES_COV >= 10" | bc -l 2>/dev/null || echo 0)
+              if [ "\$COV_OK" = "0" ]; then
+                echo "========================================"
+                echo "  WARNING: Low SPAdes coverage (\${SPADES_COV}x)"
+                echo "  Coverage <10x may yield fragmented assemblies"
+                echo "  and unreliable abundance estimates."
+                echo "========================================"
+              fi
+            fi
+          fi
+          # --- End coverage gate ---
           cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
           cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
         else
@@ -511,6 +526,18 @@ process ASSEMBLE {
           FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
           [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
           flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
+          # --- Coverage gate: warn if Flye reports low depth ---
+          if [ -f assembly_dir/flye/flye.log ]; then
+            FLYE_COV=\$(grep -a "Overlap-based coverage:" assembly_dir/flye/flye.log | grep -oP '\\d+' | tail -1)
+            if [ -n "\$FLYE_COV" ] && [ "\$FLYE_COV" -gt 0 ] 2>/dev/null && [ "\$FLYE_COV" -lt 10 ] 2>/dev/null; then
+              echo "========================================"
+              echo "  WARNING: Low Flye coverage (\${FLYE_COV}x)"
+              echo "  Coverage <10x may yield fragmented assemblies"
+              echo "  and unreliable abundance estimates."
+              echo "========================================"
+            fi
+          fi
+          # --- End coverage gate ---
           cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
 
           # LR polishing: Medaka fixes systematic Nanopore errors (skip for PacBio)
@@ -592,6 +619,21 @@ process ASSEMBLE {
             [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
             [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
             spades.py \$SPADES_OPTS
+            # --- Coverage gate: warn if SPAdes reports low depth ---
+            if [ -f assembly_dir/spades/spades.log ]; then
+              SPADES_COV=\$(grep -a "Average coverage =" assembly_dir/spades/spades.log | tail -1 | sed 's/.*Average coverage = //' | awk '{print \$1}' | tr -d ',')
+              if [ -n "\$SPADES_COV" ]; then
+                COV_OK=\$(echo "\$SPADES_COV >= 10" | bc -l 2>/dev/null || echo 0)
+                if [ "\$COV_OK" = "0" ]; then
+                  echo "========================================"
+                  echo "  WARNING: Low SPAdes coverage (\${SPADES_COV}x)"
+                  echo "  Coverage <10x may yield fragmented assemblies"
+                  echo "  and unreliable abundance estimates."
+                  echo "========================================"
+                fi
+              fi
+            fi
+            # --- End coverage gate ---
             cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
             cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
           fi
@@ -603,6 +645,18 @@ process ASSEMBLE {
           FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
           [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
           flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
+          # --- Coverage gate: warn if Flye reports low depth ---
+          if [ -f assembly_dir/flye/flye.log ]; then
+            FLYE_COV=\$(grep -a "Overlap-based coverage:" assembly_dir/flye/flye.log | grep -oP '\\d+' | tail -1)
+            if [ -n "\$FLYE_COV" ] && [ "\$FLYE_COV" -gt 0 ] 2>/dev/null && [ "\$FLYE_COV" -lt 10 ] 2>/dev/null; then
+              echo "========================================"
+              echo "  WARNING: Low Flye coverage (\${FLYE_COV}x)"
+              echo "  Coverage <10x may yield fragmented assemblies"
+              echo "  and unreliable abundance estimates."
+              echo "========================================"
+            fi
+          fi
+          # --- End coverage gate ---
           cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
 
           # Polish Nanopore assemblies with Medaka (PacBio HiFi is already high-accuracy)
