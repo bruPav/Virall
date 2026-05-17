@@ -498,21 +498,28 @@ process ASSEMBLE {
           [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
           [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
           spades.py \$SPADES_OPTS
-          # --- Coverage gate: warn if SPAdes reports low depth ---
-          if [ -f assembly_dir/spades/spades.log ]; then
-            SPADES_COV=\$(grep -a "Average coverage =" assembly_dir/spades/spades.log | tail -1 | sed 's/.*Average coverage = //' | awk '{print \$1}' | tr -d ',')
-            if [ -n "\$SPADES_COV" ]; then
-              COV_OK=\$(echo "\$SPADES_COV >= 10" | bc -l 2>/dev/null || echo 0)
-              if [ "\$COV_OK" = "0" ]; then
-                echo "========================================"
-                echo "  WARNING: Low SPAdes coverage (\${SPADES_COV}x)"
-                echo "  Coverage <10x may yield fragmented assemblies"
-                echo "  and unreliable abundance estimates."
-                echo "========================================"
-              fi
-            fi
-          fi
-          # --- End coverage gate ---
+           # --- Coverage gate: warn if SPAdes reports low depth ---
+           SPADES_COV=""
+           if [ -f assembly_dir/spades/spades.log ]; then
+             SPADES_COV=\$(grep -a "Average coverage =" assembly_dir/spades/spades.log | tail -1 | sed 's/.*Average coverage = //' | awk '{print \$1}' | tr -d ',')
+           fi
+           # Fallback: metaviralSPAdes encodes coverage in contig headers
+           if [ -z "\$SPADES_COV" ] || [ "\$SPADES_COV" = "0" ]; then
+             if [ -f contigs ] && [ -s contigs ]; then
+               SPADES_COV=\$(grep "^>" contigs | grep -oP 'cov_[0-9.]+' | sed 's/cov_//' | awk '{sum+=\$1; n++} END {if(n>0) printf "%.1f", sum/n}')
+             fi
+           fi
+           if [ -n "\$SPADES_COV" ]; then
+             COV_OK=\$(echo "\$SPADES_COV >= 10" | bc -l 2>/dev/null || echo 0)
+             if [ "\$COV_OK" = "0" ]; then
+               echo "========================================"
+               echo "  WARNING: Low SPAdes coverage (\${SPADES_COV}x)"
+               echo "  Coverage <10x may yield fragmented assemblies"
+               echo "  and unreliable abundance estimates."
+               echo "========================================"
+             fi
+           fi
+           # --- End coverage gate ---
           cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
           cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
         else
@@ -620,17 +627,24 @@ process ASSEMBLE {
             [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
             spades.py \$SPADES_OPTS
             # --- Coverage gate: warn if SPAdes reports low depth ---
+            SPADES_COV=""
             if [ -f assembly_dir/spades/spades.log ]; then
               SPADES_COV=\$(grep -a "Average coverage =" assembly_dir/spades/spades.log | tail -1 | sed 's/.*Average coverage = //' | awk '{print \$1}' | tr -d ',')
-              if [ -n "\$SPADES_COV" ]; then
-                COV_OK=\$(echo "\$SPADES_COV >= 10" | bc -l 2>/dev/null || echo 0)
-                if [ "\$COV_OK" = "0" ]; then
-                  echo "========================================"
-                  echo "  WARNING: Low SPAdes coverage (\${SPADES_COV}x)"
-                  echo "  Coverage <10x may yield fragmented assemblies"
-                  echo "  and unreliable abundance estimates."
-                  echo "========================================"
-                fi
+            fi
+            # Fallback: metaviralSPAdes encodes coverage in contig headers
+            if [ -z "\$SPADES_COV" ] || [ "\$SPADES_COV" = "0" ]; then
+              if [ -f contigs ] && [ -s contigs ]; then
+                SPADES_COV=\$(grep "^>" contigs | grep -oP 'cov_[0-9.]+' | sed 's/cov_//' | awk '{sum+=\$1; n++} END {if(n>0) printf "%.1f", sum/n}')
+              fi
+            fi
+            if [ -n "\$SPADES_COV" ]; then
+              COV_OK=\$(echo "\$SPADES_COV >= 10" | bc -l 2>/dev/null || echo 0)
+              if [ "\$COV_OK" = "0" ]; then
+                echo "========================================"
+                echo "  WARNING: Low SPAdes coverage (\${SPADES_COV}x)"
+                echo "  Coverage <10x may yield fragmented assemblies"
+                echo "  and unreliable abundance estimates."
+                echo "========================================"
               fi
             fi
             # --- End coverage gate ---
