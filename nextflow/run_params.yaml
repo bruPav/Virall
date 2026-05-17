@@ -9,10 +9,10 @@
 # Path to sample sheet CSV
 # Bulk mode columns: sample_id, read1, read2, single, long
 # Single-cell mode columns: sample_id, sc_read1, sc_read2
-samples: "nextflow/sr-samples.csv"
+samples: "nextflow/samples.csv"
 
 # Output directory for all results
-outdir: "/home/bruno/analysis/paper/InSilicoMock/DNAviruses/virall_analysis_sr"
+outdir: "./results"
 
 # -----------------------------------------------------------------------------
 # Databases (required for full pipeline; or set env VIRALL_DATABASE_DIR)
@@ -56,7 +56,7 @@ reference_only: false
 
 # Optional host genome FASTA to filter out host reads (like Virall --filter)
 # When set, reads mapping to the host are removed before assembly (minimap2 + samtools).
-host_genome: "/home/bruno/analysis/paper/Human_bacteria.fasta"
+host_genome: null
 
 # -----------------------------------------------------------------------------
 # Preprocessing
