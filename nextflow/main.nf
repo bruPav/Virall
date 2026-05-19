@@ -43,120 +43,13 @@ params.sc_barcode_whitelist = null    // Optional: custom barcode whitelist file
 params.sc_min_reads_per_cell = 100    // Minimum reads to keep a cell
 params.sc_min_viral_umis = 1          // Minimum viral UMIs to call cell "infected"
 
-// Resolve DB paths from env if not set (params.xxx are read-only; resolve in workflow)
-def db_dir = System.getenv("VIRALL_DATABASE_DIR") ?: ""
-
-// Expand ~ in outdir so "~/analysis/..." becomes /home/user/analysis/...
-if (params.outdir?.toString()?.trim()?.startsWith('~')) {
-    def home = System.getenv('HOME') ?: System.getProperty('user.home') ?: ''
-    params.outdir = (home ?: '') + params.outdir.toString().trim().substring(1)
-}
-
-// ---------------------------------------------------------------------------
-// Sample sheet with tech-specific column support
-// ---------------------------------------------------------------------------
-def expand_path = { String s ->
-    if (!s?.trim()) return ''
-    def p = s.trim()
-    if (p.startsWith('~')) {
-        def home = System.getenv('HOME') ?: System.getProperty('user.home') ?: ''
-        p = (home ?: '') + p.substring(1)
-    }
-    return p
-}
-def to_file = { String s, Path stub -> (s?.trim()) ? file(expand_path(s)) : stub }
-def stub_r1     = file("${projectDir}/.placeholder_r1")
-def stub_r2     = file("${projectDir}/.placeholder_r2")
-def stub_single = file("${projectDir}/.placeholder_single")
-def stub_long   = file("${projectDir}/.placeholder_long")
-def stub_sc_r1  = file("${projectDir}/.placeholder_sc_r1")
-def stub_sc_r2  = file("${projectDir}/.placeholder_sc_r2")
-
-Channel
-    .fromPath(params.samples, checkIfExists: true)
-    .splitCsv(header: true, strip: true)
-    .map { row ->
-        // Map short-read columns to unified format with tech detection
-        def read1, read2, single, short_tech
-        if (row.illumina_r1?.trim()) {
-            read1 = row.illumina_r1
-            read2 = row.illumina_r2 ?: ""
-            single = row.illumina_single ?: ""
-            short_tech = "illumina"
-        } else if (row.iontorrent_r1?.trim()) {
-            read1 = row.iontorrent_r1
-            read2 = row.iontorrent_r2 ?: ""
-            single = row.iontorrent_single ?: ""
-            short_tech = "iontorrent"
-        } else if (row.read1?.trim()) {
-            // Backward compatibility: fall back to generic columns
-            log.warn "Sample ${row.sample_id}: Using legacy read1/read2/single columns. Consider migrating to tech-specific columns (illumina_r1, iontorrent_r1, etc.)"
-            read1 = row.read1
-            read2 = row.read2 ?: ""
-            single = row.single ?: ""
-            short_tech = params.iontorrent ? "iontorrent" : "illumina"
-        } else if (row.illumina_single?.trim()) {
-            read1 = ""
-            read2 = ""
-            single = row.illumina_single
-            short_tech = "illumina"
-        } else if (row.iontorrent_single?.trim()) {
-            read1 = ""
-            read2 = ""
-            single = row.iontorrent_single
-            short_tech = "iontorrent"
-        } else if (row.single?.trim()) {
-            log.warn "Sample ${row.sample_id}: Using legacy single column. Consider migrating to tech-specific columns."
-            read1 = ""
-            read2 = ""
-            single = row.single
-            short_tech = params.iontorrent ? "iontorrent" : "illumina"
-        } else {
-            read1 = ""
-            read2 = ""
-            single = ""
-            short_tech = "illumina"
-        }
-        
-        // Map long-read columns to unified format with tech detection
-        def long_reads, long_tech
-        if (row.nanopore_reads?.trim()) {
-            long_reads = row.nanopore_reads
-            long_tech = "nanopore"
-        } else if (row.pacbio_reads?.trim()) {
-            long_reads = row.pacbio_reads
-            long_tech = "pacbio"
-        } else if (row.long?.trim()) {
-            // Backward compatibility: fall back to generic column
-            log.warn "Sample ${row.sample_id}: Using legacy long column. Consider migrating to tech-specific columns (nanopore_reads, pacbio_reads)."
-            long_reads = row.long
-            long_tech = params.long_read_tech ?: "nanopore"
-        } else {
-            long_reads = ""
-            long_tech = ""
-        }
-        
-        tuple(
-            row.sample_id,
-            to_file(read1, stub_r1),
-            to_file(read2, stub_r2),
-            to_file(single, stub_single),
-            to_file(long_reads, stub_long),
-            to_file(row.sc_read1, stub_sc_r1),
-            to_file(row.sc_read2, stub_sc_r2),
-            short_tech,
-            long_tech
-        )
-    }
-    .set { ch_samples }
-
 // ---------------------------------------------------------------------------
 // SINGLE-CELL: SC_EXTRACT_BARCODES – Extract cell barcodes and UMIs from 10x data
 // ---------------------------------------------------------------------------
 process SC_EXTRACT_BARCODES {
-    tag "${sample_id}"
+    tag {"SC_BC: $sample_id"}
     label "single_cell"
-    publishDir "${params.outdir}/${sample_id}/08_single_cell/barcoded_reads", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/08_single_cell/barcoded_reads" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(sc_read1), path(sc_read2)
@@ -171,23 +64,15 @@ process SC_EXTRACT_BARCODES {
     // v2 (3'/5'): 16bp barcode + 10bp UMI  
     // v1 (3'): 14bp barcode + 10bp UMI
     def bc_pattern
-    switch(params.sc_chemistry) {
-        case "10x_v3":
-        case "10x_3prime_v3":
-        case "10x_5prime_v3":
-            bc_pattern = "CCCCCCCCCCCCCCCCNNNNNNNNNNNN"  // 16C + 12N
-            break
-        case "10x_v2":
-        case "10x_3prime_v2":
-        case "10x_5prime_v2":
-            bc_pattern = "CCCCCCCCCCCCCCCCNNNNNNNNNN"    // 16C + 10N
-            break
-        case "10x_v1":
-        case "10x_3prime_v1":
-            bc_pattern = "CCCCCCCCCCCCCCNNNNNNNNNN"      // 14C + 10N
-            break
-        default:
-            bc_pattern = "CCCCCCCCCCCCCCCCNNNNNNNNNNNN"  // Default to v3
+    def chem = params.sc_chemistry
+    if (chem == "10x_v3" || chem == "10x_3prime_v3" || chem == "10x_5prime_v3") {
+        bc_pattern = "CCCCCCCCCCCCCCCCNNNNNNNNNNNN"  // 16C + 12N
+    } else if (chem == "10x_v2" || chem == "10x_3prime_v2" || chem == "10x_5prime_v2") {
+        bc_pattern = "CCCCCCCCCCCCCCCCNNNNNNNNNN"    // 16C + 10N
+    } else if (chem == "10x_v1" || chem == "10x_3prime_v1") {
+        bc_pattern = "CCCCCCCCCCCCCCNNNNNNNNNN"      // 14C + 10N
+    } else {
+        bc_pattern = "CCCCCCCCCCCCCCCCNNNNNNNNNNNN"  // Default to v3
     }
     def whitelist_opt = params.sc_barcode_whitelist ? "--whitelist ${params.sc_barcode_whitelist}" : ""
     """
@@ -213,7 +98,7 @@ process SC_EXTRACT_BARCODES {
 // SINGLE-CELL: SC_POOL_READS – Pool barcoded reads for assembly
 // ---------------------------------------------------------------------------
 process SC_POOL_READS {
-    tag "${sample_id}"
+    tag { sample_id }
     label "single_cell"
 
     input:
@@ -236,9 +121,9 @@ process SC_POOL_READS {
 // PREPROCESS – fastp (short) / fastplong (long)
 // ---------------------------------------------------------------------------
 process PREPROCESS {
-    tag "${sample_id}"
+    tag { sample_id }
     label "preprocess"
-    publishDir "${params.outdir}/${sample_id}/00_preprocess", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/00_preprocess" }, mode: "copy"
 
     input:
     tuple val(sample_id), 
@@ -304,9 +189,9 @@ process PREPROCESS {
 // HOST_FILTER – optional: remove reads mapping to host genome (minimap2 + samtools, like Virall --filter)
 // ---------------------------------------------------------------------------
 process HOST_FILTER {
-    tag "${sample_id}"
+    tag { sample_id }
     label "host_filter"
-    publishDir "${params.outdir}/${sample_id}/00_preprocess/host_filtered", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/00_preprocess/host_filtered" }, mode: "copy"
 
     input:
     tuple val(sample_id),
@@ -401,10 +286,10 @@ process HOST_FILTER {
 // ASSEMBLE – SPAdes (short/hybrid) and/or Flye (long)
 // ---------------------------------------------------------------------------
 process ASSEMBLE {
-    tag "${sample_id}"
+    tag { sample_id }
     label "assemble"
-    publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "contigs*"
-    publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "scaffolds"
+    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
+    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
 
     input:
     tuple val(sample_id),
@@ -718,10 +603,10 @@ process ASSEMBLE {
 // REF_ASSEMBLE – reference-guided consensus only (no de novo assembly)
 // ---------------------------------------------------------------------------
 process REF_ASSEMBLE {
-    tag "${sample_id}"
+    tag { sample_id }
     label "assemble"
-    publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "contigs*"
-    publishDir "${params.outdir}/${sample_id}/01_assembly", mode: "copy", pattern: "scaffolds"
+    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
+    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
 
     input:
     tuple val(sample_id),
@@ -822,9 +707,9 @@ process REF_ASSEMBLE {
 // KAIJU – classify all contigs (contigs.fasta used for viral filtering)
 // ---------------------------------------------------------------------------
 process KAIJU {
-    tag "${sample_id}"
+    tag { sample_id }
     label "kaiju"
-    publishDir "${params.outdir}/${sample_id}/03_classifications", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/03_classifications" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(contigs), path(scaffolds), path(preprocess_dir), val(short_tech), val(long_tech)
@@ -860,9 +745,9 @@ process KAIJU {
 // FILTER_VIRAL – keep classified (non-Unclassified) contigs as viral
 // ---------------------------------------------------------------------------
 process FILTER_VIRAL {
-    tag "${sample_id}"
+    tag { sample_id }
     label "filter_viral"
-    publishDir "${params.outdir}/${sample_id}/02_viral_contigs", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/02_viral_contigs" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(kaiju_dir), path(contigs), path(scaffolds), path(preprocess_dir), val(short_tech), val(long_tech)
@@ -889,9 +774,9 @@ process FILTER_VIRAL {
 // RENAME_CONTIGS – Rename viral contigs by lowest Kaiju taxonomy level
 // ---------------------------------------------------------------------------
 process RENAME_CONTIGS {
-    tag "${sample_id}"
+    tag { sample_id }
     label "rename_contigs"
-    publishDir "${params.outdir}/${sample_id}/02_viral_contigs", mode: "copy", pattern: "{viral_contigs.fasta,name_mapping.tsv}"
+    publishDir { "${params.outdir}/${sample_id}/02_viral_contigs" }, mode: "copy", pattern: "{viral_contigs.fasta,name_mapping.tsv}"
 
     input:
     tuple val(sample_id), path("input_viral_contigs.fasta"), path("input_kaiju_dir"), path(preprocess_dir), val(short_tech), val(long_tech)
@@ -922,9 +807,9 @@ process RENAME_CONTIGS {
 // VALIDATE – CheckV on viral contigs
 // ---------------------------------------------------------------------------
 process VALIDATE {
-    tag "${sample_id}"
+    tag { sample_id }
     label "validate"
-    publishDir "${params.outdir}/${sample_id}/04_quality_assessment", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/04_quality_assessment" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
@@ -972,9 +857,9 @@ process VALIDATE {
 // GENOMAD – geNomad for RNA viruses & eukaryotic viruses
 // ---------------------------------------------------------------------------
 process GENOMAD {
-    tag "${sample_id}"
+    tag { sample_id }
     label "genomad"
-    publishDir "${params.outdir}/${sample_id}/04_quality_assessment/genomad", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/04_quality_assessment/genomad" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
@@ -1040,9 +925,9 @@ process GENOMAD {
 // MERGE_QUALITY – Combine CheckV (phages) + geNomad (other viruses) results
 // ---------------------------------------------------------------------------
 process MERGE_QUALITY {
-    tag "${sample_id}"
+    tag { sample_id }
     label "merge_quality"
-    publishDir "${params.outdir}/${sample_id}/04_quality_assessment", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/04_quality_assessment" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(checkv_dir), path(genomad_dir), path(viral_contigs), path(kaiju_dir), path(preprocess_dir)
@@ -1065,9 +950,9 @@ process MERGE_QUALITY {
 // ANNOTATE – prodigal-gv + hmmscan (VOG)
 // ---------------------------------------------------------------------------
 process ANNOTATE {
-    tag "${sample_id}"
+    tag { sample_id }
     label "annotate"
-    publishDir "${params.outdir}/${sample_id}/05_gene_predictions", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/05_gene_predictions" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
@@ -1098,9 +983,9 @@ process ANNOTATE {
 // ORGANIZE_GENES – Organize genes by Kaiju taxonomy + VOG functional annotation
 // ---------------------------------------------------------------------------
 process ORGANIZE_GENES {
-    tag "${sample_id}"
+    tag { sample_id }
     label "annotate"
-    publishDir "${params.outdir}/${sample_id}/05_gene_predictions", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/05_gene_predictions" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(annotation_dir), path(viral_contigs), path(kaiju_dir)
@@ -1146,9 +1031,9 @@ process ORGANIZE_GENES {
 // QUANTIFY – BWA/minimap2 + samtools depth
 // ---------------------------------------------------------------------------
 process QUANTIFY {
-    tag "${sample_id}"
+    tag { sample_id }
     label "quantify"
-    publishDir "${params.outdir}/${sample_id}/06_quantification", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/06_quantification" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
@@ -1210,9 +1095,9 @@ process QUANTIFY {
 // REFERENCE_CHECK – optional: map reads to reference, report detection, plot coverage
 // ---------------------------------------------------------------------------
 process REFERENCE_CHECK {
-    tag "${sample_id}"
+    tag { sample_id }
     label "reference_check"
-    publishDir "${params.outdir}/${sample_id}/08_reference_check", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/08_reference_check" }, mode: "copy"
 
     input:
     tuple val(sample_id),
@@ -1445,9 +1330,9 @@ PYEOF
 // PLOT – Virall-style plots (abundance, contig lengths, taxonomy, quality, coverage)
 // ---------------------------------------------------------------------------
 process PLOT {
-    tag "${sample_id}"
+    tag { sample_id }
     label "plot"
-    publishDir "${params.outdir}/${sample_id}/07_plots", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/07_plots" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(quant_dir), path(quality_dir), path(viral_contigs), path(kaiju_dir), path(preprocess_dir)
@@ -1481,9 +1366,9 @@ process PLOT {
 // SINGLE-CELL: SC_MAP_VIRAL – Map barcoded reads to viral contigs
 // ---------------------------------------------------------------------------
 process SC_MAP_VIRAL {
-    tag "${sample_id}"
+    tag { sample_id }
     label "single_cell"
-    publishDir "${params.outdir}/${sample_id}/08_single_cell/viral_mapping", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/08_single_cell/viral_mapping" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(tagged_r2), path(viral_contigs)
@@ -1517,9 +1402,9 @@ process SC_MAP_VIRAL {
 // SINGLE-CELL: SC_COUNT_CELLS – UMI-aware counting per cell
 // ---------------------------------------------------------------------------
 process SC_COUNT_CELLS {
-    tag "${sample_id}"
+    tag { sample_id }
     label "single_cell"
-    publishDir "${params.outdir}/${sample_id}/08_single_cell", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/08_single_cell" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(bam), path(bai)
@@ -1582,9 +1467,9 @@ process SC_COUNT_CELLS {
 // SINGLE-CELL: SC_BUILD_MATRIX – Generate 10x-compatible MTX matrix
 // ---------------------------------------------------------------------------
 process SC_BUILD_MATRIX {
-    tag "${sample_id}"
+    tag { sample_id }
     label "single_cell"
-    publishDir "${params.outdir}/${sample_id}/08_single_cell/matrix", mode: "copy"
+    publishDir { "${params.outdir}/${sample_id}/08_single_cell/matrix" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(counts), path(viral_contigs), path(kaiju_dir)
@@ -1612,6 +1497,112 @@ workflow {
     if (params.reference_only && !params.reference) {
         error "ERROR: reference_only=true requires a reference genome. Set 'reference' in your params file."
     }
+
+    // Resolve DB paths from env if not set (params.xxx are read-only; resolve in workflow)
+    def db_dir = System.getenv("VIRALL_DATABASE_DIR") ?: ""
+
+    // Expand ~ in outdir so "~/analysis/..." becomes /home/user/analysis/...
+    if (params.outdir?.toString()?.trim()?.startsWith('~')) {
+        def home = System.getenv('HOME') ?: System.getProperty('user.home') ?: ''
+        params.outdir = (home ?: '') + params.outdir.toString().trim().substring(1)
+    }
+
+    // ---------------------------------------------------------------------------
+    // Helper: resolve ~ in paths
+    // ---------------------------------------------------------------------------
+    def home_dir = System.getenv('HOME') ?: System.getProperty('user.home') ?: ''
+
+    // ---------------------------------------------------------------------------
+    // Placeholders and sample sheet channel
+    // ---------------------------------------------------------------------------
+    def stub_r1     = file("${projectDir}/.placeholder_r1")
+    def stub_r2     = file("${projectDir}/.placeholder_r2")
+    def stub_single = file("${projectDir}/.placeholder_single")
+    def stub_long   = file("${projectDir}/.placeholder_long")
+    def stub_sc_r1  = file("${projectDir}/.placeholder_sc_r1")
+    def stub_sc_r2  = file("${projectDir}/.placeholder_sc_r2")
+
+    Channel
+        .fromPath(params.samples, checkIfExists: true)
+        .splitCsv(header: true, strip: true)
+        .map { row ->
+            // Map short-read columns to unified format with tech detection
+            def read1
+            def read2
+            def single
+            def short_tech
+            if (row.illumina_r1?.trim()) {
+                read1 = row.illumina_r1
+                read2 = row.illumina_r2 ?: ""
+                single = row.illumina_single ?: ""
+                short_tech = "illumina"
+            } else if (row.iontorrent_r1?.trim()) {
+                read1 = row.iontorrent_r1
+                read2 = row.iontorrent_r2 ?: ""
+                single = row.iontorrent_single ?: ""
+                short_tech = "iontorrent"
+            } else if (row.read1?.trim()) {
+                // Backward compatibility: fall back to generic columns
+                log.warn "Sample ${row.sample_id}: Using legacy read1/read2/single columns. Consider migrating to tech-specific columns (illumina_r1, iontorrent_r1, etc.)"
+                read1 = row.read1
+                read2 = row.read2 ?: ""
+                single = row.single ?: ""
+                short_tech = params.iontorrent ? "iontorrent" : "illumina"
+            } else if (row.illumina_single?.trim()) {
+                read1 = ""
+                read2 = ""
+                single = row.illumina_single
+                short_tech = "illumina"
+            } else if (row.iontorrent_single?.trim()) {
+                read1 = ""
+                read2 = ""
+                single = row.iontorrent_single
+                short_tech = "iontorrent"
+            } else if (row.single?.trim()) {
+                log.warn "Sample ${row.sample_id}: Using legacy single column. Consider migrating to tech-specific columns."
+                read1 = ""
+                read2 = ""
+                single = row.single
+                short_tech = params.iontorrent ? "iontorrent" : "illumina"
+            } else {
+                read1 = ""
+                read2 = ""
+                single = ""
+                short_tech = "illumina"
+            }
+
+            // Map long-read columns to unified format with tech detection
+            def long_reads
+            def long_tech
+            if (row.nanopore_reads?.trim()) {
+                long_reads = row.nanopore_reads
+                long_tech = "nanopore"
+            } else if (row.pacbio_reads?.trim()) {
+                long_reads = row.pacbio_reads
+                long_tech = "pacbio"
+            } else if (row.long?.trim()) {
+                // Backward compatibility: fall back to generic column
+                log.warn "Sample ${row.sample_id}: Using legacy long column. Consider migrating to tech-specific columns (nanopore_reads, pacbio_reads)."
+                long_reads = row.long
+                long_tech = params.long_read_tech ?: "nanopore"
+            } else {
+                long_reads = ""
+                long_tech = ""
+            }
+
+            tuple(
+                row.sample_id,
+                (read1?.trim()) ? file(read1.trim()) : stub_r1,
+                (read2?.trim()) ? file(read2.trim()) : stub_r2,
+                (single?.trim()) ? file(single.trim()) : stub_single,
+                (long_reads?.trim()) ? file(long_reads.trim()) : stub_long,
+                (row.sc_read1?.trim()) ? file(row.sc_read1.trim()) : stub_sc_r1,
+                (row.sc_read2?.trim()) ? file(row.sc_read2.trim()) : stub_sc_r2,
+                short_tech,
+                long_tech
+            )
+        }
+        .set { ch_samples }
 
     // Default DB base dir: in-container path so -profile docker/singularity works without extra config
     def container_db = "/opt/virall/databases"
@@ -1665,7 +1656,9 @@ workflow {
 
     // Optional host filtering: when host_genome is set, filter out host reads
     if (params.host_genome) {
-        def host_file = file(expand_path(params.host_genome))
+        def hp = params.host_genome.trim()
+        if (hp.startsWith('~')) { hp = home_dir + hp.substring(1) }
+        def host_file = file(hp)
         HOST_FILTER(
             PREPROCESS.out.preprocessed.map { t -> 
                 tuple(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], t[11], t[12], host_file) 
@@ -1676,7 +1669,7 @@ workflow {
         ch_for_assemble = PREPROCESS.out.preprocessed
     }
 
-    def ref_file = params.reference ? file(expand_path(params.reference)) : file("${projectDir}/.placeholder_ref")
+    def ref_file = params.reference ? (params.reference.trim().startsWith('~') ? file(home_dir + params.reference.trim().substring(1)) : file(params.reference.trim())) : file("${projectDir}/.placeholder_ref")
 
     if (params.reference_only && params.reference) {
         REF_ASSEMBLE(ch_for_assemble, ref_file)
