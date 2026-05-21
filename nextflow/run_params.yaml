@@ -1,6 +1,6 @@
 # Virall Nextflow run configuration
 # Copy this file, fill in your paths and options, then run:
-#   nextflow run nextflow/main.nf -params-file run_params.yaml -profile docker (or -profile singularity)
+#   nextflow run nextflow/main.nf -params-file nextflow/run_params.yaml -profile docker (or -profile singularity)
 # Optional: -resume to continue from last successful step
 
 # -----------------------------------------------------------------------------
@@ -12,7 +12,7 @@
 samples: "nextflow/samples.csv"
 
 # Output directory for all results
-outdir: "./results"
+outdir: "output/dir/location"
 
 # -----------------------------------------------------------------------------
 # Databases (required for full pipeline; or set env VIRALL_DATABASE_DIR)
@@ -54,9 +54,9 @@ reference: null
 # Default (false): full de novo assembly + optional reference-guided output on the side
 reference_only: false
 
-# Optional host genome FASTA to filter out host reads (like Virall --filter)
+# Optional host genome FASTA to filter out host reads. Only accepts one fasta file - you can put multiple genoems in the same file
 # When set, reads mapping to the host are removed before assembly (minimap2 + samtools).
-host_genome: null
+host_genome: "genomes/to/filter.fasta"
 
 # -----------------------------------------------------------------------------
 # Preprocessing
