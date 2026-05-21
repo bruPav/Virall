@@ -1524,6 +1524,12 @@ workflow {
 
     Channel
         .fromPath(params.samples, checkIfExists: true)
+        .map { file ->
+            def raw = file.getText('UTF-8')
+            if (raw.startsWith('\uFEFF'))
+                raw = raw.substring(1)
+            raw
+        }
         .splitCsv(header: true, strip: true)
         .map { row ->
             // Map short-read columns to unified format with tech detection
