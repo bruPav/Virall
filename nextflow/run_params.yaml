@@ -67,25 +67,13 @@ quality_phred_long: 7       # long reads (fastplong)
 min_read_len: 50            # short reads (fastp)
 min_read_len_long: 1000     # long reads (fastplong)
 
-# DEPRECATED: long_read_tech is now auto-detected per sample from samples.csv tech-specific columns
-# For backward compatibility with old sample sheets, this provides a fallback default
-# Use nanopore_reads or pacbio_reads columns in samples.csv instead
-# long_read_tech: "nanopore"
-
-# Flye assembler tuning (used in hybrid and long_only strategies)
-# --meta is always enabled (metagenome mode for uneven coverage)
 # Minimum overlap between long reads for Flye assembly graph construction
-# Lower values help recover shorter viral genomes; increase for less fragmented assemblies
+# Lower values help recover shorter viral genomes; increase for less fragmented assemblies. 1000 is minimum - otherwise it crashes
 flye_min_overlap: 1000
 # Expected genome size hint for Flye (e.g. "10k", "30k", "150k")
 # Leave null to let Flye auto-estimate (recommended for diverse metagenomes)
 # Set a value if targeting a specific virus size range (e.g. "30k" for coronaviruses)
 flye_genome_size: null
-
-# DEPRECATED: iontorrent is now auto-detected per sample from samples.csv tech-specific columns  
-# For backward compatibility with old sample sheets, this provides a fallback default
-# Use illumina_r1/illumina_r2 or iontorrent_r1/iontorrent_r2 columns in samples.csv instead
-# iontorrent: false
 
 # Set true to use metaviralSPAdes (--metaviral) instead of regular SPAdes
 # Note: If a reference genome is also provided, --trusted-contigs takes priority
