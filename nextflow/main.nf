@@ -261,22 +261,132 @@ process HOST_FILTER {
 }
 
 // ---------------------------------------------------------------------------
-// ASSEMBLE – SPAdes (short/hybrid) and/or Flye (long)
+// ASSEMBLE_SHORT – SPAdes for short/single-end reads only
 // ---------------------------------------------------------------------------
-process ASSEMBLE {
+process ASSEMBLE_SHORT {
     tag { sample_id }
     label "assemble"
     publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
     publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
 
     input:
-    tuple val(sample_id),
-          path(r1),
-          path(r2),
-          path(single),
-          path(long),
-          val(short_tech),
-          val(long_tech)
+    tuple val(sample_id), path(r1), path(r2), path(single), val(short_tech)
+    path(reference_file)
+
+    output:
+    tuple val(sample_id), path("contigs"), path("scaffolds"), emit: assembled
+
+    script:
+    def mem = task.memory ? task.memory.toGiga().toString() : params.memory.replaceAll(/[Gg]/, '')
+    def ion = (short_tech == "iontorrent") ? '--iontorrent' : ''
+    def has_ref = reference_file.name != '.placeholder_ref'
+    def ref_fasta = has_ref ? "reference.fasta" : ''
+    def ref = has_ref ? "--trusted-contigs ${ref_fasta}" : ''
+    def rna = (params.rna_mode && !has_ref) ? '--rnaviral' : ''
+    def metaviral = (params.metaviral_mode && !has_ref) ? '--metaviral' : ''
+    """
+    source ${projectDir}/bin/assembly_utils.sh
+
+    if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
+      ln -sf "${reference_file}" "${ref_fasta}"
+    fi
+    if [ -n "${ref}" ]; then
+      echo "NOTE: Reference genome provided — using --trusted-contigs for reference-guided assembly."
+      if [ "${params.rna_mode}" = "true" ] || [ "${params.metaviral_mode}" = "true" ]; then
+        echo "      Skipping --rnaviral/--metaviral (incompatible with --trusted-contigs)."
+      fi
+    fi
+
+    HAS_SHORT=\$( [ -s "${r1}" ] && [ -s "${r2}" ] && echo 1 || echo 0 )
+    HAS_SINGLE=\$( [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ] && echo 1 || echo 0 )
+
+    if [ "\$HAS_SHORT" = "0" ] && [ "\$HAS_SINGLE" = "0" ]; then
+      echo "ASSEMBLE_SHORT: no short/single reads for ${sample_id}"
+      touch contigs scaffolds
+    else
+      SPADES_OPTS="-o assembly_dir/spades -t ${task.cpus} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
+      [ -s "${r1}" ] && SPADES_OPTS="\$SPADES_OPTS -1 ${r1} -2 ${r2}"
+      [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ] && SPADES_OPTS="\$SPADES_OPTS -s ${single}"
+      spades.py \$SPADES_OPTS
+      check_spades_coverage "assembly_dir/spades/spades.log" "${sample_id}"
+      copy_spades_outputs "assembly_dir/spades"
+    fi
+    """
+}
+
+// ---------------------------------------------------------------------------
+// ASSEMBLE_LONG – Flye for long reads only
+// ---------------------------------------------------------------------------
+process ASSEMBLE_LONG {
+    tag { sample_id }
+    label "assemble"
+    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
+    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
+
+    input:
+    tuple val(sample_id), path(long), val(long_tech)
+    path(reference_file)
+
+    output:
+    tuple val(sample_id), path("contigs"), path("scaffolds"), emit: assembled
+    path("contigs_ref_guided.fasta"), optional: true
+
+    script:
+    def has_ref = reference_file.name != '.placeholder_ref'
+    def ref_fasta = has_ref ? "reference.fasta" : ''
+    """
+    source ${projectDir}/bin/assembly_utils.sh
+
+    if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
+      ln -sf "${reference_file}" "${ref_fasta}"
+    fi
+
+    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
+      FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
+      [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
+
+      if [ "${long_tech}" = "pacbio" ]; then
+        FLYE_INPUT_FLAG="--pacbio-raw"
+      else
+        FLYE_INPUT_FLAG="--nano-raw"
+      fi
+
+      flye \$FLYE_INPUT_FLAG ${long} --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
+      check_flye_coverage "assembly_dir/flye/flye.log" "${sample_id}"
+      cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
+
+      # Polish Nanopore assemblies with Medaka
+      if [ "${long_tech}" = "nanopore" ] && [ -s contigs ]; then
+        echo "Polishing Nanopore assembly with Medaka..."
+        medaka_consensus -i ${long} -d contigs -o assembly_dir/medaka -t ${task.cpus} \
+          && cp assembly_dir/medaka/consensus.fasta contigs \
+          || echo "WARNING: Medaka polishing failed, using unpolished Flye assembly"
+      fi
+
+      # Reference-guided consensus
+      if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
+        run_ref_guided_consensus "${long}" "${ref_fasta}" "${long_tech}" "${task.cpus}" "contigs_ref_guided.fasta" "assembly_dir"
+      fi
+
+      cp contigs scaffolds 2>/dev/null || true
+    else
+      echo "ASSEMBLE_LONG: no long reads for ${sample_id}"
+      touch contigs scaffolds
+    fi
+    """
+}
+
+// ---------------------------------------------------------------------------
+// ASSEMBLE_HYBRID – Flye + short-read polishers
+// ---------------------------------------------------------------------------
+process ASSEMBLE_HYBRID {
+    tag { sample_id }
+    label "assemble"
+    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
+    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
+
+    input:
+    tuple val(sample_id), path(r1), path(r2), path(single), path(long), val(short_tech), val(long_tech)
     path(reference_file)
 
     output:
@@ -286,287 +396,110 @@ process ASSEMBLE {
     script:
     def mem = task.memory ? task.memory.toGiga().toString() : params.memory.replaceAll(/[Gg]/, '')
     def ion = (short_tech == "iontorrent") ? '--iontorrent' : ''
-    // --trusted-contigs is incompatible with --metaviral and --rnaviral; reference takes priority
     def has_ref = reference_file.name != '.placeholder_ref'
-    // SPAdes only accepts .fa/.fasta extensions for --trusted-contigs; symlink if needed
     def ref_fasta = has_ref ? "reference.fasta" : ''
     def ref = has_ref ? "--trusted-contigs ${ref_fasta}" : ''
     def rna = (params.rna_mode && !has_ref) ? '--rnaviral' : ''
     def metaviral = (params.metaviral_mode && !has_ref) ? '--metaviral' : ''
-    def minimap2_lr_preset = (long_tech == "pacbio") ? "map-pb" : "map-ont"
     """
-    mkdir -p assembly_dir preprocess_dir
+    source ${projectDir}/bin/assembly_utils.sh
+    mkdir -p assembly_dir
+
     if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
       ln -sf "${reference_file}" "${ref_fasta}"
     fi
-
     if [ -n "${ref}" ]; then
       echo "NOTE: Reference genome provided — using --trusted-contigs for reference-guided assembly."
       if [ "${params.rna_mode}" = "true" ] || [ "${params.metaviral_mode}" = "true" ]; then
         echo "      Skipping --rnaviral/--metaviral (incompatible with --trusted-contigs)."
       fi
     fi
-    
-    cp "${r1}" preprocess_dir/trimmed_R1.fastq.gz 2>/dev/null || true
-    cp "${r2}" preprocess_dir/trimmed_R2.fastq.gz 2>/dev/null || true
-    cp "${single}" preprocess_dir/trimmed_single.fastq.gz 2>/dev/null || true
-    cp "${long}" preprocess_dir/trimmed_long.fastq.gz 2>/dev/null || true
 
-    # Detect what inputs are present
-    HAS_SHORT=\$( [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ] && echo 1 || echo 0 )
-    HAS_SINGLE=\$( [ -s preprocess_dir/trimmed_single.fastq.gz ] && echo 1 || echo 0 )
-    HAS_LONG=\$( [ -s preprocess_dir/trimmed_long.fastq.gz ] && echo 1 || echo 0 )
+    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
+      echo "Hybrid assembly: Flye --meta → Medaka (Nanopore only) → Polypolish → Pypolca"
+      FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
+      [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
 
-    if [ "\$HAS_SHORT" = "0" ] && [ "\$HAS_SINGLE" = "0" ] && [ "\$HAS_LONG" = "0" ]; then
-      echo "ASSEMBLE: no reads remaining after preprocessing/host filtering for ${sample_id} – all reads may be host. Producing empty assembly."
-      touch contigs scaffolds
-    else
-      # Determine strategy: auto-detect from inputs or use explicit setting
-      USER_STRATEGY="${params.assembly_strategy}"
-      if [ "\$USER_STRATEGY" = "auto" ] || [ -z "\$USER_STRATEGY" ]; then
-        # Auto-detect: short/single only -> short_only; long only -> long_only; both -> hybrid
-        if [ "\$HAS_LONG" = "1" ] && [ "\$HAS_SHORT" = "0" ] && [ "\$HAS_SINGLE" = "0" ]; then
-          STRATEGY="long_only"
-        elif [ "\$HAS_LONG" = "0" ]; then
-          STRATEGY="short_only"
-        else
-          STRATEGY="hybrid"
-        fi
-        echo "Auto-detected assembly strategy: \$STRATEGY (short=\$HAS_SHORT, single=\$HAS_SINGLE, long=\$HAS_LONG)"
+      if [ "${long_tech}" = "pacbio" ]; then
+        FLYE_INPUT_FLAG="--pacbio-raw"
       else
-        STRATEGY="\$USER_STRATEGY"
-        echo "Using user-specified assembly strategy: \$STRATEGY"
+        FLYE_INPUT_FLAG="--nano-raw"
       fi
 
-    # Determine long-read flags based on technology (nanopore vs pacbio)
-    LONG_READ_TECH="${long_tech}"
-    if [ "\$LONG_READ_TECH" = "pacbio" ]; then
-      SPADES_LONG_FLAG="--pacbio"
-      FLYE_INPUT_FLAG="--pacbio-raw"
+      flye \$FLYE_INPUT_FLAG ${long} --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
+      check_flye_coverage "assembly_dir/flye/flye.log" "${sample_id}"
+      cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
+
+      # LR polishing: Medaka fixes systematic Nanopore errors (skip for PacBio)
+      if [ "${long_tech}" = "nanopore" ] && [ -s contigs ]; then
+        echo "Polishing Nanopore assembly with Medaka..."
+        medaka_consensus -i ${long} -d contigs -o assembly_dir/medaka -t ${task.cpus} \
+          && cp assembly_dir/medaka/consensus.fasta contigs \
+          || echo "WARNING: Medaka polishing failed, continuing with unpolished assembly"
+      fi
+
+      HAS_SHORT=\$( [ -s "${r1}" ] && [ -s "${r2}" ] && echo 1 || echo 0 )
+      HAS_SINGLE=\$( [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ] && echo 1 || echo 0 )
+
+      # SR polishing: Polypolish
+      if [ -s contigs ] && ([ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]); then
+        if command -v polypolish &>/dev/null; then
+          echo "Polishing assembly with short reads (Polypolish)..."
+          bwa index contigs
+          if [ "\$HAS_SHORT" = "1" ]; then
+            bwa mem -t ${task.cpus} -a contigs ${r1} > assembly_dir/alignments_1.sam
+            bwa mem -t ${task.cpus} -a contigs ${r2} > assembly_dir/alignments_2.sam
+            polypolish polish contigs assembly_dir/alignments_1.sam assembly_dir/alignments_2.sam > assembly_dir/polished.fasta \
+              && cp assembly_dir/polished.fasta contigs \
+              || echo "WARNING: Polypolish failed, using previous assembly"
+            rm -f assembly_dir/alignments_1.sam assembly_dir/alignments_2.sam
+          elif [ "\$HAS_SINGLE" = "1" ]; then
+            bwa mem -t ${task.cpus} -a contigs ${single} > assembly_dir/alignments.sam
+            polypolish polish contigs assembly_dir/alignments.sam > assembly_dir/polished.fasta \
+              && cp assembly_dir/polished.fasta contigs \
+              || echo "WARNING: Polypolish failed, using previous assembly"
+            rm -f assembly_dir/alignments.sam
+          fi
+        else
+          echo "WARNING: Polypolish not found – skipping. Install with: conda install -c bioconda polypolish"
+        fi
+      fi
+
+      # Final polish: Pypolca
+      if [ -s contigs ] && [ "\$HAS_SHORT" = "1" ]; then
+        if command -v pypolca &>/dev/null; then
+          echo "Final polishing with Pypolca..."
+          pypolca run -a contigs \
+            -1 ${r1} \
+            -2 ${r2} \
+            -t ${task.cpus} --careful \
+            -o assembly_dir/pypolca 2>&1 \
+            && { PYPOLCA_OUT=\$(ls assembly_dir/pypolca/*corrected*.fasta 2>/dev/null | head -1); \
+                 [ -s "\$PYPOLCA_OUT" ] && cp "\$PYPOLCA_OUT" contigs; } \
+            || echo "WARNING: Pypolca failed, using Polypolish-polished assembly"
+        else
+          echo "WARNING: Pypolca not found – skipping final polish. Install with: pip install pypolca"
+        fi
+      fi
+
+      # Reference-guided consensus
+      if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
+        run_ref_guided_consensus "${long}" "${ref_fasta}" "${long_tech}" "${task.cpus}" "contigs_ref_guided.fasta" "assembly_dir"
+      fi
+
+      cp contigs scaffolds 2>/dev/null || true
     else
-      SPADES_LONG_FLAG="--nanopore"
-      FLYE_INPUT_FLAG="--nano-raw"
-    fi
-
-      # Run assembler(s) based on strategy
-      if [ "\$STRATEGY" = "short_only" ]; then
-        if [ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]; then
-          SPADES_OPTS="-o assembly_dir/spades -t ${task.cpus} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
-          [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
-          [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
-          spades.py \$SPADES_OPTS
-           # --- Coverage gate: warn if SPAdes reports low depth ---
-           SPADES_COV=""
-           if [ -f assembly_dir/spades/spades.log ]; then
-             SPADES_COV=\$(grep -a "Average coverage =" assembly_dir/spades/spades.log | tail -1 | sed 's/.*Average coverage = //' | awk '{print \$1}' | tr -d ',')
-           fi
-           # Fallback: metaviralSPAdes encodes coverage in contig headers
-           if [ -z "\$SPADES_COV" ] || [ "\$SPADES_COV" = "0" ]; then
-             if [ -f contigs ] && [ -s contigs ]; then
-               SPADES_COV=\$(grep "^>" contigs | grep -oP 'cov_[0-9.]+' | sed 's/cov_//' | awk '{sum+=\$1; n++} END {if(n>0) printf "%.1f", sum/n}')
-             fi
-           fi
-           if [ -n "\$SPADES_COV" ]; then
-             COV_OK=\$(echo "\$SPADES_COV >= 10" | bc -l 2>/dev/null || echo 0)
-             if [ "\$COV_OK" = "0" ]; then
-               echo "========================================"
-               echo "  WARNING: Low SPAdes coverage (\${SPADES_COV}x)"
-               echo "  Coverage <10x may yield fragmented assemblies"
-               echo "  and unreliable abundance estimates."
-               echo "========================================"
-             fi
-           fi
-           # --- End coverage gate ---
-          cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
-          cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
-        else
-          echo "Warning: strategy=short_only but no short/single reads available"
-        fi
+      echo "Warning: strategy=hybrid but no long reads available, falling back to short-read assembly"
+      if [ -s "${r1}" ] || [ -s "${single}" ]; then
+        SPADES_OPTS="-o assembly_dir/spades -t ${task.cpus} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
+        [ -s "${r1}" ] && SPADES_OPTS="\$SPADES_OPTS -1 ${r1} -2 ${r2}"
+        [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ] && SPADES_OPTS="\$SPADES_OPTS -s ${single}"
+        spades.py \$SPADES_OPTS
+        check_spades_coverage "assembly_dir/spades/spades.log" "${sample_id}"
+        copy_spades_outputs "assembly_dir/spades"
+      else
+        touch contigs scaffolds
       fi
-
-      if [ "\$STRATEGY" = "hybrid" ]; then
-        if [ "\$HAS_LONG" = "1" ]; then
-          echo "Hybrid assembly: Flye --meta → Medaka (Nanopore only) → Polypolish → Pypolca"
-          FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
-          [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
-          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
-          # --- Coverage gate: warn if Flye reports low depth ---
-          if [ -f assembly_dir/flye/flye.log ]; then
-            FLYE_COV=\$(grep -a "Overlap-based coverage:" assembly_dir/flye/flye.log | grep -oP '\\d+' | tail -1)
-            if [ -n "\$FLYE_COV" ] && [ "\$FLYE_COV" -gt 0 ] 2>/dev/null && [ "\$FLYE_COV" -lt 10 ] 2>/dev/null; then
-              echo "========================================"
-              echo "  WARNING: Low Flye coverage (\${FLYE_COV}x)"
-              echo "  Coverage <10x may yield fragmented assemblies"
-              echo "  and unreliable abundance estimates."
-              echo "========================================"
-            fi
-          fi
-          # --- End coverage gate ---
-          cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
-
-          # LR polishing: Medaka fixes systematic Nanopore errors (skip for PacBio)
-          if [ "\$LONG_READ_TECH" = "nanopore" ] && [ -s contigs ]; then
-            echo "Polishing Nanopore assembly with Medaka..."
-            medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz -d contigs -o assembly_dir/medaka -t ${task.cpus} \
-              && cp assembly_dir/medaka/consensus.fasta contigs \
-              || echo "WARNING: Medaka polishing failed, continuing with unpolished assembly"
-          fi
-
-          # SR polishing: Polypolish (repeat-aware, uses all BWA alignments)
-          if [ -s contigs ] && ([ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]); then
-            if command -v polypolish &>/dev/null; then
-              echo "Polishing assembly with short reads (Polypolish)..."
-              bwa index contigs
-              if [ "\$HAS_SHORT" = "1" ]; then
-                bwa mem -t ${task.cpus} -a contigs preprocess_dir/trimmed_R1.fastq.gz > assembly_dir/alignments_1.sam
-                bwa mem -t ${task.cpus} -a contigs preprocess_dir/trimmed_R2.fastq.gz > assembly_dir/alignments_2.sam
-                polypolish polish contigs assembly_dir/alignments_1.sam assembly_dir/alignments_2.sam > assembly_dir/polished.fasta \
-                  && cp assembly_dir/polished.fasta contigs \
-                  || echo "WARNING: Polypolish failed, using previous assembly"
-                rm -f assembly_dir/alignments_1.sam assembly_dir/alignments_2.sam
-              elif [ "\$HAS_SINGLE" = "1" ]; then
-                bwa mem -t ${task.cpus} -a contigs preprocess_dir/trimmed_single.fastq.gz > assembly_dir/alignments.sam
-                polypolish polish contigs assembly_dir/alignments.sam > assembly_dir/polished.fasta \
-                  && cp assembly_dir/polished.fasta contigs \
-                  || echo "WARNING: Polypolish failed, using previous assembly"
-                rm -f assembly_dir/alignments.sam
-              fi
-            else
-              echo "WARNING: Polypolish not found – skipping. Install with: conda install -c bioconda polypolish"
-            fi
-          fi
-
-          # Final polish: Pypolca (k-mer-based cleanup of residual SNPs/indels)
-          if [ -s contigs ] && [ "\$HAS_SHORT" = "1" ]; then
-            if command -v pypolca &>/dev/null; then
-              echo "Final polishing with Pypolca..."
-              pypolca run -a contigs \
-                -1 preprocess_dir/trimmed_R1.fastq.gz \
-                -2 preprocess_dir/trimmed_R2.fastq.gz \
-                -t ${task.cpus} --careful \
-                -o assembly_dir/pypolca 2>&1 \
-                && { PYPOLCA_OUT=\$(ls assembly_dir/pypolca/*corrected*.fasta 2>/dev/null | head -1); \
-                     [ -s "\$PYPOLCA_OUT" ] && cp "\$PYPOLCA_OUT" contigs; } \
-                || echo "WARNING: Pypolca failed, using Polypolish-polished assembly"
-            else
-              echo "WARNING: Pypolca not found – skipping final polish. Install with: pip install pypolca"
-            fi
-          fi
-
-          # Reference-guided consensus from long reads (separate output, not merged into de novo contigs)
-          if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
-            echo "Reference-guided long-read consensus assembly..."
-            minimap2 -t ${task.cpus} -ax ${minimap2_lr_preset} ${ref_fasta} \
-              preprocess_dir/trimmed_long.fastq.gz 2>/dev/null | \
-              samtools sort -@ ${task.cpus} -o assembly_dir/ref_aligned.bam -
-            samtools index assembly_dir/ref_aligned.bam
-
-            if [ "\$LONG_READ_TECH" = "nanopore" ]; then
-              medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz \
-                -d ${ref_fasta} -o assembly_dir/ref_medaka -t ${task.cpus} \
-                && cp assembly_dir/ref_medaka/consensus.fasta assembly_dir/ref_consensus.fasta \
-                || samtools consensus assembly_dir/ref_aligned.bam \
-                     -o assembly_dir/ref_consensus.fasta --show-ins no -a
-            else
-              samtools consensus assembly_dir/ref_aligned.bam \
-                -o assembly_dir/ref_consensus.fasta --show-ins no -a
-            fi
-
-            cp assembly_dir/ref_consensus.fasta contigs_ref_guided.fasta 2>/dev/null || true
-          fi
-
-          cp contigs scaffolds 2>/dev/null || true
-        else
-          echo "Warning: strategy=hybrid but no long reads available, falling back to short-read assembly"
-          if [ "\$HAS_SHORT" = "1" ] || [ "\$HAS_SINGLE" = "1" ]; then
-            SPADES_OPTS="-o assembly_dir/spades -t ${task.cpus} -m ${mem} --only-assembler ${rna} ${ion} ${metaviral} ${ref}"
-            [ -s preprocess_dir/trimmed_R1.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -1 preprocess_dir/trimmed_R1.fastq.gz -2 preprocess_dir/trimmed_R2.fastq.gz"
-            [ -s preprocess_dir/trimmed_single.fastq.gz ] && SPADES_OPTS="\$SPADES_OPTS -s preprocess_dir/trimmed_single.fastq.gz"
-            spades.py \$SPADES_OPTS
-            # --- Coverage gate: warn if SPAdes reports low depth ---
-            SPADES_COV=""
-            if [ -f assembly_dir/spades/spades.log ]; then
-              SPADES_COV=\$(grep -a "Average coverage =" assembly_dir/spades/spades.log | tail -1 | sed 's/.*Average coverage = //' | awk '{print \$1}' | tr -d ',')
-            fi
-            # Fallback: metaviralSPAdes encodes coverage in contig headers
-            if [ -z "\$SPADES_COV" ] || [ "\$SPADES_COV" = "0" ]; then
-              if [ -f contigs ] && [ -s contigs ]; then
-                SPADES_COV=\$(grep "^>" contigs | grep -oP 'cov_[0-9.]+' | sed 's/cov_//' | awk '{sum+=\$1; n++} END {if(n>0) printf "%.1f", sum/n}')
-              fi
-            fi
-            if [ -n "\$SPADES_COV" ]; then
-              COV_OK=\$(echo "\$SPADES_COV >= 10" | bc -l 2>/dev/null || echo 0)
-              if [ "\$COV_OK" = "0" ]; then
-                echo "========================================"
-                echo "  WARNING: Low SPAdes coverage (\${SPADES_COV}x)"
-                echo "  Coverage <10x may yield fragmented assemblies"
-                echo "  and unreliable abundance estimates."
-                echo "========================================"
-              fi
-            fi
-            # --- End coverage gate ---
-            cp assembly_dir/spades/contigs.fasta contigs 2>/dev/null || cp assembly_dir/spades/transcripts.fasta contigs 2>/dev/null || touch contigs
-            cp assembly_dir/spades/scaffolds.fasta scaffolds 2>/dev/null || cp assembly_dir/spades/hard_filtered_transcripts.fasta scaffolds 2>/dev/null || cp contigs scaffolds
-          fi
-        fi
-      fi
-
-      if [ "\$STRATEGY" = "long_only" ]; then
-        if [ "\$HAS_LONG" = "1" ]; then
-          FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
-          [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
-          flye \$FLYE_INPUT_FLAG preprocess_dir/trimmed_long.fastq.gz --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
-          # --- Coverage gate: warn if Flye reports low depth ---
-          if [ -f assembly_dir/flye/flye.log ]; then
-            FLYE_COV=\$(grep -a "Overlap-based coverage:" assembly_dir/flye/flye.log | grep -oP '\\d+' | tail -1)
-            if [ -n "\$FLYE_COV" ] && [ "\$FLYE_COV" -gt 0 ] 2>/dev/null && [ "\$FLYE_COV" -lt 10 ] 2>/dev/null; then
-              echo "========================================"
-              echo "  WARNING: Low Flye coverage (\${FLYE_COV}x)"
-              echo "  Coverage <10x may yield fragmented assemblies"
-              echo "  and unreliable abundance estimates."
-              echo "========================================"
-            fi
-          fi
-          # --- End coverage gate ---
-          cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
-
-          # Polish Nanopore assemblies with Medaka (PacBio HiFi is already high-accuracy)
-          if [ "\$LONG_READ_TECH" = "nanopore" ] && [ -s contigs ]; then
-            echo "Polishing Nanopore assembly with Medaka..."
-            medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz -d contigs -o assembly_dir/medaka -t ${task.cpus} \
-              && cp assembly_dir/medaka/consensus.fasta contigs \
-              || echo "WARNING: Medaka polishing failed, using unpolished Flye assembly"
-          fi
-
-          # Reference-guided consensus from long reads (separate output, not merged into de novo contigs)
-          if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
-            echo "Reference-guided long-read consensus assembly..."
-            minimap2 -t ${task.cpus} -ax ${minimap2_lr_preset} ${ref_fasta} \
-              preprocess_dir/trimmed_long.fastq.gz 2>/dev/null | \
-              samtools sort -@ ${task.cpus} -o assembly_dir/ref_aligned.bam -
-            samtools index assembly_dir/ref_aligned.bam
-
-            if [ "\$LONG_READ_TECH" = "nanopore" ]; then
-              medaka_consensus -i preprocess_dir/trimmed_long.fastq.gz \
-                -d ${ref_fasta} -o assembly_dir/ref_medaka -t ${task.cpus} \
-                && cp assembly_dir/ref_medaka/consensus.fasta assembly_dir/ref_consensus.fasta \
-                || samtools consensus assembly_dir/ref_aligned.bam \
-                     -o assembly_dir/ref_consensus.fasta --show-ins no -a
-            else
-              samtools consensus assembly_dir/ref_aligned.bam \
-                -o assembly_dir/ref_consensus.fasta --show-ins no -a
-            fi
-
-            cp assembly_dir/ref_consensus.fasta contigs_ref_guided.fasta 2>/dev/null || true
-          fi
-
-          cp contigs scaffolds 2>/dev/null || true
-        else
-          echo "Warning: strategy=long_only but no long reads available"
-        fi
-      fi
-
-      [ -f contigs ] || touch contigs scaffolds
     fi
     """
 }
@@ -1656,9 +1589,59 @@ workflow {
     if (params.reference_only && params.reference) {
         REF_ASSEMBLE(ch_filtered_reads.join(ch_meta, remainder: true), ref_file)
         ch_assembly = REF_ASSEMBLE.out.assembled
+    } else if (params.assembly_strategy == "short_only") {
+        ch_short_input = ch_filtered_reads.join(ch_meta, remainder: true)
+            .map { [it[0], it[1], it[2], it[3], it[5]] }
+        ASSEMBLE_SHORT(ch_short_input, ref_file)
+        ch_assembly = ASSEMBLE_SHORT.out.assembled
+    } else if (params.assembly_strategy == "long_only") {
+        ch_long_input = ch_filtered_reads.join(ch_meta, remainder: true)
+            .map { [it[0], it[4], it[6]] }
+        ASSEMBLE_LONG(ch_long_input, ref_file)
+        ch_assembly = ASSEMBLE_LONG.out.assembled
+    } else if (params.assembly_strategy == "hybrid") {
+        ASSEMBLE_HYBRID(ch_filtered_reads.join(ch_meta, remainder: true), ref_file)
+        ch_assembly = ASSEMBLE_HYBRID.out.assembled
     } else {
-        ASSEMBLE(ch_filtered_reads.join(ch_meta, remainder: true), ref_file)
-        ch_assembly = ASSEMBLE.out.assembled
+        // auto-detect per sample based on available reads
+        ch_reads_meta = ch_filtered_reads.join(ch_meta, remainder: true)
+
+        ch_auto_short = ch_reads_meta.filter {
+            def has_pe   = it[1].size() > 0 && it[2].size() > 0
+            def has_se   = it[3].size() > 0
+            def has_long = it[4].size() > 0
+            (has_pe || has_se) && !has_long
+        }.map { [it[0], it[1], it[2], it[3], it[5]] }
+
+        ch_auto_long = ch_reads_meta.filter {
+            def has_pe   = it[1].size() > 0 && it[2].size() > 0
+            def has_se   = it[3].size() > 0
+            def has_long = it[4].size() > 0
+            !has_pe && !has_se && has_long
+        }.map { [it[0], it[4], it[6]] }
+
+        ch_auto_hybrid = ch_reads_meta.filter {
+            def has_pe   = it[1].size() > 0 && it[2].size() > 0
+            def has_se   = it[3].size() > 0
+            def has_long = it[4].size() > 0
+            (has_pe || has_se) && has_long
+        }
+
+        // Samples with no reads: route to short (produces empty assembly)
+        ch_auto_empty = ch_reads_meta.filter {
+            def has_pe   = it[1].size() > 0 && it[2].size() > 0
+            def has_se   = it[3].size() > 0
+            def has_long = it[4].size() > 0
+            !has_pe && !has_se && !has_long
+        }.map { [it[0], it[1], it[2], it[3], it[5]] }
+
+        ASSEMBLE_SHORT(ch_auto_short.mix(ch_auto_empty), ref_file)
+        ASSEMBLE_LONG(ch_auto_long, ref_file)
+        ASSEMBLE_HYBRID(ch_auto_hybrid, ref_file)
+
+        ch_assembly = ASSEMBLE_SHORT.out.assembled
+            .mix(ASSEMBLE_LONG.out.assembled)
+            .mix(ASSEMBLE_HYBRID.out.assembled)
     }
 
     // Optional reference check: when reference is set, map reads to reference and report detection
