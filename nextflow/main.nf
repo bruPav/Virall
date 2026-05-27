@@ -138,10 +138,10 @@ process PREPROCESS {
 
     input:
     tuple val(sample_id),
-          path(read1, stageAs: "input_r1/*"),
-          path(read2, stageAs: "input_r2/*"),
-          path(single, stageAs: "input_single/*"),
-          path(long_reads, stageAs: "input_long/*"),
+          path(read1),
+          path(read2),
+          path(single),
+          path(long_reads),
           val(short_tech),
           val(long_tech)
 
@@ -1531,16 +1531,14 @@ workflow {
 
     // Optional host filtering: when host_genome is set, filter out host reads
     if (params.host_genome) {
-        def hp = params.host_genome.trim()
-        if (hp.startsWith('~')) { hp = home_dir + hp.substring(1) }
-        def host_file = file(hp)
+        def host_file = file(resolvePath(params.host_genome))
         HOST_FILTER(ch_trimmed_reads.join(ch_meta, remainder: true), host_file)
         ch_filtered_reads = HOST_FILTER.out.reads
     } else {
         ch_filtered_reads = ch_trimmed_reads
     }
 
-    def ref_file = params.reference ? (params.reference.trim().startsWith('~') ? file(home_dir + params.reference.trim().substring(1)) : file(params.reference.trim())) : file("${projectDir}/.placeholder_ref")
+    def ref_file = params.reference ? file(resolvePath(params.reference)) : file("${projectDir}/.placeholder_ref")
 
     if (params.reference_only && params.reference) {
         REF_ASSEMBLE(ch_filtered_reads.join(ch_meta, remainder: true), ref_file)
