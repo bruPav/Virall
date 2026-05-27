@@ -126,14 +126,12 @@ process PREPROCESS {
     publishDir { "${params.outdir}/${sample_id}/00_preprocess" }, mode: "copy"
 
     input:
-    tuple val(sample_id), 
-          path(read1, stageAs: "input_r1/*"), 
-          path(read2, stageAs: "input_r2/*"), 
-          path(single, stageAs: "input_single/*"), 
-          path(long_reads, stageAs: "input_long/*"), 
-          path(sc_read1, stageAs: "input_sc_r1/*"), 
-          path(sc_read2, stageAs: "input_sc_r2/*"),
-          val(short_tech), 
+    tuple val(sample_id),
+          path(read1, stageAs: "input_r1/*"),
+          path(read2, stageAs: "input_r2/*"),
+          path(single, stageAs: "input_single/*"),
+          path(long_reads, stageAs: "input_long/*"),
+          val(short_tech),
           val(long_tech)
 
     output:
@@ -142,15 +140,15 @@ process PREPROCESS {
           path("preprocess_dir/trimmed_R2.fastq.gz"),
           path("preprocess_dir/trimmed_single.fastq.gz"),
           path("preprocess_dir/trimmed_long.fastq.gz"),
+          emit: reads
+    tuple val(sample_id),
           path("preprocess_dir/fastp_pe.html"),
           path("preprocess_dir/fastp_pe.json"),
           path("preprocess_dir/fastp_single.html"),
           path("preprocess_dir/fastp_single.json"),
           path("preprocess_dir/fastplong.html"),
           path("preprocess_dir/fastplong.json"),
-          val(short_tech),
-          val(long_tech),
-          emit: preprocessed
+          emit: qc
 
     script:
     def hasShort = (read1.name != ".placeholder_r1" && read1.size() > 0) || (single.name != ".placeholder_single" && single.size() > 0)
@@ -195,19 +193,13 @@ process HOST_FILTER {
 
     input:
     tuple val(sample_id),
-          path(trimmed_r1),
-          path(trimmed_r2),
-          path(trimmed_single),
-          path(trimmed_long),
-          path(qc_pe_html),
-          path(qc_pe_json),
-          path(qc_single_html),
-          path(qc_single_json),
-          path(qc_long_html),
-          path(qc_long_json),
+          path(r1),
+          path(r2),
+          path(single),
+          path(long),
           val(short_tech),
-          val(long_tech),
-          path(host_ref)
+          val(long_tech)
+    path(host_ref)
 
     output:
     tuple val(sample_id),
@@ -215,71 +207,57 @@ process HOST_FILTER {
           path("host_filter_dir/trimmed_R2.fastq.gz"),
           path("host_filter_dir/trimmed_single.fastq.gz"),
           path("host_filter_dir/trimmed_long.fastq.gz"),
-          path("host_filter_dir/fastp_pe.html"),
-          path("host_filter_dir/fastp_pe.json"),
-          path("host_filter_dir/fastp_single.html"),
-          path("host_filter_dir/fastp_single.json"),
-          path("host_filter_dir/fastplong.html"),
-          path("host_filter_dir/fastplong.json"),
-          val(short_tech),
-          val(long_tech),
-          emit: host_filtered
+          emit: reads
 
     script:
     """
     mkdir -p host_filter_dir
-    # Copy QC reports through
-    cp "${qc_pe_html}" host_filter_dir/fastp_pe.html 2>/dev/null || touch host_filter_dir/fastp_pe.html
-    cp "${qc_pe_json}" host_filter_dir/fastp_pe.json 2>/dev/null || touch host_filter_dir/fastp_pe.json
-    cp "${qc_single_html}" host_filter_dir/fastp_single.html 2>/dev/null || touch host_filter_dir/fastp_single.html
-    cp "${qc_single_json}" host_filter_dir/fastp_single.json 2>/dev/null || touch host_filter_dir/fastp_single.json
-    cp "${qc_long_html}" host_filter_dir/fastplong.html 2>/dev/null || touch host_filter_dir/fastplong.html
-    cp "${qc_long_json}" host_filter_dir/fastplong.json 2>/dev/null || touch host_filter_dir/fastplong.json
 
     # Paired-end: keep pairs where BOTH reads are unmapped (-f 12)
-    if [ -s "${trimmed_r1}" ] && [ -s "${trimmed_r2}" ] && [ "${trimmed_r1.name}" != ".placeholder_r1" ]; then
-      minimap2 -ax sr -t ${task.cpus} ${host_ref} ${trimmed_r1} ${trimmed_r2} 2>host_filter_dir/host_filter_pe.log | \\
+    if [ -s "${r1}" ] && [ -s "${r2}" ] && [ "${r1.name}" != ".placeholder_r1" ]; then
+      minimap2 -ax sr -t ${task.cpus} ${host_ref} ${r1} ${r2} 2>host_filter_dir/host_filter_pe.log | \
         samtools sort -n - 2>/dev/null | samtools fastq -f 12 -1 host_filter_dir/R1.fq -2 host_filter_dir/R2.fq - 2>/dev/null || true
       if [ -s host_filter_dir/R1.fq ]; then
         gzip -c host_filter_dir/R1.fq > host_filter_dir/trimmed_R1.fastq.gz
         gzip -c host_filter_dir/R2.fq > host_filter_dir/trimmed_R2.fastq.gz
       else
-        cp ${trimmed_r1} host_filter_dir/trimmed_R1.fastq.gz
-        cp ${trimmed_r2} host_filter_dir/trimmed_R2.fastq.gz
+        cp ${r1} host_filter_dir/trimmed_R1.fastq.gz
+        cp ${r2} host_filter_dir/trimmed_R2.fastq.gz
       fi
     else
-      cp ${trimmed_r1} host_filter_dir/trimmed_R1.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_R1.fastq.gz
-      cp ${trimmed_r2} host_filter_dir/trimmed_R2.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_R2.fastq.gz
+      cp ${r1} host_filter_dir/trimmed_R1.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_R1.fastq.gz
+      cp ${r2} host_filter_dir/trimmed_R2.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_R2.fastq.gz
     fi
 
     # Single-end short
-    if [ -s "${trimmed_single}" ] && [ "${trimmed_single.name}" != ".placeholder_single" ]; then
-      minimap2 -ax sr -t ${task.cpus} ${host_ref} ${trimmed_single} 2>host_filter_dir/host_filter_single.log | \\
+    if [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ]; then
+      minimap2 -ax sr -t ${task.cpus} ${host_ref} ${single} 2>host_filter_dir/host_filter_single.log | \
         samtools fastq -f 4 - > host_filter_dir/single.fq 2>/dev/null || true
       if [ -s host_filter_dir/single.fq ]; then
         gzip -c host_filter_dir/single.fq > host_filter_dir/trimmed_single.fastq.gz
       else
-        cp ${trimmed_single} host_filter_dir/trimmed_single.fastq.gz
+        cp ${single} host_filter_dir/trimmed_single.fastq.gz
       fi
     else
-      cp ${trimmed_single} host_filter_dir/trimmed_single.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_single.fastq.gz
+      cp ${single} host_filter_dir/trimmed_single.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_single.fastq.gz
     fi
 
     # Long reads (ONT or PacBio)
     MINIMAP2_LONG_PRESET=\$( [ "${long_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
-    if [ -s "${trimmed_long}" ] && [ "${trimmed_long.name}" != ".placeholder_long" ]; then
-      minimap2 -ax \$MINIMAP2_LONG_PRESET -t ${task.cpus} ${host_ref} ${trimmed_long} 2>host_filter_dir/host_filter_long.log | \\
+    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
+      minimap2 -ax \$MINIMAP2_LONG_PRESET -t ${task.cpus} ${host_ref} ${long} 2>host_filter_dir/host_filter_long.log | \
         samtools fastq -f 4 - > host_filter_dir/long.fq 2>/dev/null || true
       if [ -s host_filter_dir/long.fq ]; then
         gzip -c host_filter_dir/long.fq > host_filter_dir/trimmed_long.fastq.gz
       else
-        cp ${trimmed_long} host_filter_dir/trimmed_long.fastq.gz
+        cp ${long} host_filter_dir/trimmed_long.fastq.gz
       fi
     else
-      cp ${trimmed_long} host_filter_dir/trimmed_long.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_long.fastq.gz
+      cp ${long} host_filter_dir/trimmed_long.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_long.fastq.gz
     fi
     touch host_filter_dir/trimmed_R1.fastq.gz host_filter_dir/trimmed_R2.fastq.gz host_filter_dir/trimmed_single.fastq.gz host_filter_dir/trimmed_long.fastq.gz
     """
+
 }
 
 // ---------------------------------------------------------------------------
@@ -293,22 +271,16 @@ process ASSEMBLE {
 
     input:
     tuple val(sample_id),
-          path(trimmed_r1),
-          path(trimmed_r2),
-          path(trimmed_single),
-          path(trimmed_long),
-          path(qc_pe_html),
-          path(qc_pe_json),
-          path(qc_single_html),
-          path(qc_single_json),
-          path(qc_long_html),
-          path(qc_long_json),
+          path(r1),
+          path(r2),
+          path(single),
+          path(long),
           val(short_tech),
           val(long_tech)
     path(reference_file)
 
     output:
-    tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), val(short_tech), val(long_tech), emit: assembled
+    tuple val(sample_id), path("contigs"), path("scaffolds"), emit: assembled
     path("contigs_ref_guided.fasta"), optional: true
 
     script:
@@ -335,10 +307,10 @@ process ASSEMBLE {
       fi
     fi
     
-    cp "${trimmed_r1}" preprocess_dir/trimmed_R1.fastq.gz 2>/dev/null || true
-    cp "${trimmed_r2}" preprocess_dir/trimmed_R2.fastq.gz 2>/dev/null || true
-    cp "${trimmed_single}" preprocess_dir/trimmed_single.fastq.gz 2>/dev/null || true
-    cp "${trimmed_long}" preprocess_dir/trimmed_long.fastq.gz 2>/dev/null || true
+    cp "${r1}" preprocess_dir/trimmed_R1.fastq.gz 2>/dev/null || true
+    cp "${r2}" preprocess_dir/trimmed_R2.fastq.gz 2>/dev/null || true
+    cp "${single}" preprocess_dir/trimmed_single.fastq.gz 2>/dev/null || true
+    cp "${long}" preprocess_dir/trimmed_long.fastq.gz 2>/dev/null || true
 
     # Detect what inputs are present
     HAS_SHORT=\$( [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ] && echo 1 || echo 0 )
@@ -610,22 +582,16 @@ process REF_ASSEMBLE {
 
     input:
     tuple val(sample_id),
-          path(trimmed_r1),
-          path(trimmed_r2),
-          path(trimmed_single),
-          path(trimmed_long),
-          path(qc_pe_html),
-          path(qc_pe_json),
-          path(qc_single_html),
-          path(qc_single_json),
-          path(qc_long_html),
-          path(qc_long_json),
+          path(r1),
+          path(r2),
+          path(single),
+          path(long),
           val(short_tech),
           val(long_tech)
     path(reference_file)
 
     output:
-    tuple val(sample_id), path("contigs"), path("scaffolds"), path("preprocess_dir"), val(short_tech), val(long_tech), emit: assembled
+    tuple val(sample_id), path("contigs"), path("scaffolds"), emit: assembled
 
     script:
     def minimap2_lr_preset = (long_tech == "pacbio") ? "map-pb" : "map-ont"
@@ -634,10 +600,10 @@ process REF_ASSEMBLE {
 
     ln -sf "${reference_file}" reference.fasta
 
-    cp "${trimmed_r1}" preprocess_dir/trimmed_R1.fastq.gz 2>/dev/null || true
-    cp "${trimmed_r2}" preprocess_dir/trimmed_R2.fastq.gz 2>/dev/null || true
-    cp "${trimmed_single}" preprocess_dir/trimmed_single.fastq.gz 2>/dev/null || true
-    cp "${trimmed_long}" preprocess_dir/trimmed_long.fastq.gz 2>/dev/null || true
+    cp "${r1}" preprocess_dir/trimmed_R1.fastq.gz 2>/dev/null || true
+    cp "${r2}" preprocess_dir/trimmed_R2.fastq.gz 2>/dev/null || true
+    cp "${single}" preprocess_dir/trimmed_single.fastq.gz 2>/dev/null || true
+    cp "${long}" preprocess_dir/trimmed_long.fastq.gz 2>/dev/null || true
 
     HAS_SHORT=\$( [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ] && echo 1 || echo 0 )
     HAS_SINGLE=\$( [ -s preprocess_dir/trimmed_single.fastq.gz ] && echo 1 || echo 0 )
@@ -712,11 +678,11 @@ process KAIJU {
     publishDir { "${params.outdir}/${sample_id}/03_classifications" }, mode: "copy"
 
     input:
-    tuple val(sample_id), path(contigs), path(scaffolds), path(preprocess_dir), val(short_tech), val(long_tech)
+    tuple val(sample_id), path(contigs)
     val(kaiju_db)
 
     output:
-    tuple val(sample_id), path("kaiju_dir"), path(contigs), path(scaffolds), path(preprocess_dir), val(short_tech), val(long_tech), emit: kaiju_done
+    tuple val(sample_id), path("kaiju_dir"), emit: kaiju_done
 
     script:
     """
@@ -750,11 +716,11 @@ process FILTER_VIRAL {
     publishDir { "${params.outdir}/${sample_id}/02_viral_contigs" }, mode: "copy"
 
     input:
-    tuple val(sample_id), path(kaiju_dir), path(contigs), path(scaffolds), path(preprocess_dir), val(short_tech), val(long_tech)
+    tuple val(sample_id), path(kaiju_dir), path(contigs)
     path(extract_script)
 
     output:
-    tuple val(sample_id), path("viral_contigs.fasta"), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech), emit: viral
+    tuple val(sample_id), path("viral_contigs.fasta"), path(kaiju_dir), emit: viral
 
     script:
     """
@@ -779,10 +745,10 @@ process RENAME_CONTIGS {
     publishDir { "${params.outdir}/${sample_id}/02_viral_contigs" }, mode: "copy", pattern: "{viral_contigs.fasta,name_mapping.tsv}"
 
     input:
-    tuple val(sample_id), path("input_viral_contigs.fasta"), path("input_kaiju_dir"), path(preprocess_dir), val(short_tech), val(long_tech)
+    tuple val(sample_id), path("input_viral_contigs.fasta"), path("input_kaiju_dir")
 
     output:
-    tuple val(sample_id), path("viral_contigs.fasta"), path("kaiju_dir"), path(preprocess_dir), val(short_tech), val(long_tech), emit: renamed
+    tuple val(sample_id), path("viral_contigs.fasta"), path("kaiju_dir"), emit: renamed
 
     script:
     """
@@ -812,11 +778,11 @@ process VALIDATE {
     publishDir { "${params.outdir}/${sample_id}/04_quality_assessment" }, mode: "copy"
 
     input:
-    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
+    tuple val(sample_id), path(viral_contigs), path(kaiju_dir)
     val(checkv_db)
 
     output:
-    tuple val(sample_id), path("checkv_dir"), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), emit: validated
+    tuple val(sample_id), path("checkv_dir"), emit: validated
 
     script:
     """
@@ -862,11 +828,11 @@ process GENOMAD {
     publishDir { "${params.outdir}/${sample_id}/04_quality_assessment/genomad" }, mode: "copy"
 
     input:
-    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
+    tuple val(sample_id), path(viral_contigs), path(kaiju_dir)
     val(genomad_db)
 
     output:
-    tuple val(sample_id), path("genomad_out"), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), emit: genomad_done
+    tuple val(sample_id), path("genomad_out"), emit: genomad_done
 
     script:
     """
@@ -930,11 +896,11 @@ process MERGE_QUALITY {
     publishDir { "${params.outdir}/${sample_id}/04_quality_assessment" }, mode: "copy"
 
     input:
-    tuple val(sample_id), path(checkv_dir), path(genomad_dir), path(viral_contigs), path(kaiju_dir), path(preprocess_dir)
+    tuple val(sample_id), path(checkv_dir), path(genomad_dir), path(viral_contigs), path(kaiju_dir)
     path(merge_script)
 
     output:
-    tuple val(sample_id), path("merged_quality"), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), emit: merged
+    tuple val(sample_id), path("merged_quality"), emit: merged
 
     script:
     """
@@ -955,7 +921,7 @@ process ANNOTATE {
     publishDir { "${params.outdir}/${sample_id}/05_gene_predictions" }, mode: "copy"
 
     input:
-    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
+    tuple val(sample_id), path(viral_contigs), path(kaiju_dir)
     val(vog_db)
 
     output:
@@ -1036,7 +1002,7 @@ process QUANTIFY {
     publishDir { "${params.outdir}/${sample_id}/06_quantification" }, mode: "copy"
 
     input:
-    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(preprocess_dir), val(short_tech), val(long_tech)
+    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(r1), path(r2), path(single), path(long), val(long_tech)
 
     output:
     tuple val(sample_id), path("quant_dir"), emit: quantified
@@ -1052,18 +1018,18 @@ process QUANTIFY {
     else
       bwa index -p quant_dir/idx viral_contigs.fasta
       BAMS_TO_MERGE=""
-      if [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ]; then
-        bwa mem -t ${task.cpus} quant_dir/idx preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz | samtools sort -o quant_dir/mapped_pe.bam -
+      if [ -s "${r1}" ] && [ -s "${r2}" ] && [ "${r1.name}" != ".placeholder_r1" ]; then
+        bwa mem -t ${task.cpus} quant_dir/idx ${r1} ${r2} | samtools sort -o quant_dir/mapped_pe.bam -
         BAMS_TO_MERGE="\$BAMS_TO_MERGE quant_dir/mapped_pe.bam"
       fi
-      if [ -s preprocess_dir/trimmed_single.fastq.gz ]; then
-        bwa mem -t ${task.cpus} quant_dir/idx preprocess_dir/trimmed_single.fastq.gz | samtools sort -o quant_dir/mapped_single.bam -
+      if [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ]; then
+        bwa mem -t ${task.cpus} quant_dir/idx ${single} | samtools sort -o quant_dir/mapped_single.bam -
         BAMS_TO_MERGE="\$BAMS_TO_MERGE quant_dir/mapped_single.bam"
       fi
       HAS_SHORT=\$([ -n "\$BAMS_TO_MERGE" ] && echo "1" || echo "0")
-      if [ "\$HAS_SHORT" = "0" ] && [ -s preprocess_dir/trimmed_long.fastq.gz ]; then
+      if [ "\$HAS_SHORT" = "0" ] && [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
         MINIMAP2_LONG_PRESET=\$( [ "${long_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
-        minimap2 -t ${task.cpus} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta preprocess_dir/trimmed_long.fastq.gz | samtools sort -o quant_dir/mapped_long.bam -
+        minimap2 -t ${task.cpus} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta ${long} | samtools sort -o quant_dir/mapped_long.bam -
         BAMS_TO_MERGE="\$BAMS_TO_MERGE quant_dir/mapped_long.bam"
       fi
       BAM_COUNT=\$(echo \$BAMS_TO_MERGE | wc -w)
@@ -1101,16 +1067,10 @@ process REFERENCE_CHECK {
 
     input:
     tuple val(sample_id),
-          path(trimmed_r1),
-          path(trimmed_r2),
-          path(trimmed_single),
-          path(trimmed_long),
-          path(qc_pe_html),
-          path(qc_pe_json),
-          path(qc_single_html),
-          path(qc_single_json),
-          path(qc_long_html),
-          path(qc_long_json),
+          path(r1),
+          path(r2),
+          path(single),
+          path(long),
           val(short_tech),
           val(long_tech)
     path(reference)
@@ -1130,8 +1090,8 @@ process REFERENCE_CHECK {
     MAPPED_READS=0
     TOTAL_READS=0
 
-    if [ -s "${trimmed_r1}" ] && [ -s "${trimmed_r2}" ] && [ "${trimmed_r1.name}" != ".placeholder_r1" ]; then
-      bwa mem -t ${task.cpus} ref_check_dir/ref_idx ${trimmed_r1} ${trimmed_r2} 2>/dev/null | \\
+    if [ -s "${r1}" ] && [ -s "${r2}" ] && [ "${r1.name}" != ".placeholder_r1" ]; then
+      bwa mem -t ${task.cpus} ref_check_dir/ref_idx ${r1} ${r2} 2>/dev/null | \
         samtools sort -o ref_check_dir/mapped_pe.bam - 2>/dev/null
       samtools index ref_check_dir/mapped_pe.bam 2>/dev/null || true
       PE_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_pe.bam 2>/dev/null || echo 0)
@@ -1140,8 +1100,8 @@ process REFERENCE_CHECK {
       TOTAL_READS=\$((TOTAL_READS + PE_TOTAL))
     fi
 
-    if [ -s "${trimmed_single}" ] && [ "${trimmed_single.name}" != ".placeholder_single" ]; then
-      bwa mem -t ${task.cpus} ref_check_dir/ref_idx ${trimmed_single} 2>/dev/null | \\
+    if [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ]; then
+      bwa mem -t ${task.cpus} ref_check_dir/ref_idx ${single} 2>/dev/null | \
         samtools sort -o ref_check_dir/mapped_single.bam - 2>/dev/null
       samtools index ref_check_dir/mapped_single.bam 2>/dev/null || true
       SINGLE_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_single.bam 2>/dev/null || echo 0)
@@ -1150,8 +1110,28 @@ process REFERENCE_CHECK {
       TOTAL_READS=\$((TOTAL_READS + SINGLE_TOTAL))
     fi
 
-    if [ -s "${trimmed_long}" ] && [ "${trimmed_long.name}" != ".placeholder_long" ]; then
-      minimap2 -t ${task.cpus} -ax ${minimap2_preset} ${reference} ${trimmed_long} 2>/dev/null | \\
+    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
+      minimap2 -t ${task.cpus} -ax ${minimap2_preset} ${reference} ${long} 2>/dev/null | \
+        samtools sort -o ref_check_dir/mapped_long.bam - 2>/dev/null
+      samtools index ref_check_dir/mapped_long.bam 2>/dev/null || true
+      LONG_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_long.bam 2>/dev/null || echo 0)
+      LONG_TOTAL=\$(samtools view -c ref_check_dir/mapped_long.bam 2>/dev/null || echo 0)
+      MAPPED_READS=\$((MAPPED_READS + LONG_MAPPED))
+      TOTAL_READS=\$((TOTAL_READS + LONG_TOTAL))
+    fi
+
+    if [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ]; then
+      bwa mem -t ${task.cpus} ref_check_dir/ref_idx ${single} 2>/dev/null | \
+        samtools sort -o ref_check_dir/mapped_single.bam - 2>/dev/null
+      samtools index ref_check_dir/mapped_single.bam 2>/dev/null || true
+      SINGLE_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_single.bam 2>/dev/null || echo 0)
+      SINGLE_TOTAL=\$(samtools view -c ref_check_dir/mapped_single.bam 2>/dev/null || echo 0)
+      MAPPED_READS=\$((MAPPED_READS + SINGLE_MAPPED))
+      TOTAL_READS=\$((TOTAL_READS + SINGLE_TOTAL))
+    fi
+
+    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
+      minimap2 -t ${task.cpus} -ax ${minimap2_preset} ${reference} ${long} 2>/dev/null | \
         samtools sort -o ref_check_dir/mapped_long.bam - 2>/dev/null
       samtools index ref_check_dir/mapped_long.bam 2>/dev/null || true
       LONG_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_long.bam 2>/dev/null || echo 0)
@@ -1335,7 +1315,7 @@ process PLOT {
     publishDir { "${params.outdir}/${sample_id}/07_plots" }, mode: "copy"
 
     input:
-    tuple val(sample_id), path(quant_dir), path(quality_dir), path(viral_contigs), path(kaiju_dir), path(preprocess_dir)
+    tuple val(sample_id), path(quant_dir), path(merged_quality), path(viral_contigs), path(kaiju_dir)
     path(plot_script)
 
     output:
@@ -1355,7 +1335,7 @@ process PLOT {
         --quant-dir quant_dir \\
         --viral-contigs ${viral_fasta} \\
         --kaiju-dir kaiju_dir \\
-        --checkv-dir ${quality_dir} \\
+        --checkv-dir ${merged_quality} \\
         --min-breadth ${params.quant_min_breadth} \\
         --out-dir plots_dir
     fi
@@ -1626,73 +1606,71 @@ workflow {
     def ch_genomad_db = Channel.value(g_db)
     def ch_vog_db     = v_db ? Channel.value(v_db) : Channel.value(null)
 
+    // ---------------------------------------------------------------------------
+    // Split sample channel into logical groups
+    // ---------------------------------------------------------------------------
+    ch_meta      = ch_samples.map { [it[0], it[7], it[8]] }       // sample_id, short_tech, long_tech
+    ch_raw_reads = ch_samples.map { [it[0], it[1], it[2], it[3], it[4]] }  // sample_id, r1, r2, single, long
+    ch_sc_input  = ch_samples.map { [it[0], it[5], it[6]] }       // sample_id, sc_r1, sc_r2
+
     // =========================================================================
     // SINGLE-CELL MODE: Extract barcodes, pool, run pipeline, then trace back
     // =========================================================================
     if (params.single_cell_mode) {
-        // Extract single-cell reads from sample channel
-        // ch_samples: (sample_id, read1, read2, single, long, sc_read1, sc_read2)
-        ch_sc_input = ch_samples.map { t -> tuple(t[0], t[5], t[6]) }  // (sample_id, sc_read1, sc_read2)
-        
         // Extract cell barcodes and UMIs
         SC_EXTRACT_BARCODES(ch_sc_input)
         
         // Pool reads for assembly (barcode info preserved in read names)
         SC_POOL_READS(SC_EXTRACT_BARCODES.out.tagged)
         
-        // Create channel in PREPROCESS format: (sample_id, read1, read2, single, long, ...)
         // For 10x single-cell, R2 (cDNA) is used as single-end reads for assembly
         ch_sc_for_preprocess = SC_POOL_READS.out.pooled.map { t -> 
             tuple(
-                t[0],              // sample_id
-                file("${projectDir}/.placeholder_r1"),      // no paired R1
-                file("${projectDir}/.placeholder_r2"),      // no paired R2
-                t[1],              // pooled_single.fastq.gz as single-end
-                file("${projectDir}/.placeholder_long"),    // no long
-                file("${projectDir}/.placeholder_sc_r1"),   // placeholder
-                file("${projectDir}/.placeholder_sc_r2")    // placeholder
+                t[0],                                              // sample_id
+                file("${projectDir}/.placeholder_r1"),             // no paired R1
+                file("${projectDir}/.placeholder_r2"),             // no paired R2
+                t[1],                                              // pooled_single.fastq.gz as single-end
+                file("${projectDir}/.placeholder_long")            // no long
             )
         }
-        
-        PREPROCESS(ch_sc_for_preprocess)
+        PREPROCESS(ch_sc_for_preprocess.join(ch_meta, remainder: true))
     } else {
         // Standard bulk mode
-        PREPROCESS(ch_samples)
+        PREPROCESS(ch_raw_reads.join(ch_meta, remainder: true))
     }
+    ch_trimmed_reads = PREPROCESS.out.reads
 
     // Optional host filtering: when host_genome is set, filter out host reads
     if (params.host_genome) {
         def hp = params.host_genome.trim()
         if (hp.startsWith('~')) { hp = home_dir + hp.substring(1) }
         def host_file = file(hp)
-        HOST_FILTER(
-            PREPROCESS.out.preprocessed.map { t -> 
-                tuple(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], t[11], t[12], host_file) 
-            }
-        )
-        ch_for_assemble = HOST_FILTER.out.host_filtered
+        HOST_FILTER(ch_trimmed_reads.join(ch_meta, remainder: true), host_file)
+        ch_filtered_reads = HOST_FILTER.out.reads
     } else {
-        ch_for_assemble = PREPROCESS.out.preprocessed
+        ch_filtered_reads = ch_trimmed_reads
     }
 
     def ref_file = params.reference ? (params.reference.trim().startsWith('~') ? file(home_dir + params.reference.trim().substring(1)) : file(params.reference.trim())) : file("${projectDir}/.placeholder_ref")
 
     if (params.reference_only && params.reference) {
-        REF_ASSEMBLE(ch_for_assemble, ref_file)
-        ch_assembled = REF_ASSEMBLE.out.assembled
+        REF_ASSEMBLE(ch_filtered_reads.join(ch_meta, remainder: true), ref_file)
+        ch_assembly = REF_ASSEMBLE.out.assembled
     } else {
-        ASSEMBLE(ch_for_assemble, ref_file)
-        ch_assembled = ASSEMBLE.out.assembled
+        ASSEMBLE(ch_filtered_reads.join(ch_meta, remainder: true), ref_file)
+        ch_assembly = ASSEMBLE.out.assembled
     }
 
     // Optional reference check: when reference is set, map reads to reference and report detection
     // Uses host-filtered reads if host_genome was provided, otherwise uses preprocessed reads
     if (params.reference) {
-        REFERENCE_CHECK(ch_for_assemble, ref_file)
+        REFERENCE_CHECK(ch_filtered_reads.join(ch_meta, remainder: true), ref_file)
     }
 
-    KAIJU(ch_assembled, ch_kaiju_db)
-    FILTER_VIRAL(KAIJU.out.kaiju_done, extract_script)
+    KAIJU(ch_assembly.map { [it[0], it[1]] }, ch_kaiju_db)
+    ch_kaiju_with_contigs = KAIJU.out.kaiju_done
+        .join(ch_assembly.map { [it[0], it[1]] }, remainder: true)
+    FILTER_VIRAL(ch_kaiju_with_contigs, extract_script)
     RENAME_CONTIGS(FILTER_VIRAL.out.viral)
 
     // Run CheckV and geNomad in parallel on viral contigs
@@ -1700,17 +1678,11 @@ workflow {
     GENOMAD(RENAME_CONTIGS.out.renamed, ch_genomad_db)
 
     // Merge quality assessments: CheckV for phages, geNomad for RNA/eukaryotic viruses
-    // Join by sample_id: VALIDATE output is (sample_id, checkv_dir, viral_contigs, kaiju_dir, preprocess_dir)
-    //                    GENOMAD output is (sample_id, genomad_out, viral_contigs, kaiju_dir, preprocess_dir)
-    ch_checkv = VALIDATE.out.validated.map { t -> tuple(t[0], t[1]) }  // (sample_id, checkv_dir)
-    ch_genomad = GENOMAD.out.genomad_done.map { t -> tuple(t[0], t[1]) }  // (sample_id, genomad_out)
-    ch_viral_meta = RENAME_CONTIGS.out.renamed.map { t -> tuple(t[0], t[1], t[2], t[3]) }  // (sample_id, viral_contigs, kaiju_dir, preprocess_dir)
-
-    ch_merge_input = ch_checkv
-        .join(ch_genomad)
-        .join(ch_viral_meta)
-        .map { t -> tuple(t[0], t[1], t[2], t[3], t[4], t[5]) }
-        // Result: (sample_id, checkv_dir, genomad_out, viral_contigs, kaiju_dir, preprocess_dir)
+    ch_merge_input = VALIDATE.out.validated
+        .join(GENOMAD.out.genomad_done, remainder: true)
+        .join(RENAME_CONTIGS.out.renamed, remainder: true)
+        .map { t -> tuple(t[0], t[1], t[2], t[3], t[4]) }
+        // Result: (sample_id, checkv_dir, genomad_out, viral_contigs, kaiju_dir)
 
     MERGE_QUALITY(ch_merge_input, merge_script)
 
@@ -1718,18 +1690,26 @@ workflow {
         ANNOTATE(RENAME_CONTIGS.out.renamed, ch_vog_db)
         
         // Organize genes by taxonomy
-        // Join ANNOTATE output with RENAME_CONTIGS output to get viral_contigs and kaiju_dir
         ch_organize_input = ANNOTATE.out.annotated
-            .join(RENAME_CONTIGS.out.renamed)
-            .map { sample_id, annotation_dir, viral_contigs, kaiju_dir, preprocess_dir, short_tech, long_tech ->
+            .join(RENAME_CONTIGS.out.renamed, remainder: true)
+            .map { sample_id, annotation_dir, viral_contigs, kaiju_dir ->
                 tuple(sample_id, annotation_dir, viral_contigs, kaiju_dir)
             }
         ORGANIZE_GENES(ch_organize_input, ch_vog_db)
     }
-    QUANTIFY(RENAME_CONTIGS.out.renamed)
 
-    // Use merged quality for plotting
-    ch_plot_input = QUANTIFY.out.quantified.join(MERGE_QUALITY.out.merged)
+    // Quantification: join viral contigs with original filtered reads
+    ch_quantify_input = RENAME_CONTIGS.out.renamed
+        .join(ch_filtered_reads, remainder: true)
+        .join(ch_meta, remainder: true)
+        .map { t -> tuple(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[8]) }
+        // (sample_id, viral_contigs, kaiju_dir, r1, r2, single, long, long_tech)
+    QUANTIFY(ch_quantify_input)
+
+    // Plotting: join quant, merged quality, and viral metadata
+    ch_plot_input = QUANTIFY.out.quantified
+        .join(MERGE_QUALITY.out.merged, remainder: true)
+        .join(RENAME_CONTIGS.out.renamed, remainder: true)
     PLOT(ch_plot_input, plot_script)
 
     // =========================================================================
