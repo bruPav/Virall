@@ -7,6 +7,17 @@
 nextflow.enable.dsl = 2
 
 // ---------------------------------------------------------------------------
+// Helper: resolve ~ in paths without mutating params
+// ---------------------------------------------------------------------------
+def resolvePath(String path) {
+    if (path?.trim()?.startsWith('~')) {
+        def home = System.getenv('HOME') ?: System.getProperty('user.home') ?: ''
+        return (home ?: '') + path.trim().substring(1)
+    }
+    return path
+}
+
+// ---------------------------------------------------------------------------
 // Parameters (user requirements)
 // ---------------------------------------------------------------------------
 params.samples         = "${projectDir}/samples.csv"
@@ -49,7 +60,7 @@ params.sc_min_viral_umis = 1          // Minimum viral UMIs to call cell "infect
 process SC_EXTRACT_BARCODES {
     tag {"SC_BC: $sample_id"}
     label "single_cell"
-    publishDir { "${params.outdir}/${sample_id}/08_single_cell/barcoded_reads" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell/barcoded_reads" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(sc_read1), path(sc_read2)
@@ -123,7 +134,7 @@ process SC_POOL_READS {
 process PREPROCESS {
     tag { sample_id }
     label "preprocess"
-    publishDir { "${params.outdir}/${sample_id}/00_preprocess" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/00_preprocess" }, mode: "copy"
 
     input:
     tuple val(sample_id),
@@ -189,7 +200,7 @@ process PREPROCESS {
 process HOST_FILTER {
     tag { sample_id }
     label "host_filter"
-    publishDir { "${params.outdir}/${sample_id}/00_preprocess/host_filtered" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/00_preprocess/host_filtered" }, mode: "copy"
 
     input:
     tuple val(sample_id),
@@ -266,8 +277,8 @@ process HOST_FILTER {
 process ASSEMBLE_SHORT {
     tag { sample_id }
     label "assemble"
-    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
-    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
 
     input:
     tuple val(sample_id), path(r1), path(r2), path(single), val(short_tech)
@@ -320,8 +331,8 @@ process ASSEMBLE_SHORT {
 process ASSEMBLE_LONG {
     tag { sample_id }
     label "assemble"
-    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
-    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
 
     input:
     tuple val(sample_id), path(long), val(long_tech)
@@ -382,8 +393,8 @@ process ASSEMBLE_LONG {
 process ASSEMBLE_HYBRID {
     tag { sample_id }
     label "assemble"
-    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
-    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
 
     input:
     tuple val(sample_id), path(r1), path(r2), path(single), path(long), val(short_tech), val(long_tech)
@@ -510,8 +521,8 @@ process ASSEMBLE_HYBRID {
 process REF_ASSEMBLE {
     tag { sample_id }
     label "assemble"
-    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
-    publishDir { "${params.outdir}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "contigs*"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
 
     input:
     tuple val(sample_id),
@@ -608,7 +619,7 @@ process REF_ASSEMBLE {
 process KAIJU {
     tag { sample_id }
     label "kaiju"
-    publishDir { "${params.outdir}/${sample_id}/03_classifications" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/03_classifications" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(contigs)
@@ -646,7 +657,7 @@ process KAIJU {
 process FILTER_VIRAL {
     tag { sample_id }
     label "filter_viral"
-    publishDir { "${params.outdir}/${sample_id}/02_viral_contigs" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/02_viral_contigs" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(kaiju_dir), path(contigs)
@@ -675,7 +686,7 @@ process FILTER_VIRAL {
 process RENAME_CONTIGS {
     tag { sample_id }
     label "rename_contigs"
-    publishDir { "${params.outdir}/${sample_id}/02_viral_contigs" }, mode: "copy", pattern: "{viral_contigs.fasta,name_mapping.tsv}"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/02_viral_contigs" }, mode: "copy", pattern: "{viral_contigs.fasta,name_mapping.tsv}"
 
     input:
     tuple val(sample_id), path("input_viral_contigs.fasta"), path("input_kaiju_dir")
@@ -708,7 +719,7 @@ process RENAME_CONTIGS {
 process VALIDATE {
     tag { sample_id }
     label "validate"
-    publishDir { "${params.outdir}/${sample_id}/04_quality_assessment" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/04_quality_assessment" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir)
@@ -758,7 +769,7 @@ process VALIDATE {
 process GENOMAD {
     tag { sample_id }
     label "genomad"
-    publishDir { "${params.outdir}/${sample_id}/04_quality_assessment/genomad" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/04_quality_assessment/genomad" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir)
@@ -774,7 +785,7 @@ process GENOMAD {
     # Find geNomad database
     GENOMAD_D=""
     for cand in "${genomad_db}/genomad_db" "${genomad_db}"; do
-      if [ -d "\$cand" ] && [ -f "\$cand/genomad_db" ] || [ -f "\$cand/virus_hallmark_annotation.txt" ] || [ -d "\$cand/mmseqs2" ]; then
+      if [ -d "\$cand" ] && { [ -f "\$cand/genomad_db" ] || [ -f "\$cand/virus_hallmark_annotation.txt" ] || [ -d "\$cand/mmseqs2" ]; }; then
         GENOMAD_D="\$cand"
         break
       fi
@@ -826,7 +837,7 @@ process GENOMAD {
 process MERGE_QUALITY {
     tag { sample_id }
     label "merge_quality"
-    publishDir { "${params.outdir}/${sample_id}/04_quality_assessment" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/04_quality_assessment" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(checkv_dir), path(genomad_dir), path(viral_contigs), path(kaiju_dir)
@@ -851,7 +862,7 @@ process MERGE_QUALITY {
 process ANNOTATE {
     tag { sample_id }
     label "annotate"
-    publishDir { "${params.outdir}/${sample_id}/05_gene_predictions" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/05_gene_predictions" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir)
@@ -884,7 +895,7 @@ process ANNOTATE {
 process ORGANIZE_GENES {
     tag { sample_id }
     label "annotate"
-    publishDir { "${params.outdir}/${sample_id}/05_gene_predictions" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/05_gene_predictions" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(annotation_dir), path(viral_contigs), path(kaiju_dir)
@@ -932,7 +943,7 @@ process ORGANIZE_GENES {
 process QUANTIFY {
     tag { sample_id }
     label "quantify"
-    publishDir { "${params.outdir}/${sample_id}/06_quantification" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/06_quantification" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(r1), path(r2), path(single), path(long), val(long_tech)
@@ -996,7 +1007,7 @@ process QUANTIFY {
 process REFERENCE_CHECK {
     tag { sample_id }
     label "reference_check"
-    publishDir { "${params.outdir}/${sample_id}/08_reference_check" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_reference_check" }, mode: "copy"
 
     input:
     tuple val(sample_id),
@@ -1155,73 +1166,18 @@ EOF
 
     # Generate coverage plot and per-segment stats
     if command -v python3 &>/dev/null && [ -f ref_check_dir/reference_depth.txt ] && [ -s ref_check_dir/reference_depth.txt ]; then
-      python3 << 'PYEOF'
-import sys
-try:
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    import pandas as pd
-
-    depth_file = "ref_check_dir/reference_depth.txt"
-    df = pd.read_csv(depth_file, sep='\t', header=None, names=['contig', 'pos', 'depth'])
-
-    if not df.empty:
-        contigs = df['contig'].unique()
-        n = len(contigs)
-
-        if n > 1:
-            fig, axes = plt.subplots(n, 1, figsize=(12, 2.5 * n), sharex=False)
-            if n == 1:
-                axes = [axes]
-            colors = plt.cm.tab10.colors
-            for i, (ctg, ax) in enumerate(zip(contigs, axes)):
-                sub = df[df['contig'] == ctg]
-                c = colors[i % len(colors)]
-                ax.fill_between(sub['pos'], sub['depth'], alpha=0.7, color=c)
-                ax.set_xlim(0, sub['pos'].max())
-                ax.set_ylim(0, None)
-                ax.set_ylabel('Depth')
-                label = ctg if len(ctg) <= 60 else ctg[:57] + '...'
-                ax.set_title(label, fontsize=9, loc='left')
-            axes[-1].set_xlabel('Position (bp)')
-            fig.suptitle('Reference Genome Coverage (per segment)', fontsize=11, y=1.0)
-        else:
-            fig, ax = plt.subplots(figsize=(12, 4))
-            ax.fill_between(df['pos'], df['depth'], alpha=0.7, color='steelblue')
-            ax.set_xlabel('Position (bp)')
-            ax.set_ylabel('Coverage Depth')
-            ax.set_title('Reference Genome Coverage')
-            ax.set_xlim(0, df['pos'].max())
-            ax.set_ylim(0, None)
-
-        plt.tight_layout()
-        plt.savefig('ref_check_dir/reference_coverage.png', dpi=150, bbox_inches='tight')
-        plt.close()
-
-        # Write per-segment stats
-        with open('ref_check_dir/per_segment_stats.tsv', 'w') as f:
-            f.write('segment\\tlength\\tcovered_bases\\tbreadth_%\\tmean_depth\\n')
-            for ctg in contigs:
-                sub = df[df['contig'] == ctg]
-                seg_len = int(sub['pos'].max())
-                covered = int((sub['depth'] > 0).sum())
-                breadth = covered / seg_len * 100 if seg_len > 0 else 0
-                mean_d = sub['depth'].mean()
-                f.write(f'{ctg}\\t{seg_len}\\t{covered}\\t{breadth:.2f}\\t{mean_d:.2f}\\n')
-        print(f"Coverage plot generated ({n} segment{'s' if n > 1 else ''})", file=sys.stderr)
-except Exception as e:
-    print(f"Could not generate coverage plot: {e}", file=sys.stderr)
-PYEOF
+      python3 ${projectDir}/bin/reference_check_plot.py \
+        --depth ref_check_dir/reference_depth.txt \
+        --out-prefix ref_check_dir/reference || true
     fi
 
     # Append per-segment stats to report if available
-    if [ -f ref_check_dir/per_segment_stats.tsv ]; then
-      SEG_COUNT=\$(tail -n +2 ref_check_dir/per_segment_stats.tsv | wc -l)
+    if [ -f ref_check_dir/reference_stats.tsv ]; then
+      SEG_COUNT=\$(tail -n +2 ref_check_dir/reference_stats.tsv | wc -l)
       if [ "\$SEG_COUNT" -gt 1 ]; then
         echo "Per-Segment Statistics:" >> ref_check_dir/reference_report.txt
         echo "  Segment                Length   Covered  Breadth%  MeanDepth" >> ref_check_dir/reference_report.txt
-        tail -n +2 ref_check_dir/per_segment_stats.tsv | while IFS=\$'\\t' read -r seg slen cov br md; do
+        tail -n +2 ref_check_dir/reference_stats.tsv | while IFS=\$'\\t' read -r seg slen cov br md; do
           printf "  %-22s %6s   %6s   %7s   %8s\\n" "\$seg" "\$slen" "\$cov" "\$br" "\$md" >> ref_check_dir/reference_report.txt
         done
         echo "" >> ref_check_dir/reference_report.txt
@@ -1245,7 +1201,7 @@ PYEOF
 process PLOT {
     tag { sample_id }
     label "plot"
-    publishDir { "${params.outdir}/${sample_id}/07_plots" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/07_plots" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(quant_dir), path(merged_quality), path(viral_contigs), path(kaiju_dir)
@@ -1281,7 +1237,7 @@ process PLOT {
 process SC_MAP_VIRAL {
     tag { sample_id }
     label "single_cell"
-    publishDir { "${params.outdir}/${sample_id}/08_single_cell/viral_mapping" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell/viral_mapping" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(tagged_r2), path(viral_contigs)
@@ -1317,7 +1273,7 @@ process SC_MAP_VIRAL {
 process SC_COUNT_CELLS {
     tag { sample_id }
     label "single_cell"
-    publishDir { "${params.outdir}/${sample_id}/08_single_cell" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(bam), path(bai)
@@ -1382,7 +1338,7 @@ process SC_COUNT_CELLS {
 process SC_BUILD_MATRIX {
     tag { sample_id }
     label "single_cell"
-    publishDir { "${params.outdir}/${sample_id}/08_single_cell/matrix" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell/matrix" }, mode: "copy"
 
     input:
     tuple val(sample_id), path(counts), path(viral_contigs), path(kaiju_dir)
@@ -1413,12 +1369,6 @@ workflow {
 
     // Resolve DB paths from env if not set (params.xxx are read-only; resolve in workflow)
     def db_dir = System.getenv("VIRALL_DATABASE_DIR") ?: ""
-
-    // Expand ~ in outdir so "~/analysis/..." becomes /home/user/analysis/...
-    if (params.outdir?.toString()?.trim()?.startsWith('~')) {
-        def home = System.getenv('HOME') ?: System.getProperty('user.home') ?: ''
-        params.outdir = (home ?: '') + params.outdir.toString().trim().substring(1)
-    }
 
     // ---------------------------------------------------------------------------
     // Helper: resolve ~ in paths
