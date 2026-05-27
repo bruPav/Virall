@@ -283,6 +283,7 @@ process ASSEMBLE_SHORT {
     input:
     tuple val(sample_id), path(r1), path(r2), path(single), val(short_tech)
     path(reference_file)
+    path(assembly_utils_script)
 
     output:
     tuple val(sample_id), path("contigs"), path("scaffolds"), emit: assembled
@@ -296,7 +297,7 @@ process ASSEMBLE_SHORT {
     def rna = (params.rna_mode && !has_ref) ? '--rnaviral' : ''
     def metaviral = (params.metaviral_mode && !has_ref) ? '--metaviral' : ''
     """
-    source ${projectDir}/bin/assembly_utils.sh
+    source ${assembly_utils_script}
 
     if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
       ln -sf "${reference_file}" "${ref_fasta}"
@@ -337,6 +338,7 @@ process ASSEMBLE_LONG {
     input:
     tuple val(sample_id), path(long), val(long_tech)
     path(reference_file)
+    path(assembly_utils_script)
 
     output:
     tuple val(sample_id), path("contigs"), path("scaffolds"), emit: assembled
@@ -346,7 +348,7 @@ process ASSEMBLE_LONG {
     def has_ref = reference_file.name != '.placeholder_ref'
     def ref_fasta = has_ref ? "reference.fasta" : ''
     """
-    source ${projectDir}/bin/assembly_utils.sh
+    source ${assembly_utils_script}
 
     if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
       ln -sf "${reference_file}" "${ref_fasta}"
@@ -399,6 +401,7 @@ process ASSEMBLE_HYBRID {
     input:
     tuple val(sample_id), path(r1), path(r2), path(single), path(long), val(short_tech), val(long_tech)
     path(reference_file)
+    path(assembly_utils_script)
 
     output:
     tuple val(sample_id), path("contigs"), path("scaffolds"), emit: assembled
@@ -413,7 +416,7 @@ process ASSEMBLE_HYBRID {
     def rna = (params.rna_mode && !has_ref) ? '--rnaviral' : ''
     def metaviral = (params.metaviral_mode && !has_ref) ? '--metaviral' : ''
     """
-    source ${projectDir}/bin/assembly_utils.sh
+    source ${assembly_utils_script}
     mkdir -p assembly_dir
 
     if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
@@ -1018,6 +1021,7 @@ process REFERENCE_CHECK {
           val(short_tech),
           val(long_tech)
     path(reference)
+    path(ref_check_plot_script)
 
     output:
     tuple val(sample_id), path("ref_check_dir"), emit: ref_checked
@@ -1166,7 +1170,7 @@ EOF
 
     # Generate coverage plot and per-segment stats
     if command -v python3 &>/dev/null && [ -f ref_check_dir/reference_depth.txt ] && [ -s ref_check_dir/reference_depth.txt ]; then
-      python3 ${projectDir}/bin/reference_check_plot.py \
+      python3 ${ref_check_plot_script} \
         --depth ref_check_dir/reference_depth.txt \
         --out-prefix ref_check_dir/reference || true
     fi
@@ -1481,6 +1485,8 @@ workflow {
     def extract_script = file("${projectDir}/bin/extract_fasta_by_ids.py")
     def merge_script  = file("${projectDir}/bin/merge_quality.py")
     def plot_script   = file("${projectDir}/bin/run_plots_genome_corrected.py")
+    def assembly_utils_script = file("${projectDir}/bin/assembly_utils.sh")
+    def ref_check_plot_script = file("${projectDir}/bin/reference_check_plot.py")
 
     def g_db = params.genomad_db ?: (db_dir ? "${db_dir}/genomad_db" : "${container_db}/genomad_db")
 
@@ -1542,15 +1548,15 @@ workflow {
     } else if (params.assembly_strategy == "short_only") {
         ch_short_input = ch_filtered_reads.join(ch_meta, remainder: true)
             .map { [it[0], it[1], it[2], it[3], it[5]] }
-        ASSEMBLE_SHORT(ch_short_input, ref_file)
+        ASSEMBLE_SHORT(ch_short_input, ref_file, assembly_utils_script)
         ch_assembly = ASSEMBLE_SHORT.out.assembled
     } else if (params.assembly_strategy == "long_only") {
         ch_long_input = ch_filtered_reads.join(ch_meta, remainder: true)
             .map { [it[0], it[4], it[6]] }
-        ASSEMBLE_LONG(ch_long_input, ref_file)
+        ASSEMBLE_LONG(ch_long_input, ref_file, assembly_utils_script)
         ch_assembly = ASSEMBLE_LONG.out.assembled
     } else if (params.assembly_strategy == "hybrid") {
-        ASSEMBLE_HYBRID(ch_filtered_reads.join(ch_meta, remainder: true), ref_file)
+        ASSEMBLE_HYBRID(ch_filtered_reads.join(ch_meta, remainder: true), ref_file, assembly_utils_script)
         ch_assembly = ASSEMBLE_HYBRID.out.assembled
     } else {
         // auto-detect per sample based on available reads
@@ -1585,9 +1591,9 @@ workflow {
             !has_pe && !has_se && !has_long
         }.map { [it[0], it[1], it[2], it[3], it[5]] }
 
-        ASSEMBLE_SHORT(ch_auto_short.mix(ch_auto_empty), ref_file)
-        ASSEMBLE_LONG(ch_auto_long, ref_file)
-        ASSEMBLE_HYBRID(ch_auto_hybrid, ref_file)
+        ASSEMBLE_SHORT(ch_auto_short.mix(ch_auto_empty), ref_file, assembly_utils_script)
+        ASSEMBLE_LONG(ch_auto_long, ref_file, assembly_utils_script)
+        ASSEMBLE_HYBRID(ch_auto_hybrid, ref_file, assembly_utils_script)
 
         ch_assembly = ASSEMBLE_SHORT.out.assembled
             .mix(ASSEMBLE_LONG.out.assembled)
@@ -1597,7 +1603,7 @@ workflow {
     // Optional reference check: when reference is set, map reads to reference and report detection
     // Uses host-filtered reads if host_genome was provided, otherwise uses preprocessed reads
     if (params.reference) {
-        REFERENCE_CHECK(ch_filtered_reads.join(ch_meta, remainder: true), ref_file)
+        REFERENCE_CHECK(ch_filtered_reads.join(ch_meta, remainder: true), ref_file, ref_check_plot_script)
     }
 
     KAIJU(ch_assembly.map { [it[0], it[1]] }, ch_kaiju_db)
