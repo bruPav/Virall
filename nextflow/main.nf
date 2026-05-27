@@ -207,7 +207,7 @@ process HOST_FILTER {
           path(r1),
           path(r2),
           path(single),
-          path(long),
+          path(long_reads),
           val(short_tech),
           val(long_tech)
     path(host_ref)
@@ -255,16 +255,16 @@ process HOST_FILTER {
 
     # Long reads (ONT or PacBio)
     MINIMAP2_LONG_PRESET=\$( [ "${long_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
-    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
-      minimap2 -ax \$MINIMAP2_LONG_PRESET -t ${task.cpus} ${host_ref} ${long} 2>host_filter_dir/host_filter_long.log | \
+    if [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
+      minimap2 -ax \$MINIMAP2_LONG_PRESET -t ${task.cpus} ${host_ref} ${long_reads} 2>host_filter_dir/host_filter_long.log | \
         samtools fastq -f 4 - > host_filter_dir/long.fq 2>/dev/null || true
       if [ -s host_filter_dir/long.fq ]; then
         gzip -c host_filter_dir/long.fq > host_filter_dir/trimmed_long.fastq.gz
       else
-        cp ${long} host_filter_dir/trimmed_long.fastq.gz
+        cp ${long_reads} host_filter_dir/trimmed_long.fastq.gz
       fi
     else
-      cp ${long} host_filter_dir/trimmed_long.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_long.fastq.gz
+      cp ${long_reads} host_filter_dir/trimmed_long.fastq.gz 2>/dev/null || touch host_filter_dir/trimmed_long.fastq.gz
     fi
     touch host_filter_dir/trimmed_R1.fastq.gz host_filter_dir/trimmed_R2.fastq.gz host_filter_dir/trimmed_single.fastq.gz host_filter_dir/trimmed_long.fastq.gz
     """
@@ -336,7 +336,7 @@ process ASSEMBLE_LONG {
     publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
 
     input:
-    tuple val(sample_id), path(long), val(long_tech)
+    tuple val(sample_id), path(long_reads), val(long_tech)
     path(reference_file)
     path(assembly_utils_script)
 
@@ -349,12 +349,13 @@ process ASSEMBLE_LONG {
     def ref_fasta = has_ref ? "reference.fasta" : ''
     """
     source ${assembly_utils_script}
+    mkdir -p assembly_dir
 
     if [ -n "${ref_fasta}" ] && [ -f "${reference_file}" ]; then
       ln -sf "${reference_file}" "${ref_fasta}"
     fi
 
-    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
+    if [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
       FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
       [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
 
@@ -364,21 +365,21 @@ process ASSEMBLE_LONG {
         FLYE_INPUT_FLAG="--nano-raw"
       fi
 
-      flye \$FLYE_INPUT_FLAG ${long} --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
+      flye \$FLYE_INPUT_FLAG ${long_reads} --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
       check_flye_coverage "assembly_dir/flye/flye.log" "${sample_id}"
       cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
 
       # Polish Nanopore assemblies with Medaka
       if [ "${long_tech}" = "nanopore" ] && [ -s contigs ]; then
         echo "Polishing Nanopore assembly with Medaka..."
-        medaka_consensus -i ${long} -d contigs -o assembly_dir/medaka -t ${task.cpus} \
+        medaka_consensus -i ${long_reads} -d contigs -o assembly_dir/medaka -t ${task.cpus} \
           && cp assembly_dir/medaka/consensus.fasta contigs \
           || echo "WARNING: Medaka polishing failed, using unpolished Flye assembly"
       fi
 
       # Reference-guided consensus
       if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
-        run_ref_guided_consensus "${long}" "${ref_fasta}" "${long_tech}" "${task.cpus}" "contigs_ref_guided.fasta" "assembly_dir"
+        run_ref_guided_consensus "${long_reads}" "${ref_fasta}" "${long_tech}" "${task.cpus}" "contigs_ref_guided.fasta" "assembly_dir"
       fi
 
       cp contigs scaffolds 2>/dev/null || true
@@ -399,7 +400,7 @@ process ASSEMBLE_HYBRID {
     publishDir { "${resolvePath(params.outdir)}/${sample_id}/01_assembly" }, mode: "copy", pattern: "scaffolds"
 
     input:
-    tuple val(sample_id), path(r1), path(r2), path(single), path(long), val(short_tech), val(long_tech)
+    tuple val(sample_id), path(r1), path(r2), path(single), path(long_reads), val(short_tech), val(long_tech)
     path(reference_file)
     path(assembly_utils_script)
 
@@ -429,7 +430,7 @@ process ASSEMBLE_HYBRID {
       fi
     fi
 
-    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
+    if [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
       echo "Hybrid assembly: Flye --meta → Medaka (Nanopore only) → Polypolish → Pypolca"
       FLYE_EXTRA="--meta --min-overlap ${params.flye_min_overlap}"
       [ -n "${params.flye_genome_size ?: ''}" ] && FLYE_EXTRA="\$FLYE_EXTRA --genome-size ${params.flye_genome_size}"
@@ -440,14 +441,14 @@ process ASSEMBLE_HYBRID {
         FLYE_INPUT_FLAG="--nano-raw"
       fi
 
-      flye \$FLYE_INPUT_FLAG ${long} --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
+      flye \$FLYE_INPUT_FLAG ${long_reads} --out-dir assembly_dir/flye \$FLYE_EXTRA -t ${task.cpus}
       check_flye_coverage "assembly_dir/flye/flye.log" "${sample_id}"
       cp assembly_dir/flye/assembly.fasta contigs 2>/dev/null || true
 
       # LR polishing: Medaka fixes systematic Nanopore errors (skip for PacBio)
       if [ "${long_tech}" = "nanopore" ] && [ -s contigs ]; then
         echo "Polishing Nanopore assembly with Medaka..."
-        medaka_consensus -i ${long} -d contigs -o assembly_dir/medaka -t ${task.cpus} \
+        medaka_consensus -i ${long_reads} -d contigs -o assembly_dir/medaka -t ${task.cpus} \
           && cp assembly_dir/medaka/consensus.fasta contigs \
           || echo "WARNING: Medaka polishing failed, continuing with unpolished assembly"
       fi
@@ -498,7 +499,7 @@ process ASSEMBLE_HYBRID {
 
       # Reference-guided consensus
       if [ -n "${ref_fasta}" ] && [ -f "${ref_fasta}" ]; then
-        run_ref_guided_consensus "${long}" "${ref_fasta}" "${long_tech}" "${task.cpus}" "contigs_ref_guided.fasta" "assembly_dir"
+        run_ref_guided_consensus "${long_reads}" "${ref_fasta}" "${long_tech}" "${task.cpus}" "contigs_ref_guided.fasta" "assembly_dir"
       fi
 
       cp contigs scaffolds 2>/dev/null || true
@@ -532,7 +533,7 @@ process REF_ASSEMBLE {
           path(r1),
           path(r2),
           path(single),
-          path(long),
+          path(long_reads),
           val(short_tech),
           val(long_tech)
     path(reference_file)
@@ -550,7 +551,7 @@ process REF_ASSEMBLE {
     cp "${r1}" preprocess_dir/trimmed_R1.fastq.gz 2>/dev/null || true
     cp "${r2}" preprocess_dir/trimmed_R2.fastq.gz 2>/dev/null || true
     cp "${single}" preprocess_dir/trimmed_single.fastq.gz 2>/dev/null || true
-    cp "${long}" preprocess_dir/trimmed_long.fastq.gz 2>/dev/null || true
+    cp "${long_reads}" preprocess_dir/trimmed_long.fastq.gz 2>/dev/null || true
 
     HAS_SHORT=\$( [ -s preprocess_dir/trimmed_R1.fastq.gz ] && [ -s preprocess_dir/trimmed_R2.fastq.gz ] && echo 1 || echo 0 )
     HAS_SINGLE=\$( [ -s preprocess_dir/trimmed_single.fastq.gz ] && echo 1 || echo 0 )
@@ -949,7 +950,7 @@ process QUANTIFY {
     publishDir { "${resolvePath(params.outdir)}/${sample_id}/06_quantification" }, mode: "copy"
 
     input:
-    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(r1), path(r2), path(single), path(long), val(long_tech)
+    tuple val(sample_id), path(viral_contigs), path(kaiju_dir), path(r1), path(r2), path(single), path(long_reads), val(long_tech)
 
     output:
     tuple val(sample_id), path("quant_dir"), emit: quantified
@@ -974,9 +975,9 @@ process QUANTIFY {
         BAMS_TO_MERGE="\$BAMS_TO_MERGE quant_dir/mapped_single.bam"
       fi
       HAS_SHORT=\$([ -n "\$BAMS_TO_MERGE" ] && echo "1" || echo "0")
-      if [ "\$HAS_SHORT" = "0" ] && [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
+      if [ "\$HAS_SHORT" = "0" ] && [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
         MINIMAP2_LONG_PRESET=\$( [ "${long_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
-        minimap2 -t ${task.cpus} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta ${long} | samtools sort -o quant_dir/mapped_long.bam -
+        minimap2 -t ${task.cpus} -ax \$MINIMAP2_LONG_PRESET viral_contigs.fasta ${long_reads} | samtools sort -o quant_dir/mapped_long.bam -
         BAMS_TO_MERGE="\$BAMS_TO_MERGE quant_dir/mapped_long.bam"
       fi
       BAM_COUNT=\$(echo \$BAMS_TO_MERGE | wc -w)
@@ -1017,7 +1018,7 @@ process REFERENCE_CHECK {
           path(r1),
           path(r2),
           path(single),
-          path(long),
+          path(long_reads),
           val(short_tech),
           val(long_tech)
     path(reference)
@@ -1058,8 +1059,8 @@ process REFERENCE_CHECK {
       TOTAL_READS=\$((TOTAL_READS + SINGLE_TOTAL))
     fi
 
-    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
-      minimap2 -t ${task.cpus} -ax ${minimap2_preset} ${reference} ${long} 2>/dev/null | \
+    if [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
+      minimap2 -t ${task.cpus} -ax ${minimap2_preset} ${reference} ${long_reads} 2>/dev/null | \
         samtools sort -o ref_check_dir/mapped_long.bam - 2>/dev/null
       samtools index ref_check_dir/mapped_long.bam 2>/dev/null || true
       LONG_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_long.bam 2>/dev/null || echo 0)
@@ -1078,8 +1079,8 @@ process REFERENCE_CHECK {
       TOTAL_READS=\$((TOTAL_READS + SINGLE_TOTAL))
     fi
 
-    if [ -s "${long}" ] && [ "${long.name}" != ".placeholder_long" ]; then
-      minimap2 -t ${task.cpus} -ax ${minimap2_preset} ${reference} ${long} 2>/dev/null | \
+    if [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
+      minimap2 -t ${task.cpus} -ax ${minimap2_preset} ${reference} ${long_reads} 2>/dev/null | \
         samtools sort -o ref_check_dir/mapped_long.bam - 2>/dev/null
       samtools index ref_check_dir/mapped_long.bam 2>/dev/null || true
       LONG_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_long.bam 2>/dev/null || echo 0)
