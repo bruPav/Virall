@@ -289,7 +289,7 @@ process ASSEMBLE_SHORT {
     tuple val(sample_id), path("contigs"), path("scaffolds"), emit: assembled
 
     script:
-    def mem = task.memory ? task.memory.toGiga().toString() : params.memory.replaceAll(/[Gg]/, '')
+    def mem = task.memory.toGiga().toString()
     def ion = (short_tech == "iontorrent") ? '--iontorrent' : ''
     def has_ref = reference_file.name != '.placeholder_ref'
     def ref_fasta = has_ref ? "reference.fasta" : ''
@@ -408,7 +408,7 @@ process ASSEMBLE_HYBRID {
     path("contigs_ref_guided.fasta"), optional: true
 
     script:
-    def mem = task.memory ? task.memory.toGiga().toString() : params.memory.replaceAll(/[Gg]/, '')
+    def mem = task.memory.toGiga().toString()
     def ion = (short_tech == "iontorrent") ? '--iontorrent' : ''
     def has_ref = reference_file.name != '.placeholder_ref'
     def ref_fasta = has_ref ? "reference.fasta" : ''
