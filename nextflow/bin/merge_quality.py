@@ -122,6 +122,24 @@ def genomad_to_quality_tier(row: pd.Series, *,
 
 # ── I/O helpers ──────────────────────────────────────────────────────────────
 
+def _downgrade_host_contamination(row: dict) -> dict:
+    """If a contig has far more host genes than viral genes, it is likely
+    a bacterial chromosome with prophage remnants rather than a genuine
+    complete viral genome.  Downgrade quality accordingly."""
+    viral = int(row.get("viral_genes", 0) or 0)
+    host = int(row.get("host_genes", 0) or 0)
+    if host > 0 and host > viral * 3:
+        current = row.get("checkv_quality", "")
+        if current == "High-quality":
+            row["checkv_quality"] = "Low-quality"
+        elif current == "Complete":
+            row["checkv_quality"] = "Medium-quality"
+        method = str(row.get("completeness_method", ""))
+        if "host_gene_warning" not in method:
+            row["completeness_method"] = (method + "; host_gene_warning").strip("; ")
+    return row
+
+
 def load_kaiju_taxonomy(kaiju_file: Path) -> dict:
     """Parse Kaiju results-with-names into {contig_id: lineage_str}."""
     taxonomy = {}
@@ -256,6 +274,9 @@ def merge(checkv_df: pd.DataFrame,
                 "genomad_taxonomy": grow.get("taxonomy", ""),
             })
 
+    # Post-process: downgrade contigs where host genes dominate viral genes
+    rows = [_downgrade_host_contamination(r) for r in rows]
+
     return rows
 
 
@@ -284,9 +305,24 @@ def _combined_row(checkv_row, genomad_row) -> dict:
     )
 
     if genomad_completeness is not None:
-        final_completeness = genomad_completeness
-        final_quality = genomad_quality
-        final_method = "genomad_hallmarks"
+        # Don't let geNomad promote a fragment CheckV already identified.
+        # A 1 kb contig from a 190 kb poxvirus may carry one hallmark gene
+        # and look "80% complete" by density, but CheckV's genome-length
+        # comparison is definitive for fragments.
+        checkv_is_fragment = (
+            has_checkv_compl
+            and float(checkv_completeness) < 10.0
+            and str(checkv_row.get("checkv_quality", ""))
+            in ("Genome-fragment", "Low-quality", "Not-determined")
+        )
+        if checkv_is_fragment:
+            final_completeness = checkv_completeness
+            final_quality = checkv_row.get("checkv_quality", "Not-determined")
+            final_method = checkv_row.get("completeness_method", "")
+        else:
+            final_completeness = genomad_completeness
+            final_quality = genomad_quality
+            final_method = "genomad_hallmarks"
         source = "checkv+genomad"
     elif has_checkv_compl:
         final_completeness = checkv_completeness
