@@ -1253,6 +1253,14 @@ process SC_MAP_VIRAL {
 
     script:
     """
+    if [ ! -s ${viral_contigs} ]; then
+        echo "WARNING: No viral contigs found, skipping SC_MAP_VIRAL for ${sample_id}" >&2
+        printf '@HD\tVN:1.6\tSO:coordinate\n' | samtools view -bS -o viral_aligned.bam -
+        samtools index viral_aligned.bam
+        echo "## No viral contigs in input" > mapping_stats.txt
+        exit 0
+    fi
+
     # Index viral contigs
     bwa index ${viral_contigs}
 
