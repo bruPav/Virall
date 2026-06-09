@@ -565,11 +565,13 @@ process REF_ASSEMBLE {
       if [ "\$HAS_SHORT" = "1" ]; then
         bwa mem -t ${task.cpus} reference.fasta \
           preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz 2>/dev/null | \
+          samtools view -q 30 -F 256 -b - 2>/dev/null | \
           samtools sort -@ ${task.cpus} -o assembly_dir/ref_short_pe.bam -
       fi
       if [ "\$HAS_SINGLE" = "1" ]; then
         bwa mem -t ${task.cpus} reference.fasta \
           preprocess_dir/trimmed_single.fastq.gz 2>/dev/null | \
+          samtools view -q 30 -F 256 -b - 2>/dev/null | \
           samtools sort -@ ${task.cpus} -o assembly_dir/ref_short_single.bam -
       fi
     fi
