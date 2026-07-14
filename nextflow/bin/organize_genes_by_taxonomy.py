@@ -98,13 +98,6 @@ def parse_kaiju_results(kaiju_file):
                     'lineage': lineage,
                     'parsed_lineage': levels
                 }
-            else:
-                # Unclassified
-                contig_taxonomy[contig_id] = {
-                    'taxon_id': '0',
-                    'lineage': '',
-                    'parsed_lineage': []
-                }
     
     return contig_taxonomy
 
