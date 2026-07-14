@@ -23,7 +23,7 @@ def main():
         import pandas as pd
     except ImportError as exc:
         print(f"Could not generate coverage plot: {exc}", file=sys.stderr)
-        sys.exit(0)
+        sys.exit(1)
 
     try:
         df = pd.read_csv(args.depth, sep='\t', header=None,
@@ -31,15 +31,13 @@ def main():
 
         if df.empty:
             print("Depth file is empty – no plot generated", file=sys.stderr)
-            sys.exit(0)
+            sys.exit(1)
 
         contigs = df['contig'].unique()
         n = len(contigs)
 
         if n > 1:
             fig, axes = plt.subplots(n, 1, figsize=(12, 2.5 * n), sharex=False)
-            if n == 1:
-                axes = [axes]
             colors = plt.cm.tab10.colors
             for i, (ctg, ax) in enumerate(zip(contigs, axes)):
                 sub = df[df['contig'] == ctg]
@@ -84,7 +82,7 @@ def main():
               file=sys.stderr)
     except Exception as e:
         print(f"Could not generate coverage plot: {e}", file=sys.stderr)
-        sys.exit(0)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
