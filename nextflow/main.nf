@@ -177,17 +177,18 @@ workflow {
         .set { ch_samples }
 
     // Default DB base dir: in-container path so -profile docker/singularity works without extra config
+    def local_db = home_dir ? "${home_dir}/.virall/databases" : ""
     def container_db = "/opt/virall/databases"
-    def k_db = params.kaiju_db ?: (db_dir ? "${db_dir}/kaiju_db" : "${container_db}/kaiju_db")
-    def c_db = params.checkv_db ?: (db_dir ? "${db_dir}/checkv_db" : "${container_db}/checkv_db")
-    def v_db = params.vog_db ?: (db_dir ? "${db_dir}/vog_db" : "${container_db}/vog_db")
+    def k_db = params.kaiju_db ?: (db_dir ? "${db_dir}/kaiju_db" : (local_db ? "${local_db}/kaiju_db" : "${container_db}/kaiju_db"))
+    def c_db = params.checkv_db ?: (db_dir ? "${db_dir}/checkv_db" : (local_db ? "${local_db}/checkv_db" : "${container_db}/checkv_db"))
+    def v_db = params.vog_db ?: (db_dir ? "${db_dir}/vog_db" : (local_db ? "${local_db}/vog_db" : "${container_db}/vog_db"))
     def extract_script = file("${projectDir}/bin/extract_fasta_by_ids.py")
     def merge_script  = file("${projectDir}/bin/merge_quality.py")
     def plot_script   = file("${projectDir}/bin/run_plots_genome_corrected.py")
     def assembly_utils_script = file("${projectDir}/bin/assembly_utils.sh")
     def ref_check_plot_script = file("${projectDir}/bin/reference_check_plot.py")
 
-    def g_db = params.genomad_db ?: (db_dir ? "${db_dir}/genomad_db" : "${container_db}/genomad_db")
+    def g_db = params.genomad_db ?: (db_dir ? "${db_dir}/genomad_db" : (local_db ? "${local_db}/genomad_db" : "${container_db}/genomad_db"))
 
     def ch_kaiju_db   = Channel.value(k_db)
     def ch_checkv_db  = Channel.value(c_db)
