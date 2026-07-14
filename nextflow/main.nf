@@ -75,7 +75,7 @@ workflow {
     def container_img    = session.config.navigate('process.container', '')
 
     log.info "╔══════════════════════════════════════╗"
-    log.info "║  Virall  v1.0.0                       ║"
+    log.info "║  Virall  v0.4.0                       ║"
     log.info "║  Viral Genome Assembly & Analysis    ║"
     log.info "╠══════════════════════════════════════╣"
     log.info "║  Samples   : ${params.samples}"

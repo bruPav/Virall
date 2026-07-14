@@ -248,7 +248,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Changelog
 
-### v1.0.0
+### v0.4.0
 - **Architecture:** Modularized pipeline into 8 DSL2 module files (down from 1666-line monolith)
 - **UX:** Added pre-flight checks (sample sheet validation, startup banner, completion summary)
 - **UX:** Added `nextflow_schema.json` with all 30 params documented; `--help` now shows grouped reference
