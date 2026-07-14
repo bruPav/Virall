@@ -41,7 +41,7 @@ def parse_kaiju(tsv_path: Path) -> dict:
             taxonomy[contig_id] = {
                 "taxon_id": taxon_id,
                 "lineage": lineage,
-                "parsed_lineage": filtered,
+                "parsed_lineage": parsed,
                 "lowest_taxon": lowest,
             }
 
