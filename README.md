@@ -38,8 +38,12 @@ See the [complete workflow diagram](viral_assembly_workflow.md) for a visual ove
 
 | Requirement | Version |
 |-------------|---------|
-| [Nextflow](https://www.nextflow.io/) | ≥ 22.10 |
+| [Nextflow](https://www.nextflow.io/) | ≥ 24.10.0 |
 | [Docker](https://docs.docker.com/get-docker/) **or** [Singularity / Apptainer](https://apptainer.org/) | any recent |
+
+**macOS users:** Install Docker Desktop (`brew install --cask docker`) and Nextflow (`brew install nextflow`). The pipeline runs identically via Docker on macOS — no native tool installation needed.
+
+**No container?** Set the `VIRALL_DATABASE_DIR` environment variable, or place databases in `$HOME/.virall/databases/` (see [configuration](#3-configure-run-parameters)).
 
 ### 1. Get the container image
 
@@ -77,18 +81,23 @@ Create (or edit) `nextflow/samples.csv`. Leave columns empty when a read type is
 
 | Column | Description |
 |--------|-------------|
-| `sample_id` | Unique sample name |
-| `read1` / `read2` | Paired-end short reads (Illumina) |
-| `single` | Single-end short reads |
-| `long` | Long reads (ONT Nanopore or PacBio) |
+| `sample_id` | Unique sample name (required) |
+| `illumina_r1` / `illumina_r2` | Paired-end Illumina short reads |
+| `illumina_single` | Single-end Illumina short reads |
+| `iontorrent_r1` / `iontorrent_r2` | Paired-end Ion Torrent reads |
+| `iontorrent_single` | Single-end Ion Torrent reads |
+| `nanopore_reads` | Oxford Nanopore long reads |
+| `pacbio_reads` | PacBio long reads |
 | `sc_read1` / `sc_read2` | 10x Genomics single-cell reads |
+
+Legacy columns `read1`, `read2`, `single`, and `long` are still accepted for backward compatibility.
 
 Example:
 
 ```csv
-sample_id,read1,read2,single,long,sc_read1,sc_read2
-sample1,/data/s1_R1.fastq.gz,/data/s1_R2.fastq.gz,,,, 
-sample2,,,,/data/s2_long.fastq.gz,,
+sample_id,illumina_r1,illumina_r2,nanopore_reads
+sample1,/data/s1_R1.fastq.gz,/data/s1_R2.fastq.gz,
+sample2,,,/data/s2_long.fastq.gz
 ```
 
 ---
@@ -189,41 +198,19 @@ results/
 
 ## Pipeline Parameters
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `samples` | `nextflow/samples.csv` | Sample sheet CSV |
-| `outdir` | `results` | Output directory |
-| `threads` | `8` | CPUs per process |
-| `memory` | `16G` | Memory hint |
-| `assembly_strategy` | `auto` | `auto` / `hybrid` / `short_only` / `long_only` |
-| `long_read_tech` | `nanopore` | `nanopore` or `pacbio` |
-| `reference` | `null` | Reference FASTA (optional) |
-| `reference_only` | `false` | Skip de novo assembly; reference-guided consensus only |
-| `host_genome` | `null` | Host FASTA for read filtering (optional) |
-| `rna_mode` | `false` | Enable SPAdes `--rnaviral` |
-| `metaviral_mode` | `false` | Enable SPAdes `--metaviral` |
-| `iontorrent` | `false` | Ion Torrent short reads |
-| `min_contig_len` | `1000` | Minimum contig length for downstream steps |
-| `quality_phred` | `20` | Short-read PHRED threshold (fastp) |
-| `quality_phred_long` | `7` | Long-read PHRED threshold (fastplong) |
-| `min_read_len` | `50` | Minimum read length — short reads |
-| `min_read_len_long` | `1000` | Minimum read length — long reads |
-| `flye_min_overlap` | `1000` | Flye `--min-overlap` |
-| `flye_genome_size` | `null` | Flye genome size hint (e.g. `"30k"`); null = auto |
-| `quant_mapq` | `20` | MAPQ threshold for high-confidence abundance BAM |
-| `quant_min_breadth` | `0.10` | Min coverage breadth fraction for abundance plots |
-| `single_cell_mode` | `false` | Enable 10x single-cell mode |
-| `sc_chemistry` | `10x_v3` | 10x chemistry version |
-| `kaiju_db` | `null` | Kaiju database path (auto-set in Docker/Singularity) |
-| `checkv_db` | `null` | CheckV database path |
-| `genomad_db` | `null` | geNomad database path |
-| `vog_db` | `null` | VOG HMM database path |
+Run `nextflow run nextflow/main.nf --help` for a complete, grouped parameter reference — or see [nextflow_schema.json](nextflow/nextflow_schema.json).
 
-Database paths are pre-configured for the Docker and Singularity profiles (`/opt/virall/databases/`). Set them manually only when running without a container.
+Key parameters are covered in the [Quick Start](#3-configure-run-parameters) above. Database paths (`kaiju_db`, `checkv_db`, `genomad_db`, `vog_db`) are set automatically by `-profile docker` or `-profile singularity`. For local runs, databases are resolved from `$VIRALL_DATABASE_DIR/` or `$HOME/.virall/databases/`.
 
 ---
 
 ## Troubleshooting
+
+**Pipeline exits immediately with "MalformedInputException" or encoding error**
+Your sample sheet CSV may contain non-UTF-8 characters. The pipeline automatically falls back to ISO-8859-1 encoding with a logged warning. If the error persists, save your CSV as plain UTF-8 from your editor.
+
+**"Sample sheet missing required column 'sample_id'" or no sequencing columns detected**
+The pipeline validates your sample sheet at startup. Verify column names match [the sample sheet format](#2-prepare-your-sample-sheet). These checks appear in the startup banner.
 
 **No viral contigs found**
 Kaiju classifies against the virus-subset database. If no contigs are classified as viral, the pipeline continues and downstream steps produce empty-but-valid output with informative messages.
@@ -261,7 +248,30 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Changelog
 
-### v0.3.0
+### v1.0.0
+- **Architecture:** Modularized pipeline into 8 DSL2 module files (down from 1666-line monolith)
+- **UX:** Added pre-flight checks (sample sheet validation, startup banner, completion summary)
+- **UX:** Added `nextflow_schema.json` with all 30 params documented; `--help` now shows grouped reference
+- **UX:** Added `manifest` block (version, description, homepage) to `nextflow.config`
+- **Robustness:** Replaced implicit `|| true` error suppression with logged warnings on critical tool failures
+- **Robustness:** Fixed CSV encoding crash on non-UTF-8 sample sheets (ISO-8859-1 fallback)
+- **Correctness:** Fixed fuzzy contig matching producing false species labels in plots
+- **Correctness:** Fixed genome fraction correction silently disabled by NaN completeness values
+- **Correctness:** Fixed last-write-wins bug destroying Kaiju taxonomy in `organize_genes_by_taxonomy.py`
+- **Correctness:** Fixed `sys.exit(0)` masking plot generation failures in `reference_check_plot.py`
+- **Correctness:** Removed duplicated single-end/long-read processing in REFERENCE_CHECK
+- **Maintenance:** Aligned numpy version pins between Dockerfile and `install.sh`
+- **Maintenance:** Unified Kaiju parsing across 5 scripts into shared `kaiju_utils.py`
+- **Maintenance:** Unified name sanitization between `rename_contigs.py` and `organize_genes_by_taxonomy.py`
+- **Maintenance:** Pinned bioinformatics tool versions in Dockerfile for reproducible builds
+- **Portability:** Added macOS compatibility fixes (BSD `sed`, BSD `grep`, Bash 3.2 `declare -A`)
+- **Portability:** Added `$HOME/.virall/databases` database path fallback for local runs
+- **Portability:** Removed hardcoded user paths from example `asgsr_run_params.yaml`
+- **Performance:** Switched intermediate `publishDir` modes from `copy` to `symlink`
+- **Performance:** Replaced pointless `cp contigs scaffolds` with `touch` in assembly processes
+- **Correctness:** Made `rename_contigs.py` idempotent on re-run
+- **Maintenance:** Removed dead `run_plots.py` and stale references throughout codebase
+- **Maintenance:** Collapsed 4 repeated auto-detection filter closures into a single helper
 - Migrated to pure Nextflow pipeline; Python CLI removed
 - Fix HPC scheduling: replace `params.threads` with `task.cpus` in all processes so SLURM/SGE allocate the correct number of CPUs
 - Add resource directives (cpus/memory/time) to processes that were missing them (HOST_FILTER, GENOMAD, REFERENCE_CHECK, SC_*, etc.)
