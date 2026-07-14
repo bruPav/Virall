@@ -1,0 +1,237 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/bruPav/Virall/main/nextflow_schema.json",
+    "title": "Virall pipeline parameters",
+    "description": "Viral genome assembly and analysis pipeline",
+    "type": "object",
+    "definitions": {
+        "input_output_options": {
+            "title": "Input/Output options",
+            "type": "object",
+            "required": ["samples"],
+            "properties": {
+                "samples": {
+                    "type": "string",
+                    "default": "nextflow/samples.csv",
+                    "description": "Path to sample sheet CSV. Required columns: sample_id plus sequencing-read columns (illumina_r1, nanopore_reads, pacbio_reads, or iontorrent_r1).",
+                    "fa_icon": "fas fa-table"
+                },
+                "outdir": {
+                    "type": "string",
+                    "default": "results",
+                    "description": "Output directory for all pipeline results.",
+                    "fa_icon": "fas fa-folder-open"
+                },
+                "reference": {
+                    "type": ["string", "null"],
+                    "default": null,
+                    "description": "Path to reference genome FASTA for reference-guided assembly and consensus calling.",
+                    "fa_icon": "fas fa-file-alt"
+                },
+                "reference_only": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Skip de novo assembly; generate consensus directly from reference alignment only.",
+                    "fa_icon": "fas fa-toggle-off"
+                },
+                "host_genome": {
+                    "type": ["string", "null"],
+                    "default": null,
+                    "description": "Optional: Path to host genome FASTA for host read filtering (minimap2 + samtools).",
+                    "fa_icon": "fas fa-filter"
+                }
+            }
+        },
+        "read_processing_options": {
+            "title": "Read processing options",
+            "type": "object",
+            "properties": {
+                "quality_phred": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "Quality Phred threshold for short reads (fastp --qualified_quality_phred).",
+                    "fa_icon": "fas fa-chart-bar"
+                },
+                "quality_phred_long": {
+                    "type": "integer",
+                    "default": 7,
+                    "description": "Quality Phred threshold for long reads (fastplong). Lower default for ONT/PacBio reads.",
+                    "fa_icon": "fas fa-chart-bar"
+                },
+                "min_read_len": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Minimum read length for short reads after trimming (fastp --length_required).",
+                    "fa_icon": "fas fa-ruler"
+                },
+                "min_read_len_long": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Minimum read length for long reads after trimming (fastplong --length_required).",
+                    "fa_icon": "fas fa-ruler"
+                },
+                "long_read_tech": {
+                    "type": "string",
+                    "default": "nanopore",
+                    "description": "Long-read sequencing technology. Affects SPAdes, Flye, and minimap2 presets.",
+                    "enum": ["nanopore", "pacbio"],
+                    "fa_icon": "fas fa-microscope"
+                },
+                "iontorrent": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable Ion Torrent mode (adds --iontorrent to SPAdes, disables adapter trimming and poly-G trimming in fastp).",
+                    "fa_icon": "fas fa-toggle-on"
+                }
+            }
+        },
+        "assembly_options": {
+            "title": "Assembly options",
+            "type": "object",
+            "properties": {
+                "assembly_strategy": {
+                    "type": "string",
+                    "default": "auto",
+                    "description": "Assembly strategy. 'auto' detects from available reads; 'hybrid' uses Flye + short-read polishers; 'short_only' uses SPAdes; 'long_only' uses Flye.",
+                    "enum": ["auto", "hybrid", "short_only", "long_only"],
+                    "fa_icon": "fas fa-puzzle-piece"
+                },
+                "rna_mode": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable RNA virus mode (adds --rnaviral to SPAdes). Disables reference-guided assembly options.",
+                    "fa_icon": "fas fa-virus"
+                },
+                "metaviral_mode": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable metaviralSPAdes mode (--metaviral). Note: disables --trusted-contigs when a reference is provided.",
+                    "fa_icon": "fas fa-viruses"
+                },
+                "min_contig_len": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Minimum contig length (bp) for viral filtering. Contigs below this threshold are excluded.",
+                    "fa_icon": "fas fa-cut"
+                },
+                "flye_min_overlap": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Flye --min-overlap parameter. Lower values recover shorter viral genomes.",
+                    "fa_icon": "fas fa-sliders-h"
+                },
+                "flye_genome_size": {
+                    "type": ["string", "null"],
+                    "default": null,
+                    "description": "Flye --genome-size estimate (e.g. '30k'). Leave null for Flye to auto-estimate.",
+                    "fa_icon": "fas fa-dna"
+                },
+                "threads": {
+                    "type": "integer",
+                    "default": 8,
+                    "description": "Number of CPU threads per process.",
+                    "fa_icon": "fas fa-microchip"
+                },
+                "memory": {
+                    "type": "string",
+                    "default": "16G",
+                    "description": "Memory allocation per process (e.g. '16G', '32G').",
+                    "fa_icon": "fas fa-memory"
+                }
+            }
+        },
+        "classification_quality_options": {
+            "title": "Classification & quality options",
+            "type": "object",
+            "properties": {
+                "kaiju_db": {
+                    "type": ["string", "null"],
+                    "default": null,
+                    "description": "Path to Kaiju reference database directory (contains .fmi, nodes.dmp, names.dmp). Required for taxonomic classification.",
+                    "fa_icon": "fas fa-database"
+                },
+                "checkv_db": {
+                    "type": ["string", "null"],
+                    "default": null,
+                    "description": "Path to CheckV reference database directory (contains genome_db/checkv_reps.dmnd). Used for phage quality assessment.",
+                    "fa_icon": "fas fa-database"
+                },
+                "genomad_db": {
+                    "type": ["string", "null"],
+                    "default": null,
+                    "description": "Path to geNomad database directory. Used for RNA virus and eukaryotic virus quality assessment.",
+                    "fa_icon": "fas fa-database"
+                },
+                "vog_db": {
+                    "type": ["string", "null"],
+                    "default": null,
+                    "description": "Path to VOG (Virus Orthologous Groups) database directory. Used for functional gene annotation.",
+                    "fa_icon": "fas fa-database"
+                }
+            }
+        },
+        "quantification_options": {
+            "title": "Quantification options",
+            "type": "object",
+            "properties": {
+                "quant_mapq": {
+                    "type": "integer",
+                    "default": 20,
+                    "description": "MAPQ threshold for high-confidence read alignments in abundance estimation.",
+                    "fa_icon": "fas fa-chart-line"
+                },
+                "quant_min_breadth": {
+                    "type": "number",
+                    "default": 0.10,
+                    "description": "Minimum contig coverage breadth (fraction 0-1) for abundance estimation. Contigs below this threshold are excluded from relative abundance calculations.",
+                    "fa_icon": "fas fa-percent"
+                }
+            }
+        },
+        "single_cell_options": {
+            "title": "Single-cell options",
+            "type": "object",
+            "properties": {
+                "single_cell_mode": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable single-cell processing mode (10x Genomics). Extracts cell barcodes, pools reads for assembly, then maps back to cells.",
+                    "fa_icon": "fas fa-toggle-on"
+                },
+                "sc_chemistry": {
+                    "type": "string",
+                    "default": "10x_v3",
+                    "description": "10x Genomics chemistry version. Determines barcode length and UMI pattern.",
+                    "enum": ["10x_v3", "10x_v2", "10x_v1"],
+                    "fa_icon": "fas fa-flask"
+                },
+                "sc_barcode_whitelist": {
+                    "type": ["string", "null"],
+                    "default": null,
+                    "description": "Optional: Path to custom 10x barcode whitelist file. Uses umi_tools default if not provided.",
+                    "fa_icon": "fas fa-list"
+                },
+                "sc_min_reads_per_cell": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "Minimum number of reads required to retain a cell barcode.",
+                    "fa_icon": "fas fa-filter"
+                },
+                "sc_min_viral_umis": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "Minimum viral UMIs to classify a cell as infected.",
+                    "fa_icon": "fas fa-biohazard"
+                }
+            }
+        }
+    },
+    "allOf": [
+        { "$ref": "#/definitions/input_output_options" },
+        { "$ref": "#/definitions/read_processing_options" },
+        { "$ref": "#/definitions/assembly_options" },
+        { "$ref": "#/definitions/classification_quality_options" },
+        { "$ref": "#/definitions/quantification_options" },
+        { "$ref": "#/definitions/single_cell_options" }
+    ]
+}
