@@ -173,6 +173,23 @@ nextflow run nextflow/main.nf \
 
 ---
 
+## Testing
+
+Verify the pipeline works on your system with a minimal PhiX174 test:
+
+```bash
+docker build -t pavle17/virall .
+nextflow run nextflow/main.nf -profile test
+```
+
+This runs the full pipeline on 200 synthetic paired-end reads from Enterobacteria phage phiX174 (5.4 kb genome). Expected output:
+- 1 viral contig (~5.4 kb) assembled and classified as *Sinsheimervirus phiX174*
+- Full pipeline output in `test_results/test_sample/`
+
+CI runs this test automatically on every push and pull request — check the **Actions** tab on GitHub for build status.
+
+---
+
 ## Output Structure
 
 Results are written per sample under the output directory:
