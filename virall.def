@@ -3,7 +3,7 @@ From: ubuntu:22.04
 
 %files
     # Note: virall Python package is NOT copied into the container
-    # All Nextflow plotting functionality is self-contained in nextflow/bin/run_plots.py
+    # All Nextflow plotting functionality is self-contained in nextflow/bin/run_plots_genome_corrected.py
     # This simplifies the container and avoids version sync issues
 
 %environment
@@ -364,7 +364,7 @@ From: ubuntu:22.04
     fi
 
     # Note: virall Python package is NOT installed in the container
-    # All Nextflow plotting functionality is self-contained in nextflow/bin/run_plots.py
+    # All Nextflow plotting functionality is self-contained in nextflow/bin/run_plots_genome_corrected.py
     # This simplifies the container and avoids version sync issues
     
     # Fix numpy version for TensorFlow + numba/geNomad compatibility
@@ -536,5 +536,5 @@ From: ubuntu:22.04
          -profile singularity
     
     Note: The virall Python package is NOT installed in this container.
-    All plotting and analysis logic is self-contained in nextflow/bin/run_plots.py
+    All plotting and analysis logic is self-contained in nextflow/bin/run_plots_genome_corrected.py
 

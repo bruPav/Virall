@@ -18,7 +18,7 @@ from kaiju_utils import parse_kaiju
 try:
     import pandas as pd
 except ImportError:
-    sys.exit("run_plots.py requires pandas: pip install pandas")
+    sys.exit("run_plots_genome_corrected.py requires pandas: pip install pandas")
 
 def main():
     parser = argparse.ArgumentParser(
