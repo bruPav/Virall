@@ -89,7 +89,7 @@ if the entire viral genome were assembled.
         if cid_first in species_by_contig:
             return species_by_contig[cid_first]
         for kaiju_cid, sp in species_by_contig.items():
-            if kaiju_cid.startswith(cid) or cid.startswith(kaiju_cid):
+            if kaiju_cid == cid:
                 return sp
         return "Unknown"
 
