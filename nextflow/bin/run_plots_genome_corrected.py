@@ -13,6 +13,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from kaiju_utils import parse_kaiju
+
 try:
     import pandas as pd
 except ImportError:
@@ -72,24 +74,12 @@ if the entire viral genome were assembled.
         contig_lengths = {c: p + 1 for c, p in max_pos.items()}
 
     # Parse Kaiju addTaxonNames output
-    species_by_contig = {}
     kaiju_lineage_by_contig = {}
+    species_by_contig = {}
     if kaiju_file.exists():
-        with open(kaiju_file) as f:
-            for line in f:
-                if line.startswith("C"):
-                    parts = line.strip().split("\t")
-                    if len(parts) >= 4:
-                        cid = parts[1].strip()
-                        if len(parts) >= 10:
-                            lineage = ";".join(p.strip() for p in parts[3:10])
-                            name = (parts[9].strip() if len(parts) > 9 else "") or "Unknown"
-                        else:
-                            lineage = parts[3].strip()
-                            lineage_parts = [p.strip() for p in lineage.split(";") if p.strip()]
-                            name = lineage_parts[-1] if lineage_parts else "Unknown"
-                        species_by_contig[cid] = name or "Unknown"
-                        kaiju_lineage_by_contig[cid] = lineage or name or "Unknown"
+        raw = parse_kaiju(kaiju_file)
+        kaiju_lineage_by_contig = {cid: info["lineage"] for cid, info in raw.items()}
+        species_by_contig = {cid: info["lowest_taxon"] for cid, info in raw.items()}
 
     def species_for_contig(depth_cid):
         cid = depth_cid.strip() if isinstance(depth_cid, str) else str(depth_cid)
@@ -261,24 +251,17 @@ if the entire viral genome were assembled.
     if kaiju_file.exists() and kaiju_lineage_by_contig:
         rows = []
         skipped = 0
-        with open(kaiju_file) as f:
-            for line in f:
-                if line.startswith("C"):
-                    parts = line.strip().split("\t")
-                    if len(parts) >= 4:
-                        cid, taxon_id = parts[1], parts[2]
-                        # Only include contigs that passed FILTER_VIRAL
-                        if viral_contig_ids and cid.strip() not in viral_contig_ids:
-                            skipped += 1
-                            continue
-                        if len(parts) >= 10:
-                            lineage = ";".join(p.strip() for p in parts[3:10])
-                            name = (parts[9].strip() if len(parts) > 9 else "") or "Unknown"
-                        else:
-                            lineage = parts[3].strip()
-                            lineage_parts = [p.strip() for p in lineage.split(";") if p.strip()]
-                            name = lineage_parts[-1] if lineage_parts else "Unknown"
-                        rows.append({"contig_id": cid, "taxon_id": taxon_id, "taxon_name": name or "Unknown", "classification": name or "Unknown", "lineage": lineage or name or "Unknown"})
+        for cid, info in raw.items():
+            if viral_contig_ids and cid not in viral_contig_ids:
+                skipped += 1
+                continue
+            rows.append({
+                "contig_id": cid,
+                "taxon_id": info["taxon_id"],
+                "taxon_name": info["lowest_taxon"],
+                "classification": info["lowest_taxon"],
+                "lineage": info["lineage"],
+            })
         print(f"[run_plots] kaiju_summary: found {len(rows)} classified contigs ({skipped} skipped – not in viral_contigs.fasta)", file=sys.stderr)
         if rows:
             pd.DataFrame(rows).to_csv(kaiju_summary_file, sep="\t", index=False)
