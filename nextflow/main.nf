@@ -69,10 +69,7 @@ workflow {
     }
 
     // ── Pre-flight ─────────────────────────────────────────────────────────
-    def using_docker     = session.config.navigate('docker.enabled', false)
-    def using_singularity = session.config.navigate('singularity.enabled', false)
-    def using_slurm      = session.config.navigate('process.executor') == 'slurm'
-    def container_img    = session.config.navigate('process.container', '')
+    def has_container = params.kaiju_db?.startsWith('/opt/virall')
 
     log.info "╔══════════════════════════════════════╗"
     log.info "║  Virall  v0.4.0                       ║"
@@ -85,14 +82,10 @@ workflow {
         log.info "║  RNA mode  : enabled"
     if (params.host_genome)
         log.info "║  Host filt : ${params.host_genome}"
-    if (using_docker)
-        log.info "║  Container : docker (${container_img})"
-    else if (using_singularity)
-        log.info "║  Container : singularity (${container_img})"
+    if (has_container)
+        log.info "║  Container : detected (DBs from container)"
     else
         log.warn "║  No container profile active — tools must be installed locally"
-    if (using_slurm)
-        log.info "║  Executor  : SLURM"
     log.info "╚══════════════════════════════════════╝"
 
     // Validate sample sheet columns
@@ -415,11 +408,11 @@ workflow {
         
         SC_BUILD_MATRIX(ch_matrix_input)
     }
-}
 
-workflow.onComplete {
-    log.info "════════════════════════════════════"
-    log.info "  Virall pipeline completed"
-    log.info "  Results: ${params.outdir}"
-    log.info "════════════════════════════════════"
+    workflow.onComplete {
+        println "════════════════════════════════════"
+        println "  Virall pipeline completed"
+        println "  Results: " + params.outdir
+        println "════════════════════════════════════"
+    }
 }
