@@ -112,8 +112,8 @@ if the entire viral genome were assembled.
                 # Prefer CheckV's checkv_completeness (AAI-based genome fraction).
                 # geNomad's completeness measures hallmark gene presence, not genome
                 # fraction — a 2 kb fragment with a marker gene is not 100% complete.
-                checkv_val = float(row.get("checkv_completeness", 0) or 0)
-                genomad_val = float(row.get("completeness", 0) or 0)
+                checkv_val = pd.to_numeric(row.get("checkv_completeness", 0), errors='coerce')
+                genomad_val = pd.to_numeric(row.get("completeness", 0), errors='coerce')
                 if pd.notna(checkv_val) and checkv_val > 0:
                     completeness = checkv_val
                 elif genomad_val > 0:
