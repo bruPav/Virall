@@ -18,6 +18,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from kaiju_utils import parse_kaiju
+
 
 def sanitize_name(name):
     """Sanitize a taxonomy name for use as a contig identifier."""
@@ -46,27 +48,6 @@ def get_lowest_classification(lineage_str):
         return "unclassified_virus"
 
     return sanitize_name(levels[-1])
-
-
-def parse_kaiju_taxonomy(kaiju_file):
-    """Parse Kaiju results-with-names to get contig_id -> lineage mapping."""
-    taxonomy = {}
-
-    if not kaiju_file.exists() or kaiju_file.stat().st_size == 0:
-        return taxonomy
-
-    with open(kaiju_file) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split('\t')
-            if len(parts) >= 4 and parts[0] == 'C':
-                contig_id = parts[1].strip()
-                lineage = parts[3].strip()
-                taxonomy[contig_id] = lineage
-
-    return taxonomy
 
 
 def parse_fasta_ids(fasta_file):
@@ -175,7 +156,8 @@ def main():
     # Parse inputs
     print(f"[rename_contigs] Reading taxonomy from {kaiju_names_file}",
           file=sys.stderr)
-    taxonomy = parse_kaiju_taxonomy(kaiju_names_file)
+    raw_tax = parse_kaiju(kaiju_names_file)
+    taxonomy = {cid: info["lineage"] for cid, info in raw_tax.items()}
     contig_ids = parse_fasta_ids(args.fasta)
 
     print(f"[rename_contigs] Found {len(contig_ids)} contigs in FASTA",
