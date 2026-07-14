@@ -408,11 +408,4 @@ workflow {
         
         SC_BUILD_MATRIX(ch_matrix_input)
     }
-
-    workflow.onComplete {
-        println "════════════════════════════════════"
-        println "  Virall pipeline completed"
-        println "  Results: " + params.outdir
-        println "════════════════════════════════════"
-    }
 }
