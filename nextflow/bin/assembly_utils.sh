@@ -14,7 +14,7 @@ check_spades_coverage() {
     # Fallback: metaviralSPAdes encodes coverage in contig headers
     if [ -z "$SPADES_COV" ] || [ "$SPADES_COV" = "0" ]; then
         if [ -f contigs ] && [ -s contigs ]; then
-            SPADES_COV=$(grep "^>" contigs | grep -oP 'cov_[0-9.]+' | sed 's/cov_//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n}')
+            SPADES_COV=$(grep "^>" contigs | grep -Eo 'cov_[0-9.]+' | sed 's/cov_//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n}')
         fi
     fi
     if [ -n "$SPADES_COV" ]; then
@@ -34,7 +34,7 @@ check_flye_coverage() {
     local LOGFILE="$1"
     local SAMPLE_ID="$2"
     if [ -f "$LOGFILE" ]; then
-        local FLYE_COV=$(grep -a "Overlap-based coverage:" "$LOGFILE" | grep -oP '\\d+' | tail -1)
+        local FLYE_COV=$(grep -a "Overlap-based coverage:" "$LOGFILE" | grep -Eo '[0-9]+' | tail -1)
         if [ -n "$FLYE_COV" ] && [ "$FLYE_COV" -gt 0 ] 2>/dev/null && [ "$FLYE_COV" -lt 10 ] 2>/dev/null; then
             echo "========================================"
             echo "  WARNING: Low Flye coverage (${FLYE_COV}x)"
