@@ -14,6 +14,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from kaiju_utils import parse_kaiju
+
 try:
     from scipy.io import mmwrite
     from scipy.sparse import csr_matrix
@@ -21,28 +23,6 @@ try:
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
-
-
-def parse_kaiju_taxonomy(kaiju_dir):
-    """Parse Kaiju results to get contig taxonomy."""
-    taxonomy = {}
-    kaiju_file = Path(kaiju_dir) / "kaiju_results_with_names.tsv"
-    
-    if not kaiju_file.exists():
-        return taxonomy
-    
-    with open(kaiju_file) as f:
-        for line in f:
-            parts = line.strip().split('\t')
-            if len(parts) >= 4 and parts[0] == 'C':
-                contig_id = parts[1]
-                lineage = parts[3] if len(parts) > 3 else ''
-                # Extract species/genus name from lineage
-                levels = [l.strip() for l in lineage.split(';') if l.strip() and l.strip() != 'NA']
-                name = levels[-1] if levels else contig_id
-                taxonomy[contig_id] = name
-    
-    return taxonomy
 
 
 def parse_counts(counts_file):
@@ -150,7 +130,8 @@ def main():
     print(f"[sc_build_matrix] Found {len(counts)} cells with counts", file=sys.stderr)
     
     print("[sc_build_matrix] Parsing Kaiju taxonomy...", file=sys.stderr)
-    taxonomy = parse_kaiju_taxonomy(args.kaiju_dir)
+    raw_tax = parse_kaiju(Path(args.kaiju_dir) / "kaiju_results_with_names.tsv")
+    taxonomy = {cid: info["lowest_taxon"] for cid, info in raw_tax.items()}
     print(f"[sc_build_matrix] Found taxonomy for {len(taxonomy)} contigs", file=sys.stderr)
     
     print("[sc_build_matrix] Parsing contig lengths...", file=sys.stderr)
