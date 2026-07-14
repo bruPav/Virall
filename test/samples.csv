@@ -1,0 +1,2 @@
+sample_id,illumina_r1,illumina_r2
+test_sample,test/data/test_R1.fastq.gz,test/data/test_R2.fastq.gz

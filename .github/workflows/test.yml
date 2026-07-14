@@ -1,0 +1,42 @@
+name: Test Pipeline
+
+on:
+  push:
+    paths-ignore:
+      - README.md
+      - LICENSE
+      - .gitignore
+      - '*.md'
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Nextflow
+        run: |
+          curl -fsSL https://get.nextflow.io | bash
+          sudo mv nextflow /usr/local/bin/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (cached)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: pavle17/virall:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run pipeline
+        run: nextflow run nextflow/main.nf -profile test -ansi-log false
+
+      - name: Verify outputs
+        run: |
+          test -f test_results/test_sample/02_viral_contigs/viral_contigs.fasta || exit 1
+          test -s test_results/test_sample/02_viral_contigs/viral_contigs.fasta || exit 1
+          echo "Pipeline produced viral contigs — test passed"
