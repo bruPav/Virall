@@ -1071,26 +1071,6 @@ process REFERENCE_CHECK {
       TOTAL_READS=\$((TOTAL_READS + LONG_TOTAL))
     fi
 
-    if [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ]; then
-      bwa mem -t ${task.cpus} ref_check_dir/ref_idx ${single} 2>/dev/null | \
-        samtools sort -o ref_check_dir/mapped_single.bam - 2>/dev/null
-      samtools index ref_check_dir/mapped_single.bam 2>/dev/null || true
-      SINGLE_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_single.bam 2>/dev/null || echo 0)
-      SINGLE_TOTAL=\$(samtools view -c ref_check_dir/mapped_single.bam 2>/dev/null || echo 0)
-      MAPPED_READS=\$((MAPPED_READS + SINGLE_MAPPED))
-      TOTAL_READS=\$((TOTAL_READS + SINGLE_TOTAL))
-    fi
-
-    if [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
-      minimap2 -t ${task.cpus} -ax ${minimap2_preset} ${reference} ${long_reads} 2>/dev/null | \
-        samtools sort -o ref_check_dir/mapped_long.bam - 2>/dev/null
-      samtools index ref_check_dir/mapped_long.bam 2>/dev/null || true
-      LONG_MAPPED=\$(samtools view -c -F 4 ref_check_dir/mapped_long.bam 2>/dev/null || echo 0)
-      LONG_TOTAL=\$(samtools view -c ref_check_dir/mapped_long.bam 2>/dev/null || echo 0)
-      MAPPED_READS=\$((MAPPED_READS + LONG_MAPPED))
-      TOTAL_READS=\$((TOTAL_READS + LONG_TOTAL))
-    fi
-
     # Merge BAMs if multiple exist
     BAM_FILES=""
     [ -f ref_check_dir/mapped_pe.bam ] && BAM_FILES="\$BAM_FILES ref_check_dir/mapped_pe.bam"
