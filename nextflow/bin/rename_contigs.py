@@ -92,6 +92,11 @@ def rename_fasta(input_fasta, output_fasta, mapping):
                 header = line[1:].strip()
                 old_id = header.split()[0]
                 rest = header[len(old_id):]
+                # If already renamed, extract the original assembler name
+                m = re.search(r'original_name=(\S+)', rest)
+                if m:
+                    old_id = m.group(1)
+                    rest = re.sub(r'\s+original_name=\S+', '', rest)
                 new_id = mapping.get(old_id, old_id)
                 fout.write(f">{new_id} original_name={old_id}{rest}\n")
             else:
