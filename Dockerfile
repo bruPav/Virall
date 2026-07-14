@@ -1,4 +1,4 @@
-# Dockerfile for Virall - Viral Assembler Pipeline
+# Dockerfile for Virall - Viral Genome Assembly Pipeline
 # Uses miniforge3 with mamba for fast, reliable package management
 
 FROM condaforge/miniforge3:latest
@@ -73,7 +73,7 @@ RUN mamba install -n virall -c bioconda -c conda-forge -y \
     && mamba clean -afy
 
 # Note: virall Python package is NOT installed in the container
-# All Nextflow plotting functionality is self-contained in nextflow/bin/run_plots.py
+# All Nextflow plotting functionality is self-contained in nextflow/bin/run_plots_genome_corrected.py
 # This simplifies the container and avoids version sync issues
 
 # Set up directories for databases and work
