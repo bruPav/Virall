@@ -48,28 +48,28 @@ RUN mamba install -n virall -c conda-forge -y \
     "psutil>=5.9.0" \
     && mamba clean -afy
 
-# Install bioinformatics tools (versions relaxed so solver can resolve libzlib/gsl)
+# Install bioinformatics tools with version pins matching install.sh
 RUN mamba install -n virall -c bioconda -c conda-forge -y \
-    samtools \
-    bwa \
-    minimap2 \
-    spades \
-    flye \
-    fastp \
-    fastplong \
-    fastqc \
-    seqtk \
-    checkv \
-    diamond \
-    bcftools \
+    "samtools>=1.22.1,<2.0" \
+    "bwa>=0.7.19" \
+    "minimap2>=2.30,<3.0" \
+    "spades>=4.2.0,<5.0" \
+    "flye>=2.9.6,<3.0" \
+    "fastp>=1.0.1,<2.0" \
+    "fastplong>=0.4.1,<1.0" \
+    "fastqc>=0.12.1,<1.0" \
+    "seqtk>=1.3,<2.0" \
+    "checkv>=1.0.3,<2.0" \
+    "diamond>=2.1.0,<3.0" \
+    "bcftools>=1.22,<2.0" \
     polypolish \
     pypolca \
-    hmmer \
-    prodigal \
-    kaiju \
-    genomad \
-    umi_tools \
-    medaka \
+    "hmmer>=3.4,<4.0" \
+    "prodigal>=2.6.3,<3.0" \
+    "kaiju>=1.10.1,<2.0" \
+    "genomad>=1.9.0,<2.0" \
+    "umi_tools>=1.1.5,<2.0" \
+    "medaka>=1.11,<2.0" \
     && mamba clean -afy
 
 # Note: virall Python package is NOT installed in the container
