@@ -60,7 +60,7 @@ params.sc_min_viral_umis = 1          // Minimum viral UMIs to call cell "infect
 process SC_EXTRACT_BARCODES {
     tag {"SC_BC: $sample_id"}
     label "single_cell"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell/barcoded_reads" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell/barcoded_reads" }, mode: "symlink"
 
     input:
     tuple val(sample_id), path(sc_read1), path(sc_read2)
@@ -134,7 +134,7 @@ process SC_POOL_READS {
 process PREPROCESS {
     tag { sample_id }
     label "preprocess"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/00_preprocess" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/00_preprocess" }, mode: "symlink"
 
     input:
     tuple val(sample_id),
@@ -200,7 +200,7 @@ process PREPROCESS {
 process HOST_FILTER {
     tag { sample_id }
     label "host_filter"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/00_preprocess/host_filtered" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/00_preprocess/host_filtered" }, mode: "symlink"
 
     input:
     tuple val(sample_id),
@@ -625,7 +625,7 @@ process REF_ASSEMBLE {
 process KAIJU {
     tag { sample_id }
     label "kaiju"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/03_classifications" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/03_classifications" }, mode: "symlink"
 
     input:
     tuple val(sample_id), path(contigs)
@@ -663,7 +663,7 @@ process KAIJU {
 process FILTER_VIRAL {
     tag { sample_id }
     label "filter_viral"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/02_viral_contigs" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/02_viral_contigs" }, mode: "symlink"
 
     input:
     tuple val(sample_id), path(kaiju_dir), path(contigs)
@@ -725,7 +725,7 @@ process RENAME_CONTIGS {
 process VALIDATE {
     tag { sample_id }
     label "validate"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/04_quality_assessment" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/04_quality_assessment" }, mode: "symlink"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir)
@@ -775,7 +775,7 @@ process VALIDATE {
 process GENOMAD {
     tag { sample_id }
     label "genomad"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/04_quality_assessment/genomad" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/04_quality_assessment/genomad" }, mode: "symlink"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir)
@@ -868,7 +868,7 @@ process MERGE_QUALITY {
 process ANNOTATE {
     tag { sample_id }
     label "annotate"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/05_gene_predictions" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/05_gene_predictions" }, mode: "symlink"
 
     input:
     tuple val(sample_id), path(viral_contigs), path(kaiju_dir)
@@ -901,7 +901,7 @@ process ANNOTATE {
 process ORGANIZE_GENES {
     tag { sample_id }
     label "annotate"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/05_gene_predictions" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/05_gene_predictions" }, mode: "symlink"
 
     input:
     tuple val(sample_id), path(annotation_dir), path(viral_contigs), path(kaiju_dir)
@@ -1013,7 +1013,7 @@ process QUANTIFY {
 process REFERENCE_CHECK {
     tag { sample_id }
     label "reference_check"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_reference_check" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_reference_check" }, mode: "symlink"
 
     input:
     tuple val(sample_id),
@@ -1224,7 +1224,7 @@ process PLOT {
 process SC_MAP_VIRAL {
     tag { sample_id }
     label "single_cell"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell/viral_mapping" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell/viral_mapping" }, mode: "symlink"
 
     input:
     tuple val(sample_id), path(tagged_r2), path(viral_contigs)
@@ -1268,7 +1268,7 @@ process SC_MAP_VIRAL {
 process SC_COUNT_CELLS {
     tag { sample_id }
     label "single_cell"
-    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell" }, mode: "copy"
+    publishDir { "${resolvePath(params.outdir)}/${sample_id}/08_single_cell" }, mode: "symlink"
 
     input:
     tuple val(sample_id), path(bam), path(bai)
