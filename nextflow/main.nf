@@ -68,6 +68,51 @@ workflow {
         error "ERROR: reference_only=true requires a reference genome. Set 'reference' in your params file."
     }
 
+    // ── Pre-flight ─────────────────────────────────────────────────────────
+    def using_docker     = session.config.navigate('docker.enabled', false)
+    def using_singularity = session.config.navigate('singularity.enabled', false)
+    def using_slurm      = session.config.navigate('process.executor') == 'slurm'
+    def container_img    = session.config.navigate('process.container', '')
+
+    log.info "╔══════════════════════════════════════╗"
+    log.info "║  Virall  v1.0.0                       ║"
+    log.info "║  Viral Genome Assembly & Analysis    ║"
+    log.info "╠══════════════════════════════════════╣"
+    log.info "║  Samples   : ${params.samples}"
+    log.info "║  Output    : ${params.outdir}"
+    log.info "║  Strategy  : ${params.assembly_strategy}"
+    if (params.rna_mode)
+        log.info "║  RNA mode  : enabled"
+    if (params.host_genome)
+        log.info "║  Host filt : ${params.host_genome}"
+    if (using_docker)
+        log.info "║  Container : docker (${container_img})"
+    else if (using_singularity)
+        log.info "║  Container : singularity (${container_img})"
+    else
+        log.warn "║  No container profile active — tools must be installed locally"
+    if (using_slurm)
+        log.info "║  Executor  : SLURM"
+    log.info "╚══════════════════════════════════════╝"
+
+    // Validate sample sheet columns
+    def samples_file = file(params.samples)
+    if (samples_file.exists()) {
+        def header
+        try {
+            header = samples_file.getText('UTF-8')
+        } catch (java.nio.charset.MalformedInputException e) {
+            header = samples_file.getText('ISO-8859-1')
+        }
+        header = header.readLines().first().split(',').collect{ it.trim().toLowerCase() }
+        if (!header.contains('sample_id'))
+            error "Sample sheet '${params.samples}' missing required column 'sample_id'. Found: ${header}"
+        if (!header.any { it in ['illumina_r1', 'nanopore_reads', 'pacbio_reads', 'iontorrent_r1'] })
+            log.warn "No sequencing-read column detected in sample sheet. Expected one of: illumina_r1, nanopore_reads, pacbio_reads, iontorrent_r1"
+    } else {
+        error "Sample sheet not found: ${params.samples}"
+    }
+
     // Resolve DB paths from env if not set (params.xxx are read-only; resolve in workflow)
     def db_dir = System.getenv("VIRALL_DATABASE_DIR") ?: ""
 
@@ -370,4 +415,11 @@ workflow {
         
         SC_BUILD_MATRIX(ch_matrix_input)
     }
+}
+
+workflow.onComplete {
+    log.info "════════════════════════════════════"
+    log.info "  Virall pipeline completed"
+    log.info "  Results: ${params.outdir}"
+    log.info "════════════════════════════════════"
 }
