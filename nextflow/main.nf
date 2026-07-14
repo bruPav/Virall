@@ -91,7 +91,13 @@ workflow {
     Channel
         .fromPath(params.samples, checkIfExists: true)
         .map { file ->
-            def raw = file.getText('UTF-8')
+            def raw
+            try {
+                raw = file.getText('UTF-8')
+            } catch (java.nio.charset.MalformedInputException e) {
+                log.warn "File ${file.name} has non-UTF-8 bytes; falling back to ISO-8859-1"
+                raw = file.getText('ISO-8859-1')
+            }
             if (raw.startsWith('\uFEFF'))
                 raw = raw.substring(1)
             raw
