@@ -27,6 +27,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from kaiju_utils import parse_kaiju
+
 # Try to import BioPython for FASTA parsing
 try:
     from Bio import SeqIO
@@ -62,44 +64,6 @@ def parse_prodigal_header(header):
     strand = int(parts[3]) if len(parts) > 3 else 1
     
     return gene_id, contig_id, start, end, strand
-
-
-def parse_kaiju_results(kaiju_file):
-    """
-    Parse Kaiju results file to get contig_id -> taxonomy mapping.
-    
-    Returns dict: contig_id -> {
-        'taxon_id': str,
-        'lineage': str,
-        'parsed_lineage': list of taxonomy levels
-    }
-    """
-    contig_taxonomy = {}
-    
-    with open(kaiju_file) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            
-            parts = line.split("\t")
-            status = parts[0]
-            contig_id = parts[1]
-            
-            if status == "C" and len(parts) >= 4:
-                taxon_id = parts[2]
-                lineage = parts[3]
-                
-                # Parse lineage: "Viruses; Nucleocytoviricota; Megaviricetes; ..."
-                levels = [p.strip() for p in lineage.split(";") if p.strip()]
-                
-                contig_taxonomy[contig_id] = {
-                    'taxon_id': taxon_id,
-                    'lineage': lineage,
-                    'parsed_lineage': levels
-                }
-    
-    return contig_taxonomy
 
 
 def get_taxonomy_key(lineage_levels):
@@ -457,7 +421,7 @@ def main():
         print(f"[organize_genes] Loaded {len(vog_categories)} functional category definitions", file=sys.stderr)
     
     print(f"[organize_genes] Loading Kaiju taxonomy from {kaiju_file}", file=sys.stderr)
-    contig_taxonomy = parse_kaiju_results(kaiju_file)
+    contig_taxonomy = parse_kaiju(kaiju_file)
     print(f"[organize_genes] Loaded taxonomy for {len(contig_taxonomy)} contigs", file=sys.stderr)
     
     # Load contig sequences
