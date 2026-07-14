@@ -114,7 +114,8 @@ process ASSEMBLE_LONG {
         run_ref_guided_consensus "${long_reads}" "${ref_fasta}" "${long_tech}" "${task.cpus}" "contigs_ref_guided.fasta" "assembly_dir"
       fi
 
-      cp contigs scaffolds 2>/dev/null || true
+      # Scaffolding not implemented — emit empty scaffolds placeholder
+      touch scaffolds
     else
       echo "ASSEMBLE_LONG: no long reads for ${sample_id}"
       touch contigs scaffolds
@@ -234,7 +235,8 @@ process ASSEMBLE_HYBRID {
         run_ref_guided_consensus "${long_reads}" "${ref_fasta}" "${long_tech}" "${task.cpus}" "contigs_ref_guided.fasta" "assembly_dir"
       fi
 
-      cp contigs scaffolds 2>/dev/null || true
+      # Scaffolding not implemented — emit empty scaffolds placeholder
+      touch scaffolds
     else
       echo "Warning: strategy=hybrid but no long reads available, falling back to short-read assembly"
       if [ -s "${r1}" ] || [ -s "${single}" ]; then
@@ -344,7 +346,7 @@ process REF_ASSEMBLE {
       samtools consensus assembly_dir/ref_merged.bam -o contigs --show-ins no -a
     fi
 
-    cp contigs scaffolds 2>/dev/null || touch contigs scaffolds
+      touch scaffolds
     touch preprocess_dir/trimmed_R1.fastq.gz preprocess_dir/trimmed_R2.fastq.gz preprocess_dir/trimmed_single.fastq.gz preprocess_dir/trimmed_long.fastq.gz
 
     echo "Reference-only assembly complete for ${sample_id}"
