@@ -33,7 +33,7 @@ process HOST_FILTER {
     # Paired-end: keep pairs where BOTH reads are unmapped (-f 12)
     if [ -s "${r1}" ] && [ -s "${r2}" ] && [ "${r1.name}" != ".placeholder_r1" ]; then
       minimap2 -ax sr -t ${task.cpus} ${host_ref} ${r1} ${r2} 2>host_filter_dir/host_filter_pe.log | \
-        samtools sort -n - 2>/dev/null | samtools fastq -f 12 -1 host_filter_dir/R1.fq -2 host_filter_dir/R2.fq - 2>/dev/null || true
+        samtools sort -n - 2>/dev/null | samtools fastq -f 12 -1 host_filter_dir/R1.fq -2 host_filter_dir/R2.fq - 2>/dev/null || { echo "WARNING: samtools fastq (PE) failed for ${sample_id}" >&2; }
       if [ -s host_filter_dir/R1.fq ]; then
         gzip -c host_filter_dir/R1.fq > host_filter_dir/trimmed_R1.fastq.gz
         gzip -c host_filter_dir/R2.fq > host_filter_dir/trimmed_R2.fastq.gz
@@ -49,7 +49,7 @@ process HOST_FILTER {
     # Single-end short
     if [ -s "${single}" ] && [ "${single.name}" != ".placeholder_single" ]; then
       minimap2 -ax sr -t ${task.cpus} ${host_ref} ${single} 2>host_filter_dir/host_filter_single.log | \
-        samtools fastq -f 4 - > host_filter_dir/single.fq 2>/dev/null || true
+        samtools fastq -f 4 - > host_filter_dir/single.fq 2>/dev/null || { echo "WARNING: samtools fastq (single) failed for ${sample_id}" >&2; }
       if [ -s host_filter_dir/single.fq ]; then
         gzip -c host_filter_dir/single.fq > host_filter_dir/trimmed_single.fastq.gz
       else
@@ -63,7 +63,7 @@ process HOST_FILTER {
     MINIMAP2_LONG_PRESET=\$( [ "${long_tech}" = "pacbio" ] && echo "map-pb" || echo "map-ont" )
     if [ -s "${long_reads}" ] && [ "${long_reads.name}" != ".placeholder_long" ]; then
       minimap2 -ax \$MINIMAP2_LONG_PRESET -t ${task.cpus} ${host_ref} ${long_reads} 2>host_filter_dir/host_filter_long.log | \
-        samtools fastq -f 4 - > host_filter_dir/long.fq 2>/dev/null || true
+        samtools fastq -f 4 - > host_filter_dir/long.fq 2>/dev/null || { echo "WARNING: samtools fastq (long) failed for ${sample_id}" >&2; }
       if [ -s host_filter_dir/long.fq ]; then
         gzip -c host_filter_dir/long.fq > host_filter_dir/trimmed_long.fastq.gz
       else

@@ -50,15 +50,15 @@ process QUANTIFY {
         touch quant_dir/mapped.bam
       fi
       samtools index quant_dir/mapped.bam
-      samtools depth -a quant_dir/mapped.bam > quant_dir/depth.txt 2>/dev/null || true
+      samtools depth -a quant_dir/mapped.bam > quant_dir/depth.txt 2>/dev/null || { echo "WARNING: samtools depth failed for ${sample_id}" >&2; }
 
       # High-confidence subset for abundance estimation:
       # -q: keep alignments with MAPQ >= params.quant_mapq
       # -F 2308: remove unmapped(4), secondary(256), supplementary(2048)
-      samtools view -b -q ${params.quant_mapq} -F 2308 quant_dir/mapped.bam > quant_dir/mapped_primary_mapq.bam 2>/dev/null || true
+      samtools view -b -q ${params.quant_mapq} -F 2308 quant_dir/mapped.bam > quant_dir/mapped_primary_mapq.bam 2>/dev/null || { echo "WARNING: samtools view MAPQ filter failed for ${sample_id}" >&2; }
       if [ -s quant_dir/mapped_primary_mapq.bam ]; then
         samtools index quant_dir/mapped_primary_mapq.bam 2>/dev/null || true
-        samtools depth -a quant_dir/mapped_primary_mapq.bam > quant_dir/depth_primary_mapq${params.quant_mapq}.txt 2>/dev/null || true
+        samtools depth -a quant_dir/mapped_primary_mapq.bam > quant_dir/depth_primary_mapq${params.quant_mapq}.txt 2>/dev/null || { echo "WARNING: samtools depth (MAPQ) failed for ${sample_id}" >&2; }
       else
         touch quant_dir/mapped_primary_mapq.bam quant_dir/depth_primary_mapq${params.quant_mapq}.txt
       fi
@@ -139,7 +139,7 @@ process REFERENCE_CHECK {
     if [ -n "\$BAM_FILES" ]; then
       samtools merge -f ref_check_dir/merged.bam \$BAM_FILES 2>/dev/null || cp \$(echo \$BAM_FILES | awk '{print \$1}') ref_check_dir/merged.bam
       samtools index ref_check_dir/merged.bam 2>/dev/null || true
-      samtools depth -a ref_check_dir/merged.bam > ref_check_dir/reference_depth.txt 2>/dev/null || true
+      samtools depth -a ref_check_dir/merged.bam > ref_check_dir/reference_depth.txt 2>/dev/null || { echo "WARNING: samtools depth (ref) failed for ${sample_id}" >&2; }
     fi
 
     # Calculate mapping rate and coverage (awk instead of bc for container compatibility)
