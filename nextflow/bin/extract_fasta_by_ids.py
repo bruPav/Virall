@@ -44,7 +44,7 @@ def main():
             # match by full id or id before first space
             seq_id = rec.id.split()[0]
             if seq_id in wanted or rec.id in wanted:
-                if args.min_len and len(rec.seq) < args.min_len:
+                if len(rec.seq) < args.min_len:
                     skipped_short += 1
                     continue
                 SeqIO.write(rec, out_f, "fasta")
