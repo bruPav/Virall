@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from kaiju_utils import parse_kaiju
+
 
 # ── Phage detection ──────────────────────────────────────────────────────────
 
@@ -138,27 +140,6 @@ def _downgrade_host_contamination(row: dict) -> dict:
         if "host_gene_warning" not in method:
             row["completeness_method"] = (method + "; host_gene_warning").strip("; ")
     return row
-
-
-def load_kaiju_taxonomy(kaiju_file: Path) -> dict:
-    """Parse Kaiju results-with-names into {contig_id: lineage_str}."""
-    taxonomy = {}
-    if not kaiju_file.exists():
-        return taxonomy
-    try:
-        with open(kaiju_file) as fh:
-            for line in fh:
-                if not line.startswith("C"):
-                    continue
-                parts = line.strip().split("\t")
-                if len(parts) >= 4:
-                    contig_id = parts[1].strip()
-                    lineage = parts[3] if len(parts) == 4 else ";".join(parts[3:10])
-                    taxonomy[contig_id] = lineage.lower()
-        print(f"Loaded taxonomy for {len(taxonomy)} contigs", file=sys.stderr)
-    except Exception as exc:
-        print(f"Warning: Could not read Kaiju file: {exc}", file=sys.stderr)
-    return taxonomy
 
 
 def load_tsv(path: Path, label: str) -> pd.DataFrame:
@@ -385,7 +366,8 @@ def main():
     if not checkv_df.empty:
         checkv_df["quality_source"] = "checkv"
     genomad_df = load_tsv(genomad_file, "geNomad")
-    kaiju_taxonomy = load_kaiju_taxonomy(kaiju_file)
+    kaiju_raw = parse_kaiju(kaiju_file)
+    kaiju_taxonomy = {cid: info["lineage"].lower() for cid, info in kaiju_raw.items()}
 
     merged_rows = merge(checkv_df, genomad_df, kaiju_taxonomy)
 
