@@ -183,10 +183,10 @@ def get_taxonomy_key(lineage_levels):
 def sanitize_filename(name):
     """Sanitize a string to be safe for use as filename."""
     # Replace problematic characters
-    name = re.sub(r'[<>:"/\\|?*]', '_', name)
+    name = re.sub(r'[<>:"/\\|?*\[\]{}()\'`~!@#$%^&+=,;]', '', name)
     name = re.sub(r'\s+', '_', name)
     name = re.sub(r'_+', '_', name)
-    name = name.strip('_')
+    name = name.strip('_.')
     return name if name else "unknown"
 
 
