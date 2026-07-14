@@ -1551,36 +1551,28 @@ workflow {
         // auto-detect per sample based on available reads
         ch_reads_meta = ch_filtered_reads.join(ch_meta, remainder: true)
 
-        ch_auto_short = ch_reads_meta.filter {
-            def has_pe   = it[1].size() > 0 && it[2].size() > 0
-            def has_se   = it[3].size() > 0
-            def has_long = it[4].size() > 0
-            (has_pe || has_se) && !has_long
-        }.map { [it[0], it[1], it[2], it[3], it[5]] }
-
-        ch_auto_long = ch_reads_meta.filter {
-            def has_pe   = it[1].size() > 0 && it[2].size() > 0
-            def has_se   = it[3].size() > 0
-            def has_long = it[4].size() > 0
-            !has_pe && !has_se && has_long
-        }.map { [it[0], it[4], it[6]] }
-
-        ch_auto_hybrid = ch_reads_meta.filter {
-            def has_pe   = it[1].size() > 0 && it[2].size() > 0
-            def has_se   = it[3].size() > 0
-            def has_long = it[4].size() > 0
-            (has_pe || has_se) && has_long
+        // classify each sample by available reads → (mode, sample_tuple)
+        ch_reads_classified = ch_reads_meta.map { t ->
+            def has_pe   = t[1].size() > 0 && t[2].size() > 0
+            def has_se   = t[3].size() > 0
+            def has_long = t[4].size() > 0
+            if (!has_pe && !has_se && !has_long) return tuple("empty", t)
+            if ((has_pe || has_se) && !has_long) return tuple("short", t)
+            if (!has_pe && !has_se && has_long)  return tuple("long", t)
+            return tuple("hybrid", t)
         }
 
-        // Samples with no reads: route to short (produces empty assembly)
-        ch_auto_empty = ch_reads_meta.filter {
-            def has_pe   = it[1].size() > 0 && it[2].size() > 0
-            def has_se   = it[3].size() > 0
-            def has_long = it[4].size() > 0
-            !has_pe && !has_se && !has_long
-        }.map { [it[0], it[1], it[2], it[3], it[5]] }
+        ch_auto_short = ch_reads_classified
+            .filter { it[0] == "short" || it[0] == "empty" }
+            .map { [it[1][0], it[1][1], it[1][2], it[1][3], it[1][5]] }
+        ch_auto_long = ch_reads_classified
+            .filter { it[0] == "long" }
+            .map { [it[1][0], it[1][4], it[1][6]] }
+        ch_auto_hybrid = ch_reads_classified
+            .filter { it[0] == "hybrid" }
+            .map { it[1] }
 
-        ASSEMBLE_SHORT(ch_auto_short.mix(ch_auto_empty), ref_file, assembly_utils_script)
+        ASSEMBLE_SHORT(ch_auto_short, ref_file, assembly_utils_script)
         ASSEMBLE_LONG(ch_auto_long, ref_file, assembly_utils_script)
         ASSEMBLE_HYBRID(ch_auto_hybrid, ref_file, assembly_utils_script)
 
