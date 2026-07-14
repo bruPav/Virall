@@ -130,34 +130,28 @@ if command -v module >/dev/null 2>&1; then
     echo "Module system detected (likely HPC environment)"
 fi
 
-# Define all required bioinformatics tools
-declare -A TOOLS_TO_INSTALL
-TOOLS_TO_INSTALL=(
-    ["samtools"]="samtools=1.22.1"
-    ["bwa"]="bwa=0.7.19"
-    ["minimap2"]="minimap2=2.30"
-    ["spades"]="spades=4.2.0"
-    ["flye"]="flye=2.9.6"
-    ["fastp"]="fastp=1.0.1"
-    ["fastplong"]="fastplong=0.4.1"
-    ["fastqc"]="fastqc=0.12.1"
-    ["seqtk"]="seqtk=1.3"
-    ["checkv"]="checkv=1.0.3"
-    ["bcftools"]="bcftools=1.22"
-    ["polypolish"]="polypolish"
-    ["pypolca"]="pypolca"
-    ["hmmer"]="hmmer=3.4"
-    ["prodigal"]="prodigal=2.6.3"
-    ["kaiju"]="kaiju=1.10.1"
-    ["gsl"]="gsl=2.6"
-)
+# Define all required bioinformatics tools (Bash 3.2-compatible parallel arrays)
+TOOL_NAMES=("samtools" "bwa" "minimap2" "spades" "flye" "fastp" "fastplong" "fastqc" "seqtk" "checkv" "bcftools" "polypolish" "pypolca" "hmmer" "prodigal" "kaiju" "gsl")
+TOOL_PKGS=("samtools=1.22.1" "bwa=0.7.19" "minimap2=2.30" "spades=4.2.0" "flye=2.9.6" "fastp=1.0.1" "fastplong=0.4.1" "fastqc=0.12.1" "seqtk=1.3" "checkv=1.0.3" "bcftools=1.22" "polypolish" "pypolca" "hmmer=3.4" "prodigal=2.6.3" "kaiju=1.10.1" "gsl=2.6")
+
+# Helper: resolve tool name to package spec
+get_pkg() {
+    local name="$1"
+    for i in "${!TOOL_NAMES[@]}"; do
+        if [ "${TOOL_NAMES[$i]}" = "$name" ]; then
+            echo "${TOOL_PKGS[$i]}"
+            return 0
+        fi
+    done
+    echo "$name"
+}
 
 # Check which tools are already available
 echo "Checking for existing bioinformatics tools..."
 MISSING_TOOLS=()
 FOUND_TOOLS=()
 
-for tool in "${!TOOLS_TO_INSTALL[@]}"; do
+for tool in "${TOOL_NAMES[@]}"; do
     if check_command "$tool"; then
         FOUND_TOOLS+=("$tool")
         echo "  $tool found - skipping installation"
@@ -186,7 +180,7 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
     ALL_TOOLS=()
     for tool in "${MISSING_TOOLS[@]}"; do
         if [[ "$tool" != "kaiju" ]]; then
-            ALL_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+            ALL_TOOLS+=("$(get_pkg "$tool")")
         fi
     done
     
@@ -238,7 +232,7 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
             MAPPING_TOOLS=()
             for tool in "${MISSING_TOOLS[@]}"; do
                 if [[ "$tool" == "samtools" || "$tool" == "bwa" || "$tool" == "minimap2" ]]; then
-                    MAPPING_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+                    MAPPING_TOOLS+=("$(get_pkg "$tool")")
                 fi
             done
             
@@ -246,7 +240,7 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
             ASSEMBLY_TOOLS=()
             for tool in "${MISSING_TOOLS[@]}"; do
                 if [[ "$tool" == "spades" || "$tool" == "flye" ]]; then
-                    ASSEMBLY_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+                    ASSEMBLY_TOOLS+=("$(get_pkg "$tool")")
                 fi
             done
             
@@ -254,7 +248,7 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
             QC_TOOLS=()
             for tool in "${MISSING_TOOLS[@]}"; do
                 if [[ "$tool" == "fastp" || "$tool" == "fastplong" || "$tool" == "fastqc" || "$tool" == "seqtk" ]]; then
-                    QC_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+                    QC_TOOLS+=("$(get_pkg "$tool")")
                 fi
             done
             
@@ -265,7 +259,7 @@ if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
                       ! "$tool" == "spades" && ! "$tool" == "flye" && \
                       ! "$tool" == "fastp" && ! "$tool" == "fastplong" && ! "$tool" == "fastqc" && ! "$tool" == "seqtk" && \
                       ! "$tool" == "kaiju" ]]; then
-                    OTHER_TOOLS+=("${TOOLS_TO_INSTALL[$tool]}")
+                    OTHER_TOOLS+=("$(get_pkg "$tool")")
                 fi
             done
     
