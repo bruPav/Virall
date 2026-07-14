@@ -178,7 +178,7 @@ nextflow run nextflow/main.nf \
 Verify the pipeline works on your system with a minimal PhiX174 test:
 
 ```bash
-docker build -t pavle17/virall .
+docker pull pavle17/virall          # or: docker build -t pavle17/virall .
 nextflow run nextflow/main.nf -profile test
 ```
 
